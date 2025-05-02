@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loan Tracker - My Loans</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto py-8">
+        <!-- Simple header with just logout -->
+        <div class="flex justify-end mb-8">
+            <a href="/logout" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
+                Logout
+            </a>
+        </div>
+
+        <div class="loans-list">
+            <div class="bg-white rounded shadow p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">Active Loans</h2>
+                    <button id="add-loan" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Add New Loan</button>
+                </div>
+                <table id="loans-table" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Loan Name</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Current Balance</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Loan Quantity</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total Paid</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for loan in loans %}
+                        <tr class="loan-row hover:bg-gray-100 cursor-pointer" data-loan-id="{{ loan.id }}">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                {{ loan.name }}
+                                {% if loan.deleted %}
+                                    <span class="ml-2 px-2 py-1 bg-red-100 text-red-800 text-xs rounded">Deleted</span>
+                                {% endif %}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap {{ 'text-red-600' if loan.current_balance > 0 else '' }}">
+                                £{{ "{:,.2f}".format(loan.current_balance) }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">£{{ "{:,.2f}".format(loan.total_loan_quantity) }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">£{{ "{:,.2f}".format(loan.total_paid) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Add Loan Modal -->
+        <div id="add-loan-modal" class="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50" style="display: none;">
+            <div class="bg-white rounded-lg shadow-lg p-8 w-full max-w-md fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                <h2 class="text-xl font-semibold mb-4">Add New Loan</h2>
+                <form id="new-loan-form" class="space-y-4">
+                    <div class="mb-4">
+                        <label for="loan-name" class="block text-gray-700 mb-2">Loan Name</label>
+                        <input type="text" id="loan-name" required class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="loan-amount" class="block text-gray-700 mb-2">Initial Amount (£)</label>
+                        <input type="number" id="loan-amount" step="0.01" required class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="mb-4">
+                        <label for="loan-interest-rate" class="block text-gray-700 mb-2">Interest Rate (%)</label>
+                        <input type="number" id="loan-interest-rate" step="0.01" min="0" max="100" required class="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="flex justify-end space-x-2 pt-4">
+                        <button type="button" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-gray-500" onclick="closeModal()">Cancel</button>
+                        <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:ring-2 focus:ring-blue-500">Create Loan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Add click handlers for loan rows
+        document.querySelectorAll('.loan-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const loanId = row.dataset.loanId;
+                window.location.href = `/loan/${loanId}`;
+            });
+        });
+
+        // Modal handling
+        const modal = document.getElementById('add-loan-modal');
+        const addLoanButton = document.getElementById('add-loan');
+        const newLoanForm = document.getElementById('new-loan-form');
+
+        addLoanButton.addEventListener('click', () => {
+            modal.style.display = 'block';
+        });
+
+        function closeModal() {
+            modal.style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.addEventListener('click', (event) => {
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
+
+        // Handle new loan form submission
+        newLoanForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('loan-name').value,
+                loan_amount: document.getElementById('loan-amount').value,
+                interest_rate: document.getElementById('loan-interest-rate').value
+            };
+
+            try {
+                const response = await fetch('/api/loan', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const error = await response.json();
+                    alert(error.error || 'Failed to create loan');
+                }
+            } catch (error) {
+                alert('Failed to create loan');
+            }
+        });
+    </script>
+</body>
+</html> 

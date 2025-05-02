@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loan Tracker</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto py-8">
+        <header class="bg-white shadow mb-8">
+            <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+                <div class="flex items-center space-x-4">
+                    <a href="/" class="text-gray-600 hover:text-gray-900">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                    </a>
+                    <div id="loan-name-display" class="text-3xl font-bold text-gray-900">{{ loan_name }}</div>
+                    {% if not loan_deleted %}
+                    <button id="edit-loan-name" class="icon-button edit-name-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>
+                    {% endif %}
+                    <div id="loan-name-edit" class="loan-name-edit" style="display: none;">
+                        <input type="text" id="loan-name-input" value="{{ loan_name }}" class="loan-name-input" {% if loan_deleted %}disabled{% endif %}>
+                        {% if not loan_deleted %}
+                        <button id="save-loan-name" class="icon-button save-button">Save</button>
+                        <button id="cancel-loan-name" class="icon-button cancel-button">Cancel</button>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="flex space-x-4">
+                    <button id="deleteLoanBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                        {% if loan_deleted %}Recover Loan{% else %}Delete Loan{% endif %}
+                    </button>
+                    <a href="/logout" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">
+                        Logout
+                    </a>
+                </div>
+            </div>
+        </header>
+        <div class="loan-summary mb-8">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Loan Summary</h2>
+                <div class="summary-details">
+                    <div class="current-balance-container mb-4">
+                        <p>Current Balance</p>
+                        <h3 class="balance-amount text-2xl font-bold" id="current-balance">£{{ "{:,.2f}".format(loan_amount) }}</h3>
+                        <div class="balance-details flex space-x-8 mt-2">
+                            <div class="balance-stat">
+                                <span class="stat-label">Total Loan Quantity</span>
+                                <span class="stat-value">£{{ "{:,.2f}".format(total_loan_quantity) }}</span>
+                            </div>
+                            <div class="balance-stat">
+                                <span class="stat-label">Total Paid</span>
+                                <span class="stat-value">£{{ "{:,.2f}".format(total_paid) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="interest-settings mb-8">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Interest Settings</h2>
+                <div class="settings-details">
+                    <p>
+                        Interest Rate:
+                        <span class="interest-rate-container">
+                            <input type="number" id="interest-rate-input" value="{{ "{:,.2f}".format(interest_rate) }}" min="0" max="100" step="0.01" class="interest-rate-input border border-gray-300 rounded px-2 py-1" disabled {% if loan_deleted %}readonly{% endif %}>
+                            <small>% APR</small>
+                            {% if not loan_deleted %}
+                            <button id="edit-interest-rate" class="icon-button ml-2">Edit</button>
+                            <button id="apply-interest-rate" class="icon-button ml-2" style="display: none;">Apply</button>
+                            {% endif %}
+                        </span>
+                    </p>
+                    <p class="mt-2">
+                        Interest Day:
+                        <span class="interest-day-container">
+                            <input type="number" id="interest-day" value="{{ interest_day }}" min="1" max="31" class="interest-day-input border border-gray-300 rounded px-2 py-1" disabled {% if loan_deleted %}readonly{% endif %}>
+                            <small>of each month</small>
+                            {% if not loan_deleted %}
+                            <button id="edit-interest-day" class="icon-button ml-2">Edit</button>
+                            <button id="apply-interest-day" class="icon-button ml-2" style="display: none;">Apply</button>
+                            {% endif %}
+                        </span>
+                    </p>
+                </div>
+            </div>
+        </div>
+        <div class="actions mb-8">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Add Transaction</h2>
+                <form id="transaction-form">
+                    <div class="mb-4">
+                        <label for="amount" class="block text-gray-700">Amount (£)</label>
+                        <input type="number" id="amount" step="0.01" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                    </div>
+                    <div class="mb-4">
+                        <label for="type" class="block text-gray-700">Type</label>
+                        <select id="type" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                            <option value="repayment">Repayment</option>
+                            <option value="addition">Addition to Loan</option>
+                        </select>
+                    </div>
+                    <div class="mb-4">
+                        <label for="description" class="block text-gray-700">Description</label>
+                        <input type="text" id="description" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                    </div>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" {% if loan_deleted %}disabled{% endif %}>Add Transaction</button>
+                </form>
+                <button id="apply-interest" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded mt-4" {% if loan_deleted %}disabled{% endif %}>Apply Monthly Interest</button>
+            </div>
+        </div>
+        <div class="recurring-payments mb-8">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Recurring Payments</h2>
+                <table id="recurring-payments-table" class="min-w-full divide-y divide-gray-200 mb-4">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Start Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Next Payment Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% if recurring_payments %}
+                            {% for rp in recurring_payments %}
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap">£{{ "{:,.2f}".format(rp.amount) }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">{{ rp.schedule|capitalize }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">{{ rp.start_date }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">{{ rp.next_payment_date }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap">
+                                    <button class="delete-recurring-btn bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded" data-id="{{ loop.index0 }}" {% if loan_deleted %}disabled{% endif %}>Delete</button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr><td colspan="5" class="text-center py-4">No recurring payments set up.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+                <form id="recurring-payment-form" class="mt-4">
+                    <div class="mb-4">
+                        <label for="recurring-amount" class="block text-gray-700">Amount (£)</label>
+                        <input type="number" id="recurring-amount" step="0.01" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                    </div>
+                    <div class="mb-4">
+                        <label for="recurring-schedule" class="block text-gray-700">Schedule</label>
+                        <select id="recurring-schedule" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                            <option value="monthly">Monthly</option>
+                            <option value="bi-weekly">Bi-Weekly</option>
+                            <option value="weekly">Weekly</option>
+                        </select>
+                    </div>
+                    <div class="mb-4">
+                        <label for="recurring-start-date" class="block text-gray-700">Start Date</label>
+                        <input type="date" id="recurring-start-date" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                    </div>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" {% if loan_deleted %}disabled{% endif %}>Add Recurring Payment</button>
+                </form>
+            </div>
+        </div>
+        <div class="transactions">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-4">Audit Log</h2>
+                <table id="transactions-table" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        {% for transaction in transactions|reverse %}
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap">{{ transaction.date }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">{{ transaction.type|title }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap {{ 'text-red-600' if transaction.type == 'repayment' else '' }}">
+                                £{{ "{:,.2f}".format(transaction.amount|abs) }}
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">{{ transaction.description }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">{{ transaction.user }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html> 
