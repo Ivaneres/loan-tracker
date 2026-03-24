@@ -2,19 +2,36 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 from functools import wraps
 from datetime import datetime, date, timedelta
 import json
+import logging
 import os
 from dateutil.relativedelta import relativedelta
 from calendar import monthrange
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+logger = logging.getLogger(__name__)
+
+
+def _env_bool(key, default=False):
+    v = os.getenv(key)
+    if v is None:
+        return default
+    return v.strip().lower() in ('1', 'true', 'yes', 'on')
+
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this in production
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 app.config['SESSION_COOKIE_NAME'] = 'finance_tracker_session'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = False  # Set True if serving over HTTPS
+# Behind nginx/Caddy with TLS, set SESSION_COOKIE_SECURE=1 so browsers send the cookie on HTTPS.
+app.config['SESSION_COOKIE_SECURE'] = _env_bool('SESSION_COOKIE_SECURE', False)
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=31)
+
+# Honour X-Forwarded-* from a reverse proxy so request.scheme / host match what the browser uses.
+if _env_bool('TRUST_PROXY', True):
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 
 def load_users():
     """
@@ -168,19 +185,37 @@ def calculate_loan_stats(transactions):
     
     return total_loan_quantity, total_paid
 
+def _login_form_credentials():
+    """Normal form POST; also accept JSON for non-browser clients."""
+    username = (request.form.get('username') or '').strip()
+    password = (request.form.get('password') or '').strip()
+    if username or password:
+        return username, password
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        return (
+            str(data.get('username', '') or '').strip(),
+            str(data.get('password', '') or '').strip(),
+        )
+    return username, password
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = (request.form.get('username') or '').strip()
-        password = (request.form.get('password') or '').strip()
-        
+        username, password = _login_form_credentials()
         if username in USERS and USERS[username] == password:
             session.permanent = True
             session['username'] = username
             return redirect(url_for('index'))
-        else:
-            return render_template('login.html', error='Invalid username or password')
-    
+        logger.warning(
+            'login failed: user_in_map=%s form_keys=%s content_type=%s',
+            username in USERS,
+            list(request.form.keys()),
+            request.content_type,
+        )
+        return render_template('login.html', error='Invalid username or password')
+
     return render_template('login.html')
 
 @app.route('/logout')

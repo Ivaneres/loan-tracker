@@ -9,7 +9,7 @@
 <body class="bg-gray-100 min-h-screen flex items-center justify-center">
     <div class="bg-white p-8 rounded-lg shadow-md w-96">
         <h1 class="text-2xl font-bold mb-6 text-center">Finance Tracker</h1>
-        <form method="POST" action="/login">
+        <form method="POST" action="{{ url_for('login') }}">
             <div class="mb-4">
                 <label for="username" class="block text-gray-700 text-sm font-bold mb-2">Username</label>
                 <input type="text" id="username" name="username" required
