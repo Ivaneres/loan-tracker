@@ -1,29 +1,57 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
-from datetime import datetime, date
+from functools import wraps
+from datetime import datetime, date, timedelta
 import json
+import os
 from dateutil.relativedelta import relativedelta
 from calendar import monthrange
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from flask_session import Session
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this in production
-app.config['SESSION_TYPE'] = 'filesystem'
-Session(app)
+app.config['SESSION_COOKIE_NAME'] = 'finance_tracker_session'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_SECURE'] = False  # Set True if serving over HTTPS
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=31)
 
-# Simple user database (in production, use a proper database)
-USERS = {
-    'admin': 'admin123',
-    'user': 'user123'
-}
+def load_users():
+    """
+    Load users from FINANCE_TRACKER_USERS env var:
+    "username:password,another:secret"
+    Falls back to defaults for local development.
+    """
+    raw_users = os.getenv('FINANCE_TRACKER_USERS', '').strip()
+    if not raw_users:
+        return {
+            'admin': 'admin123',
+            'user': 'user123'
+        }
+
+    users = {}
+    for pair in raw_users.split(','):
+        if ':' not in pair:
+            continue
+        username, password = pair.split(':', 1)
+        username = username.strip()
+        password = password.strip()
+        if username and password:
+            users[username] = password
+
+    return users or {
+        'admin': 'admin123',
+        'user': 'user123'
+    }
+
+USERS = load_users()
 
 def login_required(f):
+    @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'username' not in session:
             return redirect(url_for('login'))
         return f(*args, **kwargs)
-    decorated_function.__name__ = f.__name__
     return decorated_function
 
 scheduler = BackgroundScheduler()
@@ -143,10 +171,11 @@ def calculate_loan_stats(transactions):
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        username = (request.form.get('username') or '').strip()
+        password = (request.form.get('password') or '').strip()
         
         if username in USERS and USERS[username] == password:
+            session.permanent = True
             session['username'] = username
             return redirect(url_for('index'))
         else:
