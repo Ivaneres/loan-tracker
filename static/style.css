@@ -489,6 +489,21 @@ button.primary:hover {
     }
 }
 
+/* Baseline table row delete: avoid global blue button + red text clash */
+button.baseline-saved-delete {
+    background-color: transparent;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+button.baseline-saved-delete:hover {
+    background-color: #fef2f2;
+    color: #991b1b;
+}
+
 /* Custom style for the delete loan button */
 #deleteLoanBtn {
     background-color: var(--danger-color) !important;

@@ -1,3 +1,62 @@
+/**
+ * Client-side filter for the audit log table (#transactions-table).
+ * Compares row dates as YYYY-MM-DD strings (lexicographic order matches chronological).
+ */
+function applyAuditLogFilters() {
+    const tbody = document.querySelector('#transactions-table tbody');
+    if (!tbody) return;
+
+    const searchEl = document.getElementById('audit-search');
+    const opEl = document.getElementById('audit-date-op');
+    const singleEl = document.getElementById('audit-date-single');
+    const startEl = document.getElementById('audit-date-start');
+    const endEl = document.getElementById('audit-date-end');
+
+    const q = (searchEl && searchEl.value) ? searchEl.value.trim().toLowerCase() : '';
+    const op = (opEl && opEl.value) ? opEl.value : '';
+    const single = singleEl && singleEl.value ? singleEl.value : '';
+    const start = startEl && startEl.value ? startEl.value : '';
+    const end = endEl && endEl.value ? endEl.value : '';
+
+    function rowMatchesSearch(tr) {
+        if (!q) return true;
+        const text = tr.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+        return text.includes(q);
+    }
+
+    function rowMatchesDate(tr) {
+        const rowDate = tr.getAttribute('data-row-date') || '';
+        if (!op) return true;
+        if (op === 'between') {
+            if (!start || !end) return true;
+            const lo = start <= end ? start : end;
+            const hi = start <= end ? end : start;
+            return rowDate >= lo && rowDate <= hi;
+        }
+        if (!single) return true;
+        if (op === 'lt') return rowDate < single;
+        if (op === 'gt') return rowDate > single;
+        if (op === 'eq') return rowDate === single;
+        return true;
+    }
+
+    tbody.querySelectorAll('tr.audit-log-row').forEach((tr) => {
+        const show = rowMatchesSearch(tr) && rowMatchesDate(tr);
+        tr.style.display = show ? '' : 'none';
+    });
+}
+
+function syncAuditDateFilterControls() {
+    const opEl = document.getElementById('audit-date-op');
+    const singleWrap = document.getElementById('audit-date-single-wrap');
+    const betweenWrap = document.getElementById('audit-date-between-wrap');
+    if (!opEl || !singleWrap || !betweenWrap) return;
+    const op = opEl.value;
+    const isBetween = op === 'between';
+    singleWrap.classList.toggle('hidden', isBetween);
+    betweenWrap.classList.toggle('hidden', !isBetween);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const loanId = window.location.pathname.split('/').pop();
 
@@ -410,6 +469,670 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
+    const statementFile = document.getElementById('statement-file');
+    const statementPreviewBtn = document.getElementById('statement-preview-btn');
+    const statementPreviewStatus = document.getElementById('statement-preview-status');
+    const statementImportResults = document.getElementById('statement-import-results');
+    const statementTruncatedHint = document.getElementById('statement-truncated-hint');
+    const statementImportTbody = document.getElementById('statement-import-tbody');
+    const statementImportBtn = document.getElementById('statement-import-btn');
+    const statementClearBtn = document.getElementById('statement-clear-btn');
+
+    function showStatementStatus(msg, isError) {
+        if (!statementPreviewStatus) return;
+        if (!msg) {
+            statementPreviewStatus.style.display = 'none';
+            return;
+        }
+        statementPreviewStatus.style.display = 'block';
+        statementPreviewStatus.textContent = msg;
+        statementPreviewStatus.className = 'text-sm mb-2 ' + (isError ? 'text-red-600' : 'text-gray-600');
+    }
+
+    function clearStatementRows() {
+        if (statementImportTbody) statementImportTbody.innerHTML = '';
+        if (statementImportResults) statementImportResults.style.display = 'none';
+        renderBaselineDiff(null);
+    }
+
+    function renderBaselineDiff(diff) {
+        const panel = document.getElementById('baseline-diff-panel');
+        const elM = document.getElementById('baseline-diff-missing');
+        const elN = document.getElementById('baseline-diff-new');
+        const elC = document.getElementById('baseline-diff-changed');
+        if (!panel || !elM || !elN || !elC) return;
+        if (!diff || (!diff.missing?.length && !diff.new?.length && !diff.amount_changed?.length)) {
+            panel.style.display = 'none';
+            elM.textContent = '';
+            elN.textContent = '';
+            elC.textContent = '';
+            return;
+        }
+        panel.style.display = 'block';
+        elM.textContent = diff.missing && diff.missing.length
+            ? 'Missing vs baseline: ' + diff.missing.map((b) => `${b.description} (bank £${b.amount_bank})`).join('; ')
+            : '';
+        elN.textContent = diff.new && diff.new.length
+            ? 'Possible new bills: ' + diff.new.map((c) => `${c.description} (bank £${c.amount_bank})`).join('; ')
+            : '';
+        elC.textContent = diff.amount_changed && diff.amount_changed.length
+            ? 'Amount changed: ' + diff.amount_changed.map((x) =>
+                `${x.baseline.description}: expected bank £${x.expected_amount_bank}, actual £${x.actual_amount_bank}`
+            ).join('; ')
+            : '';
+    }
+
+    function renderStatementCandidates(candidates) {
+        if (!statementImportTbody || !statementImportResults) return;
+        statementImportTbody.innerHTML = '';
+        candidates.forEach((c) => {
+            const tr = document.createElement('tr');
+            if (c.possible_duplicate) tr.classList.add('bg-amber-50');
+            tr.dataset.date = c.statement_date;
+            tr.dataset.description = c.description;
+
+            const tdCheck = document.createElement('td');
+            tdCheck.className = 'px-4 py-2';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'statement-row-check';
+            cb.checked = true;
+            tdCheck.appendChild(cb);
+
+            const tdDate = document.createElement('td');
+            tdDate.className = 'px-4 py-2 whitespace-nowrap';
+            tdDate.textContent = c.statement_date;
+
+            const tdDesc = document.createElement('td');
+            tdDesc.className = 'px-4 py-2';
+            const wrap = document.createElement('div');
+            wrap.textContent = c.description;
+            tdDesc.appendChild(wrap);
+            if (c.possible_duplicate) {
+                const badge = document.createElement('span');
+                badge.className = 'ml-2 text-xs text-amber-800 font-semibold';
+                badge.textContent = 'Matches existing transaction';
+                tdDesc.appendChild(badge);
+            }
+
+            const tdBank = document.createElement('td');
+            tdBank.className = 'px-4 py-2 whitespace-nowrap';
+            const bankVal = typeof c.amount_bank === 'number' ? c.amount_bank : parseFloat(c.amount_bank);
+            tdBank.textContent = Number.isFinite(bankVal) ? bankVal.toFixed(2) : String(c.amount_bank);
+
+            const tdShare = document.createElement('td');
+            tdShare.className = 'px-4 py-2';
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.step = '0.01';
+            inp.min = '0.01';
+            inp.className = 'statement-row-amount border border-gray-300 rounded px-2 py-1 w-32';
+            const defShare = c.amount_default != null ? c.amount_default : (Number.isFinite(bankVal) ? bankVal / 2 : 0);
+            inp.value = Number(defShare).toFixed(2);
+            tdShare.appendChild(inp);
+
+            tr.appendChild(tdCheck);
+            tr.appendChild(tdDate);
+            tr.appendChild(tdDesc);
+            tr.appendChild(tdBank);
+            tr.appendChild(tdShare);
+            statementImportTbody.appendChild(tr);
+        });
+        statementImportResults.style.display = 'block';
+    }
+
+    if (statementPreviewBtn && statementFile) {
+        statementPreviewBtn.addEventListener('click', async function() {
+            const file = statementFile.files && statementFile.files[0];
+            if (!file) {
+                alert('Choose a file first.');
+                return;
+            }
+            showStatementStatus('Loading…', false);
+            statementPreviewBtn.disabled = true;
+            clearStatementRows();
+            if (statementTruncatedHint) statementTruncatedHint.style.display = 'none';
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                const response = await fetch(`/api/loan/${loanId}/statement/preview`, {
+                    method: 'POST',
+                    body: fd
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `Preview failed (${response.status})`);
+                }
+                if (statementTruncatedHint) {
+                    statementTruncatedHint.style.display = data.truncated ? 'block' : 'none';
+                }
+                if (!data.candidates || !data.candidates.length) {
+                    showStatementStatus('No matching household bill debits found. Try another export or add transactions manually.', false);
+                    renderBaselineDiff(data.baseline_diff || null);
+                    return;
+                }
+                showStatementStatus(`Found ${data.candidates.length} candidate(s). Review and import.`, false);
+                renderStatementCandidates(data.candidates);
+                renderBaselineDiff(data.baseline_diff || null);
+            } catch (e) {
+                console.error(e);
+                showStatementStatus(e.message || 'Preview failed', true);
+            } finally {
+                statementPreviewBtn.disabled = false;
+            }
+        });
+    }
+
+    if (statementImportBtn) {
+        statementImportBtn.addEventListener('click', async function() {
+            const tbody = document.getElementById('statement-import-tbody');
+            if (!tbody) return;
+            const transactions = [];
+            tbody.querySelectorAll('tr').forEach((tr) => {
+                const cb = tr.querySelector('.statement-row-check');
+                if (!cb || !cb.checked) return;
+                const inp = tr.querySelector('.statement-row-amount');
+                const amt = parseFloat(inp && inp.value);
+                if (Number.isNaN(amt) || amt <= 0) return;
+                transactions.push({
+                    date: tr.dataset.date,
+                    amount: amt,
+                    description: tr.dataset.description || 'Imported repayment'
+                });
+            });
+            if (!transactions.length) {
+                alert('Select at least one row with a positive amount.');
+                return;
+            }
+            statementImportBtn.disabled = true;
+            try {
+                const response = await fetch(`/api/loan/${loanId}/statement/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ transactions })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Import failed');
+                updateUI(data);
+                clearStatementRows();
+                if (statementTruncatedHint) statementTruncatedHint.style.display = 'none';
+                showStatementStatus(`Imported ${transactions.length} repayment(s).`, false);
+            } catch (e) {
+                console.error(e);
+                alert(e.message || 'Import failed');
+            } finally {
+                statementImportBtn.disabled = false;
+            }
+        });
+    }
+
+    if (statementClearBtn) {
+        statementClearBtn.addEventListener('click', function() {
+            clearStatementRows();
+            if (statementTruncatedHint) statementTruncatedHint.style.display = 'none';
+            showStatementStatus('', false);
+        });
+    }
+
+    const baselineFile = document.getElementById('baseline-file');
+    const baselinePreviewBtn = document.getElementById('baseline-preview-btn');
+    const baselinePreviewStatus = document.getElementById('baseline-preview-status');
+    const baselineSetupResults = document.getElementById('baseline-setup-results');
+    const baselineCandidateTbody = document.getElementById('baseline-candidate-tbody');
+    const baselineReminderDay = document.getElementById('baseline-reminder-day');
+    const baselineReminderEmail = document.getElementById('baseline-reminder-email');
+    const baselineSaveBtn = document.getElementById('baseline-save-btn');
+    const baselineClearBtn = document.getElementById('baseline-clear-btn');
+    const baselinePeriodHint = document.getElementById('baseline-period-hint');
+    const baselineSavedTbody = document.getElementById('baseline-saved-tbody');
+    const baselineSavedSaveBtn = document.getElementById('baseline-saved-save-btn');
+    const expectedBillsSection = document.getElementById('expected-bills-section');
+    const baselineMergeModal = document.getElementById('baseline-merge-modal');
+    const baselineModalReplaceBtn = document.getElementById('baseline-modal-replace-btn');
+    const baselineModalMergeBtn = document.getElementById('baseline-modal-merge-btn');
+    const baselineModalCancelBtn = document.getElementById('baseline-modal-cancel-btn');
+    const baselineMergeModalBackdrop = document.getElementById('baseline-merge-modal-backdrop');
+
+    let baselinePreviewState = { periodEnd: null, candidates: [] };
+    let pendingBaselineFile = null;
+
+    function getSavedBaselineSnapshot() {
+        if (!baselineSavedTbody) return '[]';
+        const rows = [];
+        baselineSavedTbody.querySelectorAll('tr').forEach((tr) => {
+            const id = tr.dataset.itemId || '';
+            const descInp = tr.querySelector('.baseline-saved-desc');
+            const bankInp = tr.querySelector('.baseline-saved-bank');
+            const shareInp = tr.querySelector('.baseline-saved-share');
+            const catInp = tr.querySelector('.baseline-saved-cat');
+            const noteInp = tr.querySelector('.baseline-saved-note');
+            const ab = parseFloat(bankInp && bankInp.value);
+            const sh = parseFloat(shareInp && shareInp.value);
+            rows.push({
+                id,
+                description: (descInp && descInp.value.trim()) || '',
+                amount_bank: Number.isFinite(ab) ? Math.round(ab * 100) / 100 : null,
+                amount_share: Number.isFinite(sh) ? Math.round(sh * 100) / 100 : null,
+                category: (catInp && catInp.value.trim()) || '',
+                note: (noteInp && noteInp.value.trim()) || ''
+            });
+        });
+        rows.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+        return JSON.stringify(rows);
+    }
+
+    let baselineSavedInitialSnapshot = baselineSavedTbody ? getSavedBaselineSnapshot() : '';
+
+    function getReminderEmailSnapshot() {
+        return baselineReminderEmail ? baselineReminderEmail.value.trim() : '';
+    }
+
+    let baselineReminderEmailInitial = getReminderEmailSnapshot();
+
+    function updateBaselineEmailDisplayText() {
+        const el = document.getElementById('baseline-email-display');
+        if (!el || !expectedBillsSection) return;
+        const v = getReminderEmailSnapshot();
+        const def = (expectedBillsSection.dataset.defaultNotifyEmail || '').trim();
+        el.textContent = v || def || 'not set';
+    }
+
+    function updateBaselineDirtyState() {
+        const baselineCount = expectedBillsSection
+            ? parseInt(expectedBillsSection.dataset.baselineCount, 10) || 0
+            : 0;
+        const tableDirty = baselineSavedTbody
+            ? getSavedBaselineSnapshot() !== baselineSavedInitialSnapshot
+            : false;
+        const emailDirty = getReminderEmailSnapshot() !== baselineReminderEmailInitial;
+
+        if (baselineSavedSaveBtn && baselineSavedTbody) {
+            baselineSavedSaveBtn.classList.toggle('hidden', !(tableDirty || emailDirty));
+        }
+
+        const emailSaveBtn = document.getElementById('baseline-reminder-email-save-btn');
+        if (emailSaveBtn) {
+            if (baselineCount > 0) {
+                emailSaveBtn.classList.add('hidden');
+            } else {
+                emailSaveBtn.classList.toggle('hidden', !emailDirty);
+            }
+        }
+    }
+
+    function closeBaselineMergeModal() {
+        pendingBaselineFile = null;
+        if (baselineMergeModal) baselineMergeModal.classList.add('hidden');
+    }
+
+    function openBaselineMergeModal(file) {
+        pendingBaselineFile = file;
+        if (baselineMergeModal) baselineMergeModal.classList.remove('hidden');
+    }
+
+    async function runBaselinePreviewUpload(file, useMerge) {
+        showBaselineStatus('Loading…', false);
+        if (baselinePreviewBtn) baselinePreviewBtn.disabled = true;
+        clearBaselinePreview();
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            const response = await fetch(`/api/loan/${loanId}/statement/baseline-preview`, {
+                method: 'POST',
+                body: fd
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(data.error || `Preview failed (${response.status})`);
+            }
+            if (!data.candidates || !data.candidates.length) {
+                showBaselineStatus('No candidate bill lines found. Try another export.', false);
+                return;
+            }
+            let rowsForTable = data.candidates;
+            if (useMerge) {
+                const mergeRes = await fetch(`/api/loan/${loanId}/bill-baseline/merge-candidates`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ candidates: data.candidates })
+                });
+                const mergeData = await mergeRes.json().catch(() => ({}));
+                if (!mergeRes.ok) {
+                    throw new Error(mergeData.error || `Merge failed (${mergeRes.status})`);
+                }
+                rowsForTable = mergeData.items || [];
+            }
+            baselinePreviewState = {
+                periodEnd: data.inferred_period_end || null,
+                candidates: rowsForTable
+            };
+            if (baselineReminderDay) {
+                baselineReminderDay.value = String(data.inferred_reminder_day != null ? data.inferred_reminder_day : 1);
+            }
+            if (baselinePeriodHint) {
+                if (data.inferred_period_end) {
+                    baselinePeriodHint.textContent = `Inferred statement period end: ${data.inferred_period_end}. Reminder day defaults to the next calendar day.`;
+                    baselinePeriodHint.style.display = 'block';
+                } else {
+                    baselinePeriodHint.style.display = 'none';
+                }
+            }
+            showBaselineStatus(`Found ${rowsForTable.length} line(s). Uncheck false positives, then save.`, false);
+            renderBaselineCandidates(rowsForTable);
+        } catch (e) {
+            console.error(e);
+            showBaselineStatus(e.message || 'Preview failed', true);
+        } finally {
+            if (baselinePreviewBtn) baselinePreviewBtn.disabled = false;
+        }
+    }
+
+    function showBaselineStatus(msg, isError) {
+        if (!baselinePreviewStatus) return;
+        if (!msg) {
+            baselinePreviewStatus.style.display = 'none';
+            return;
+        }
+        baselinePreviewStatus.style.display = 'block';
+        baselinePreviewStatus.textContent = msg;
+        baselinePreviewStatus.className = 'text-sm mb-2 ' + (isError ? 'text-red-600' : 'text-gray-600');
+    }
+
+    function renderBaselineCandidates(candidates) {
+        if (!baselineCandidateTbody || !baselineSetupResults) return;
+        baselineCandidateTbody.innerHTML = '';
+        candidates.forEach((c) => {
+            const tr = document.createElement('tr');
+            const dateStr = c.statement_date || '';
+            tr.dataset.date = dateStr;
+            tr.dataset.description = c.description || '';
+            tr.dataset.amountBank = String(c.amount_bank != null ? c.amount_bank : '');
+            tr.dataset.category = c.category != null && c.category !== '' ? String(c.category) : '';
+            if (c.id != null && c.id !== '') {
+                tr.dataset.rowId = String(c.id);
+            }
+
+            const tdCheck = document.createElement('td');
+            tdCheck.className = 'px-4 py-2';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'baseline-row-check';
+            cb.checked = true;
+            tdCheck.appendChild(cb);
+
+            const tdDate = document.createElement('td');
+            tdDate.className = 'px-4 py-2 whitespace-nowrap';
+            tdDate.textContent = dateStr || '—';
+
+            const tdDesc = document.createElement('td');
+            tdDesc.className = 'px-4 py-2';
+            tdDesc.textContent = c.description || '';
+
+            const tdCat = document.createElement('td');
+            tdCat.className = 'px-4 py-2 text-sm text-gray-700 max-w-[140px] break-words';
+            tdCat.textContent = c.category != null && String(c.category).trim() ? String(c.category) : '—';
+
+            const tdBank = document.createElement('td');
+            tdBank.className = 'px-4 py-2 whitespace-nowrap';
+            const bankVal = typeof c.amount_bank === 'number' ? c.amount_bank : parseFloat(c.amount_bank);
+            tdBank.textContent = Number.isFinite(bankVal) ? bankVal.toFixed(2) : String(c.amount_bank);
+
+            const tdShare = document.createElement('td');
+            tdShare.className = 'px-4 py-2';
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.step = '0.01';
+            inp.min = '0.01';
+            inp.className = 'baseline-row-amount border border-gray-300 rounded px-2 py-1 w-32';
+            let defShare = c.amount_share;
+            if (defShare == null && c.amount_default != null) defShare = c.amount_default;
+            if (defShare == null && Number.isFinite(bankVal)) defShare = bankVal / 2;
+            if (defShare == null) defShare = 0;
+            inp.value = Number(defShare).toFixed(2);
+            tdShare.appendChild(inp);
+
+            const tdNote = document.createElement('td');
+            tdNote.className = 'px-4 py-2';
+            const noteInp = document.createElement('input');
+            noteInp.type = 'text';
+            noteInp.maxLength = 300;
+            noteInp.className = 'baseline-row-note border border-gray-300 rounded px-2 py-1 w-full max-w-xs';
+            noteInp.value = c.note != null ? String(c.note) : '';
+            noteInp.placeholder = 'Optional';
+            tdNote.appendChild(noteInp);
+
+            tr.appendChild(tdCheck);
+            tr.appendChild(tdDate);
+            tr.appendChild(tdDesc);
+            tr.appendChild(tdCat);
+            tr.appendChild(tdBank);
+            tr.appendChild(tdShare);
+            tr.appendChild(tdNote);
+            baselineCandidateTbody.appendChild(tr);
+        });
+        baselineSetupResults.style.display = 'block';
+    }
+
+    function clearBaselinePreview() {
+        if (baselineCandidateTbody) baselineCandidateTbody.innerHTML = '';
+        if (baselineSetupResults) baselineSetupResults.style.display = 'none';
+        if (baselinePeriodHint) baselinePeriodHint.style.display = 'none';
+        baselinePreviewState = { periodEnd: null, candidates: [] };
+    }
+
+    if (baselinePreviewBtn && baselineFile) {
+        baselinePreviewBtn.addEventListener('click', async function() {
+            const file = baselineFile.files && baselineFile.files[0];
+            if (!file) {
+                alert('Choose a file first.');
+                return;
+            }
+            const baselineCount = expectedBillsSection
+                ? parseInt(expectedBillsSection.dataset.baselineCount, 10) || 0
+                : 0;
+            if (baselineCount > 0) {
+                openBaselineMergeModal(file);
+                return;
+            }
+            await runBaselinePreviewUpload(file, false);
+        });
+    }
+
+    if (baselineModalReplaceBtn) {
+        baselineModalReplaceBtn.addEventListener('click', async function() {
+            const f = pendingBaselineFile;
+            closeBaselineMergeModal();
+            if (f) await runBaselinePreviewUpload(f, false);
+        });
+    }
+    if (baselineModalMergeBtn) {
+        baselineModalMergeBtn.addEventListener('click', async function() {
+            const f = pendingBaselineFile;
+            closeBaselineMergeModal();
+            if (f) await runBaselinePreviewUpload(f, true);
+        });
+    }
+    if (baselineModalCancelBtn) {
+        baselineModalCancelBtn.addEventListener('click', closeBaselineMergeModal);
+    }
+    if (baselineMergeModalBackdrop) {
+        baselineMergeModalBackdrop.addEventListener('click', closeBaselineMergeModal);
+    }
+    document.addEventListener('keydown', function(ev) {
+        if (ev.key !== 'Escape' || !baselineMergeModal || baselineMergeModal.classList.contains('hidden')) return;
+        closeBaselineMergeModal();
+    });
+
+    if (baselineSaveBtn && baselineCandidateTbody) {
+        baselineSaveBtn.addEventListener('click', async function() {
+            const items = [];
+            baselineCandidateTbody.querySelectorAll('tr').forEach((tr) => {
+                const cb = tr.querySelector('.baseline-row-check');
+                if (!cb || !cb.checked) return;
+                const inp = tr.querySelector('.baseline-row-amount');
+                const noteInp = tr.querySelector('.baseline-row-note');
+                const amt = parseFloat(inp && inp.value);
+                if (Number.isNaN(amt) || amt <= 0) return;
+                const ab = parseFloat(tr.dataset.amountBank || '0');
+                if (Number.isNaN(ab) || ab <= 0) return;
+                const cat = (tr.dataset.category || '').trim();
+                const row = {
+                    description: tr.dataset.description || 'Bill',
+                    amount_bank: ab,
+                    amount_share: amt,
+                    category: cat || null,
+                    note: (noteInp && noteInp.value) ? noteInp.value.trim() : ''
+                };
+                if (tr.dataset.rowId) row.id = tr.dataset.rowId;
+                items.push(row);
+            });
+            if (!items.length) {
+                alert('Select at least one row with a positive share amount.');
+                return;
+            }
+            const day = parseInt(baselineReminderDay && baselineReminderDay.value, 10);
+            if (Number.isNaN(day) || day < 1 || day > 31) {
+                alert('Reminder day must be 1–31.');
+                return;
+            }
+            baselineSaveBtn.disabled = true;
+            try {
+                const response = await fetch(`/api/loan/${loanId}/statement/baseline-save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        items,
+                        day_of_month: day,
+                        reminder_email: baselineReminderEmail ? baselineReminderEmail.value.trim() : '',
+                        inferred_period_end: baselinePreviewState.periodEnd
+                    })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Save failed');
+                window.location.reload();
+            } catch (e) {
+                console.error(e);
+                alert(e.message || 'Save failed');
+            } finally {
+                baselineSaveBtn.disabled = false;
+            }
+        });
+    }
+
+    if (baselineClearBtn) {
+        baselineClearBtn.addEventListener('click', function() {
+            clearBaselinePreview();
+            showBaselineStatus('', false);
+        });
+    }
+
+    if (baselineSavedTbody) {
+        baselineSavedTbody.addEventListener('input', updateBaselineDirtyState);
+        baselineSavedTbody.addEventListener('change', updateBaselineDirtyState);
+    }
+    if (baselineReminderEmail) {
+        baselineReminderEmail.addEventListener('input', updateBaselineDirtyState);
+        baselineReminderEmail.addEventListener('change', updateBaselineDirtyState);
+    }
+    updateBaselineDirtyState();
+
+    if (baselineSavedSaveBtn && baselineSavedTbody) {
+        baselineSavedSaveBtn.addEventListener('click', async function() {
+            const items = [];
+            baselineSavedTbody.querySelectorAll('tr').forEach((tr) => {
+                const id = tr.dataset.itemId;
+                const descInp = tr.querySelector('.baseline-saved-desc');
+                const bankInp = tr.querySelector('.baseline-saved-bank');
+                const shareInp = tr.querySelector('.baseline-saved-share');
+                const catInp = tr.querySelector('.baseline-saved-cat');
+                const noteInp = tr.querySelector('.baseline-saved-note');
+                const ab = parseFloat(bankInp && bankInp.value);
+                const sh = parseFloat(shareInp && shareInp.value);
+                if (!id || Number.isNaN(ab) || ab <= 0 || Number.isNaN(sh) || sh <= 0) return;
+                const cat = (catInp && catInp.value.trim()) || null;
+                items.push({
+                    id,
+                    description: (descInp && descInp.value.trim()) || 'Bill',
+                    amount_bank: ab,
+                    amount_share: sh,
+                    category: cat,
+                    note: (noteInp && noteInp.value) ? noteInp.value.trim() : ''
+                });
+            });
+            if (!items.length) {
+                alert('Add at least one valid row, or delete the section from the last remaining row via Delete.');
+                return;
+            }
+            baselineSavedSaveBtn.disabled = true;
+            try {
+                const response = await fetch(`/api/loan/${loanId}/bill-baseline`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        items,
+                        reminder_email: baselineReminderEmail ? baselineReminderEmail.value.trim() : ''
+                    })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Save failed');
+                window.location.reload();
+            } catch (e) {
+                console.error(e);
+                alert(e.message || 'Save failed');
+            } finally {
+                baselineSavedSaveBtn.disabled = false;
+            }
+        });
+    }
+
+    const baselineReminderEmailSaveBtn = document.getElementById('baseline-reminder-email-save-btn');
+    if (baselineReminderEmailSaveBtn) {
+        baselineReminderEmailSaveBtn.addEventListener('click', async function() {
+            baselineReminderEmailSaveBtn.disabled = true;
+            try {
+                const response = await fetch(`/api/loan/${loanId}/bill-baseline`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        reminder_email: baselineReminderEmail ? baselineReminderEmail.value.trim() : ''
+                    })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Save failed');
+                baselineReminderEmailInitial = getReminderEmailSnapshot();
+                updateBaselineEmailDisplayText();
+                updateBaselineDirtyState();
+            } catch (e) {
+                console.error(e);
+                alert(e.message || 'Save failed');
+            } finally {
+                baselineReminderEmailSaveBtn.disabled = false;
+            }
+        });
+    }
+
+    const baselineSavedWrap = document.getElementById('baseline-saved-wrap');
+    if (baselineSavedWrap) {
+        baselineSavedWrap.addEventListener('click', async function(ev) {
+            const btn = ev.target.closest && ev.target.closest('.baseline-saved-delete');
+            if (!btn) return;
+            const tr = btn.closest('tr');
+            if (!tr || !tr.dataset.itemId) return;
+            if (!confirm('Remove this expected bill from the baseline?')) return;
+            try {
+                const response = await fetch(`/api/loan/${loanId}/bill-baseline/item/${encodeURIComponent(tr.dataset.itemId)}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(data.error || 'Delete failed');
+                window.location.reload();
+            } catch (e) {
+                console.error(e);
+                alert(e.message || 'Delete failed');
+            }
+        });
+    }
+
     const initialBalance = document.getElementById('current-balance') || document.getElementById('current-balance-mobile');
     const initialRate = document.getElementById('interest-rate-input') || document.getElementById('interest-rate-input-mobile');
     if (initialBalance && initialRate && initialBalance.textContent.trim() === '£0.00' && initialRate.value === '0.00') {
@@ -418,6 +1141,22 @@ document.addEventListener('DOMContentLoaded', function() {
         if (loanAmount && interestRate) {
             initializeLoan(parseFloat(loanAmount), parseFloat(interestRate));
         }
+    }
+
+    const auditSearch = document.getElementById('audit-search');
+    const auditDateOp = document.getElementById('audit-date-op');
+    const auditDateSingle = document.getElementById('audit-date-single');
+    const auditDateStart = document.getElementById('audit-date-start');
+    const auditDateEnd = document.getElementById('audit-date-end');
+    if (auditSearch) {
+        auditSearch.addEventListener('input', applyAuditLogFilters);
+    }
+    [auditDateOp, auditDateSingle, auditDateStart, auditDateEnd].forEach((el) => {
+        if (el) el.addEventListener('change', applyAuditLogFilters);
+    });
+    if (auditDateOp) {
+        auditDateOp.addEventListener('change', syncAuditDateFilterControls);
+        syncAuditDateFilterControls();
     }
 });
 
@@ -480,6 +1219,8 @@ function updateUI(data) {
 
         if (desktopTbody) {
             const desktopRow = document.createElement('tr');
+            desktopRow.className = 'audit-log-row';
+            desktopRow.setAttribute('data-row-date', transaction.date);
             desktopRow.innerHTML = `
                 <td class="px-6 py-4 whitespace-nowrap">${transaction.date}</td>
                 <td class="px-6 py-4 whitespace-nowrap">${prettyType}</td>
@@ -492,6 +1233,8 @@ function updateUI(data) {
 
         if (mobileTbody) {
             const mobileRow = document.createElement('tr');
+            mobileRow.className = 'audit-log-row';
+            mobileRow.setAttribute('data-row-date', transaction.date);
             mobileRow.innerHTML = `
                 <td class="px-2 py-1">${transaction.date}</td>
                 <td class="px-2 py-1">${prettyType}</td>
@@ -502,6 +1245,7 @@ function updateUI(data) {
             mobileTbody.appendChild(mobileRow);
         }
     });
+    applyAuditLogFilters();
 }
 
 function toggleVersion() {

@@ -1,2 +1,3 @@
 data.json
 flask_session/
+.venv/

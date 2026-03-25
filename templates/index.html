@@ -94,6 +94,172 @@
                 </div>
             </div>
         </div>
+        <div class="expected-bills mb-8" id="expected-bills-section" data-baseline-count="{{ (bill_baseline|length) if bill_baseline else 0 }}" data-default-notify-email="{{ default_notify_email or '' }}">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-2">Expected monthly bills</h2>
+                <p class="text-sm text-gray-600 mb-4">Upload a statement to capture likely recurring debits (broader match than import). Uncheck anything that is not a shared bill, set when you want a monthly email reminder, then save. Regular import below will flag differences vs this baseline.</p>
+                {% if bill_baseline and bill_baseline|length > 0 %}
+                <p id="baseline-summary" class="text-sm text-gray-800 mb-4">
+                    <strong>{{ bill_baseline|length }}</strong> expected bill(s) saved.
+                    Reminder on day <strong>{{ bill_reminder.day_of_month if bill_reminder else '1' }}</strong> of each month
+                    {% if bill_reminder and bill_reminder.inferred_period_end %} (period end inferred: {{ bill_reminder.inferred_period_end }}){% endif %}.
+                    Email: <strong id="baseline-email-display">{{ bill_reminder_email or default_notify_email or 'not set' }}</strong>
+                </p>
+                {% else %}
+                <p id="baseline-summary" class="text-sm text-gray-500 mb-4">No baseline saved yet.</p>
+                {% endif %}
+                {% if not smtp_configured %}
+                <p class="text-sm text-amber-800 mb-2">SMTP is not configured (set SMTP_HOST, MAIL_FROM, etc.); email reminders will not send until it is.</p>
+                {% endif %}
+                {% if not loan_deleted %}
+                <div class="mb-4 max-w-xl">
+                    <label for="baseline-reminder-email" class="block text-gray-700 text-sm font-medium mb-1">Reminder email (optional)</label>
+                    <p class="text-xs text-gray-500 mb-2">Monthly statement reminders are sent here when SMTP is configured. Leave empty to use the server default from the environment.</p>
+                    <div class="flex flex-wrap gap-2 items-center">
+                        <input type="email" id="baseline-reminder-email" name="baseline_reminder_email" autocomplete="email" placeholder="{{ default_notify_email or 'Uses FINANCE_TRACKER_NOTIFY_EMAIL from server' }}" value="{{ bill_reminder_email }}" class="border border-gray-300 rounded px-3 py-2 flex-1 min-w-[220px] max-w-md">
+                        <button type="button" id="baseline-reminder-email-save-btn" class="hidden bg-gray-700 hover:bg-gray-800 text-white font-semibold py-2 px-4 rounded text-sm">Save email</button>
+                    </div>
+                </div>
+                {% if bill_baseline and bill_baseline|length > 0 %}
+                <div id="baseline-saved-wrap" class="mb-6">
+                    <h3 class="text-sm font-semibold text-gray-800 mb-2">Saved expected bills</h3>
+                    <div class="overflow-x-auto mb-2">
+                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bank (£)</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Your share (£)</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Note</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="baseline-saved-tbody" class="bg-white divide-y divide-gray-200">
+                                {% for row in bill_baseline %}
+                                <tr data-item-id="{{ row.id }}" data-description="{{ row.description|e }}" data-amount-bank="{{ row.amount_bank }}" data-category="{{ row.category or '' }}">
+                                    <td class="px-3 py-2 align-top">
+                                        <input type="text" class="baseline-saved-desc border border-gray-300 rounded px-2 py-1 w-full max-w-xs" value="{{ row.description }}" maxlength="500">
+                                    </td>
+                                    <td class="px-3 py-2 align-top whitespace-nowrap">
+                                        <input type="number" step="0.01" min="0.01" class="baseline-saved-bank border border-gray-300 rounded px-2 py-1 w-28" value="{{ '%.2f'|format(row.amount_bank) }}">
+                                    </td>
+                                    <td class="px-3 py-2 align-top whitespace-nowrap">
+                                        <input type="number" step="0.01" min="0.01" class="baseline-saved-share border border-gray-300 rounded px-2 py-1 w-28" value="{{ '%.2f'|format(row.amount_share|default(row.amount_bank / 2, true)) }}">
+                                    </td>
+                                    <td class="px-3 py-2 align-top">
+                                        <input type="text" class="baseline-saved-cat border border-gray-300 rounded px-2 py-1 w-full max-w-[140px]" value="{{ row.category or '' }}" maxlength="120" placeholder="—">
+                                    </td>
+                                    <td class="px-3 py-2 align-top">
+                                        <input type="text" class="baseline-saved-note border border-gray-300 rounded px-2 py-1 w-full max-w-xs" value="{{ row.note or '' }}" maxlength="300" placeholder="Optional">
+                                    </td>
+                                    <td class="px-3 py-2 align-top whitespace-nowrap">
+                                        <button type="button" class="baseline-saved-delete">Delete</button>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="baseline-saved-save-btn" class="hidden bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded text-sm">Save changes</button>
+                </div>
+                {% endif %}
+                <div id="baseline-merge-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" aria-modal="true" role="dialog" aria-labelledby="baseline-merge-modal-title">
+                    <div id="baseline-merge-modal-backdrop" class="absolute inset-0 bg-black opacity-40" aria-hidden="true"></div>
+                    <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6 z-10">
+                        <h3 id="baseline-merge-modal-title" class="text-lg font-semibold text-gray-900 mb-2">Update expected bills</h3>
+                        <p class="text-sm text-gray-600 mb-4">You already have saved expected bills. How should this statement be used?</p>
+                        <div class="flex flex-col gap-2 mb-4">
+                            <button type="button" id="baseline-modal-replace-btn" class="w-full text-left bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium py-3 px-4 rounded border border-gray-200">Replace baseline with this upload</button>
+                            <button type="button" id="baseline-modal-merge-btn" class="w-full text-left bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-medium py-3 px-4 rounded border border-indigo-200">Merge with saved baseline</button>
+                        </div>
+                        <button type="button" id="baseline-modal-cancel-btn" class="text-sm bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 py-2 px-4 rounded">Cancel</button>
+                    </div>
+                </div>
+                <div id="baseline-import-controls" class="mb-4 flex flex-wrap items-end gap-4">
+                    <div>
+                        <label for="baseline-file" class="block text-gray-700 text-sm mb-1">Statement for baseline</label>
+                        <input type="file" id="baseline-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="border border-gray-300 rounded px-3 py-2">
+                    </div>
+                    <button type="button" id="baseline-preview-btn" class="bg-indigo-500 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">Upload &amp; preview</button>
+                </div>
+                <p id="baseline-preview-status" class="text-sm mb-2" style="display:none;"></p>
+                <div id="baseline-setup-results" style="display:none;">
+                    <div class="flex flex-wrap gap-4 mb-4">
+                        <div>
+                            <label for="baseline-reminder-day" class="block text-gray-700 text-sm mb-1">Reminder day of month (1–31)</label>
+                            <input type="number" id="baseline-reminder-day" min="1" max="31" value="{{ bill_reminder.day_of_month if bill_reminder and bill_reminder.day_of_month else 1 }}" class="border border-gray-300 rounded px-3 py-2 w-24">
+                        </div>
+                        <p class="text-xs text-gray-500 self-end pb-2 flex-1 min-w-[200px]">Reminder email is set in the field above.</p>
+                    </div>
+                    <p id="baseline-period-hint" class="text-sm text-gray-600 mb-2" style="display:none;"></p>
+                    <div class="overflow-x-auto mb-4">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Include</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bank (£)</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Your share (£)</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Note</th>
+                                </tr>
+                            </thead>
+                            <tbody id="baseline-candidate-tbody" class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="baseline-save-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2">Save expected bills</button>
+                    <button type="button" id="baseline-clear-btn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">Clear</button>
+                </div>
+                {% else %}
+                <p class="text-gray-500">Baseline is disabled for deleted loans.</p>
+                {% endif %}
+            </div>
+        </div>
+        <div class="statement-import mb-8" id="statement-import-section">
+            <div class="bg-white rounded shadow p-6">
+                <h2 class="text-xl font-semibold mb-2">Import from bank statement</h2>
+                <p class="text-sm text-gray-600 mb-4">Upload a PDF, CSV, or text export. The app sends the text to OpenAI to find household bill debits; your share defaults to 50% of each debit. Uncheck any row you do not want, edit amounts if needed, then import.</p>
+                {% if not loan_deleted %}
+                <div id="statement-import-controls" class="mb-4 flex flex-wrap items-end gap-4">
+                    <div>
+                        <label for="statement-file" class="block text-gray-700 text-sm mb-1">Statement file</label>
+                        <input type="file" id="statement-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="border border-gray-300 rounded px-3 py-2">
+                    </div>
+                    <button type="button" id="statement-preview-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Upload &amp; preview</button>
+                </div>
+                <p id="statement-preview-status" class="text-sm mb-2" style="display:none;"></p>
+                <p id="statement-truncated-hint" class="text-sm text-amber-800 mb-2" style="display:none;">Statement text was truncated before analysis; check for missing rows.</p>
+                <div id="baseline-diff-panel" class="mb-4 p-4 border border-amber-300 rounded bg-amber-50" style="display:none;">
+                    <h3 class="font-semibold text-amber-900 mb-2">Compared to expected bills</h3>
+                    <div id="baseline-diff-missing" class="text-sm mb-2"></div>
+                    <div id="baseline-diff-new" class="text-sm mb-2"></div>
+                    <div id="baseline-diff-changed" class="text-sm"></div>
+                </div>
+                <div id="statement-import-results" style="display:none;">
+                    <div class="overflow-x-auto mb-4">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Include</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bank (£)</th>
+                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Your share (£)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="statement-import-tbody" class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                    <button type="button" id="statement-import-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2">Import selected</button>
+                    <button type="button" id="statement-clear-btn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">Clear</button>
+                </div>
+                {% else %}
+                <p class="text-gray-500">Import is disabled for deleted loans.</p>
+                {% endif %}
+            </div>
+        </div>
         <div class="actions mb-8">
             <div class="bg-white rounded shadow p-6">
                 <h2 class="text-xl font-semibold mb-4">Add Transaction</h2>
@@ -173,6 +339,36 @@
         <div class="transactions">
             <div class="bg-white rounded shadow p-6">
                 <h2 class="text-xl font-semibold mb-4">Audit Log</h2>
+                <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+                    <div class="flex-1 min-w-[12rem]">
+                        <label for="audit-search" class="block text-gray-700 text-sm mb-1">Search</label>
+                        <input type="search" id="audit-search" placeholder="Filter by type, amount, description, user…" autocomplete="off" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label for="audit-date-op" class="block text-gray-700 text-sm mb-1">Date filter</label>
+                        <select id="audit-date-op" class="border border-gray-300 rounded px-3 py-2 text-sm bg-white">
+                            <option value="">Any date</option>
+                            <option value="lt">Before (&lt;)</option>
+                            <option value="gt">After (&gt;)</option>
+                            <option value="eq">On (==)</option>
+                            <option value="between">Between</option>
+                        </select>
+                    </div>
+                    <div id="audit-date-single-wrap" class="audit-date-input-group">
+                        <label for="audit-date-single" class="block text-gray-700 text-sm mb-1">Date</label>
+                        <input type="date" id="audit-date-single" class="border border-gray-300 rounded px-3 py-2 text-sm">
+                    </div>
+                    <div id="audit-date-between-wrap" class="audit-date-input-group hidden flex flex-wrap gap-3 items-end">
+                        <div>
+                            <label for="audit-date-start" class="block text-gray-700 text-sm mb-1">From</label>
+                            <input type="date" id="audit-date-start" class="border border-gray-300 rounded px-3 py-2 text-sm">
+                        </div>
+                        <div>
+                            <label for="audit-date-end" class="block text-gray-700 text-sm mb-1">To</label>
+                            <input type="date" id="audit-date-end" class="border border-gray-300 rounded px-3 py-2 text-sm">
+                        </div>
+                    </div>
+                </div>
                 <table id="transactions-table" class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
                         <tr>
@@ -185,7 +381,7 @@
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
                         {% for transaction in transactions|reverse %}
-                        <tr>
+                        <tr class="audit-log-row" data-row-date="{{ transaction.date }}">
                             <td class="px-6 py-4 whitespace-nowrap">{{ transaction.date }}</td>
                             <td class="px-6 py-4 whitespace-nowrap">{{ transaction.type|title }}</td>
                             <td class="px-6 py-4 whitespace-nowrap {{ 'text-red-600' if transaction.type == 'repayment' else '' }}">
