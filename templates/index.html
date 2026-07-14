@@ -34,7 +34,12 @@
                         {% endif %}
                     </div>
                 </div>
-                <div class="flex space-x-4">
+                <div class="flex items-center space-x-3">
+                    <nav class="flex gap-2 bg-gray-100 rounded p-1">
+                        <a href="/" class="px-3 py-1 rounded text-sm font-medium text-gray-700 hover:bg-white">Loan Tracker</a>
+                        <a href="/spending" class="px-3 py-1 rounded text-sm font-medium text-gray-700 hover:bg-white">Monthly Spending</a>
+                    </nav>
+                    <span class="text-sm text-gray-600 hidden md:inline">Signed in as {{ username }}</span>
                     <button id="deleteLoanBtn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
                         {% if loan_deleted %}Recover Loan{% else %}Delete Loan{% endif %}
                     </button>

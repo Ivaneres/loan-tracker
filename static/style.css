@@ -100,6 +100,51 @@ button:hover {
     background-color: var(--secondary-color);
 }
 
+/* Monthly Spending: table header sort controls (override global primary button) */
+button.insight-sort-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: #374151;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-align: left;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+button.insight-sort-btn:hover {
+    background: transparent;
+    color: #1d4ed8;
+}
+
+button.insight-sort-btn .sort-ind {
+    display: inline-block;
+    min-width: 1em;
+    font-weight: 500;
+    font-size: 0.8125rem;
+    line-height: 1;
+    color: #2563eb;
+}
+
+button.insight-sort-btn:focus {
+    outline: none;
+}
+
+button.insight-sort-btn:focus-visible {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--primary-color);
+    border-radius: 2px;
+}
+
 button.secondary {
     background-color: var(--background-color);
     color: var(--text-color);
@@ -524,4 +569,547 @@ button.baseline-saved-delete:hover {
     margin-left: 0.75em;
     vertical-align: middle;
     letter-spacing: 0.5px;
-} 
+}
+
+/* Monthly spending: preview rows flagged as duplicate of ledger or same upload */
+tr.spending-preview-row-duplicate td {
+    background-color: #fffbeb;
+}
+span.preview-duplicate-pill {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #92400e;
+    background: #fde68a;
+    border: 1px solid #fbbf24;
+    border-radius: 0.25rem;
+    padding: 0.15rem 0.4rem;
+    white-space: nowrap;
+}
+span.preview-duplicate-pill[data-reason="ledger"] {
+    color: #1e3a5f;
+    background: #dbeafe;
+    border-color: #93c5fd;
+}
+
+#insight-transactions-tbody tr.spending-insight-tx-muted {
+    color: #6b7280;
+    background: #f3f4f6;
+}
+#insight-transactions-tbody tr.spending-insight-tx-muted .spending-insight-tx-amount {
+    color: #6b7280;
+}
+button.insight-tx-exclude-btn {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2rem 0.45rem;
+    border-radius: 0.25rem;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #374151;
+    white-space: nowrap;
+}
+button.insight-tx-exclude-btn:hover {
+    background: #f9fafb;
+    border-color: #9ca3af;
+}
+button.insight-tx-exclude-btn[data-want-exclude="true"] {
+    color: #7c2d12;
+    border-color: #fdba74;
+    background: #fff7ed;
+}
+
+/* Regular bills: expand / collapse (overrides global `button` padding + solid blue) */
+#subscription-signals-toggle-wrap {
+    text-align: left;
+}
+button.spending-subscription-toggle,
+button#subscription-signals-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    width: auto;
+    max-width: 100%;
+    margin: 0;
+    padding: 0.5rem 0.95rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: 0;
+    text-transform: none;
+    text-decoration: none;
+    color: #1d4ed8;
+    background: #f8fafc;
+    background-color: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+button.spending-subscription-toggle:hover,
+button#subscription-signals-toggle-btn:hover {
+    background: #eff6ff;
+    background-color: #eff6ff;
+    color: #1e3a8a;
+    border-color: #93c5fd;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+button.spending-subscription-toggle:focus,
+button#subscription-signals-toggle-btn:focus {
+    outline: none;
+}
+button.spending-subscription-toggle:focus-visible,
+button#subscription-signals-toggle-btn:focus-visible {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #3b82f6;
+    border-color: #60a5fa;
+}
+button.spending-subscription-toggle[aria-expanded="true"],
+button#subscription-signals-toggle-btn[aria-expanded="true"] {
+    color: #334155;
+    background: #f1f5f9;
+    background-color: #f1f5f9;
+    border-color: #cbd5e1;
+}
+button.spending-subscription-toggle[aria-expanded="true"]:hover,
+button#subscription-signals-toggle-btn[aria-expanded="true"]:hover {
+    background: #e2e8f0;
+    background-color: #e2e8f0;
+    color: #1e293b;
+    border-color: #94a3b8;
+}
+
+/* Month transactions: column header filters (override global `input` / `button` in table) */
+#spending-insight-transactions-table tr.spending-tx-filters th {
+    vertical-align: top;
+    background: #f9fafb;
+}
+#spending-insight-transactions-table tr.spending-tx-filters th:not(:last-child) {
+    min-width: 0;
+}
+#spending-insight-transactions-table input.spending-tx-header-filter,
+#spending-insight-transactions-table select.spending-tx-header-filter {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+    background: #fff;
+    color: #374151;
+    box-sizing: border-box;
+    box-shadow: none;
+}
+#spending-insight-transactions-table input.spending-tx-header-filter::placeholder {
+    color: #9ca3af;
+    font-size: 0.7rem;
+}
+#spending-insight-transactions-table input.spending-tx-header-filter:focus,
+#spending-insight-transactions-table select.spending-tx-header-filter:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 1px #3b82f6;
+}
+button.spending-tx-filter-clear {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0.2rem 0.35rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: #4b5563;
+    background: #fff;
+    background-color: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+button.spending-tx-filter-clear:hover {
+    background: #f3f4f6;
+    background-color: #f3f4f6;
+    border-color: #d1d5db;
+    color: #1f2937;
+}
+button.spending-tx-filter-clear:focus {
+    outline: none;
+}
+button.spending-tx-filter-clear:focus-visible {
+    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #3b82f6;
+    border-color: #60a5fa;
+}
+
+/* Screen-reader-only labels in spending (if Tailwind `sr-only` is unavailable) */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+}
+
+/* Live sums under Amount (£) header (visible / filtered rows) */
+p.insight-tx-amount-rollup,
+#insight-tx-filter-rollup {
+    font-variant-numeric: tabular-nums;
+    margin: 0;
+    padding: 0;
+    font-weight: 500;
+    width: 100%;
+    max-width: 14rem;
+}
+p.insight-tx-amount-rollup:not(.hidden):empty,
+#insight-tx-filter-rollup:not(.hidden):empty {
+    min-height: 0;
+}
+
+/* --- Monthly spending page (aligned with :root tokens) --- */
+body.spending-page {
+    background-color: var(--background-color);
+    color: var(--text-color);
+}
+.spending-shell {
+    max-width: 1200px;
+}
+.spending-header,
+.spending-section.card,
+.spending-chart-card {
+    background-color: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+    padding: 1.25rem 1.5rem;
+}
+.spending-header-inner {
+    width: 100%;
+}
+.spending-top-nav {
+    background: var(--background-color);
+    border: 1px solid var(--border-color);
+}
+.spending-nav-active {
+    background: var(--card-background);
+    color: var(--primary-color) !important;
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.spending-h2 {
+    font-size: 1.35rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 0.25rem;
+}
+.spending-h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 0.35rem;
+}
+.spending-sub,
+.spending-muted {
+    color: var(--text-color);
+    opacity: 0.8;
+}
+.spending-hint {
+    color: var(--text-color);
+    opacity: 0.72;
+}
+.spending-skip {
+    text-decoration: none;
+}
+.spending-skip:hover {
+    text-decoration: underline;
+}
+.spending-control {
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    padding: 0.4rem 0.6rem;
+    background: #fff;
+    color: var(--text-color);
+}
+.spending-btn {
+    display: inline-block;
+    font-weight: 600;
+    border-radius: 0.375rem;
+    padding: 0.5rem 1rem;
+    text-decoration: none;
+    border: 1px solid transparent;
+    cursor: pointer;
+    line-height: 1.3;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.spending-btn--primary {
+    background: var(--primary-color);
+    color: #fff;
+    border-color: var(--primary-color);
+}
+.spending-btn--primary:hover {
+    background: var(--secondary-color);
+    border-color: var(--secondary-color);
+    color: #fff;
+}
+.spending-btn--ok {
+    background: var(--success-color);
+    color: #fff;
+    border-color: var(--success-color);
+}
+.spending-btn--ok:hover {
+    filter: brightness(0.95);
+    color: #fff;
+}
+.spending-btn--muted {
+    background: #e2e8f0;
+    color: #1e293b;
+    border-color: #cbd5e1;
+}
+.spending-btn--muted:hover {
+    background: #cbd5e1;
+}
+.spending-btn--teal {
+    background: #0d9488;
+    color: #fff;
+    border-color: #0d9488;
+}
+.spending-btn--teal:hover {
+    background: #0f766e;
+    color: #fff;
+}
+.spending-btn--danger {
+    background: var(--danger-color);
+    color: #fff;
+    border-color: var(--danger-color);
+}
+.spending-btn--danger:hover {
+    filter: brightness(0.95);
+    color: #fff;
+}
+.spending-btn--indigo {
+    background: #4f46e5;
+    color: #fff;
+    border-color: #4f46e5;
+}
+.spending-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+@media (min-width: 640px) {
+    .spending-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (min-width: 1024px) {
+    .spending-kpi-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+.spending-metric {
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1rem 1.1rem;
+    background: var(--background-color);
+}
+.spending-metric__label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-color);
+    opacity: 0.7;
+    margin-bottom: 0.35rem;
+}
+.spending-metric__value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+.spending-metric--income .spending-metric__value { color: var(--success-color); }
+.spending-metric--outgoing .spending-metric__value { color: var(--danger-color); }
+.spending-metric--net .spending-metric__value { color: var(--primary-color); }
+.spending-metric--savings .spending-metric__value { color: #4338ca; }
+.spending-metric__delta {
+    font-size: 0.8rem;
+    margin-top: 0.4rem;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+}
+.spending-metric__delta--up { color: #b91c1c; }
+.spending-metric__delta--down { color: var(--success-color); }
+.spending-metric__delta--neutral { opacity: 0.75; }
+.spending-metric__sub { margin-top: 0.3rem; opacity: 0.85; }
+.spending-budget-actions {
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    padding: 1rem 1.1rem;
+    background: linear-gradient(180deg, rgba(37, 99, 235, 0.04), var(--card-background));
+}
+.spending-budget-actions-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.spending-budget-actions-list li {
+    border: 1px solid var(--border-color);
+    border-radius: 0.375rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--card-background);
+}
+.spending-budget-item-title { font-weight: 600; color: var(--text-color); }
+.spending-budget-item-detail { margin-top: 0.2rem; opacity: 0.88; font-size: 0.9rem; }
+
+/* Savings coach (AI) */
+.spending-savings-coach .savings-coach-status { color: var(--text-color); }
+.spending-savings-coach .savings-coach-status[aria-busy="true"] { opacity: 0.9; }
+.spending-savings-coach .savings-coach-priority { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.1rem 0.45rem; border-radius: 0.25rem; margin-right: 0.35rem; }
+.spending-savings-coach .savings-coach-priority--1 { background: rgba(5, 150, 105, 0.18); color: #047857; }
+.spending-savings-coach .savings-coach-priority--2 { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+.spending-savings-coach .savings-coach-priority--3 { background: rgba(100, 116, 139, 0.2); color: #334155; }
+.spending-savings-coach .spending-budget-item-detail--evidence { margin-top: 0.35rem; font-size: 0.8rem; opacity: 0.75; }
+.spending-link-btn {
+    background: none;
+    border: none;
+    color: var(--primary-color);
+    cursor: pointer;
+    font-weight: 500;
+    padding: 0;
+    text-decoration: underline;
+    font: inherit;
+}
+.spending-link-btn:hover {
+    color: var(--secondary-color);
+}
+.spending-chart-card {
+    padding: 0.75rem 1rem;
+}
+.spending-cb input {
+    accent-color: var(--primary-color);
+}
+.spending-bar-list li {
+    list-style: none;
+}
+#top-merchants-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+#top-categories-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+#anomalies-list,
+#recurring-list {
+    list-style: disc;
+    padding-left: 1.1rem;
+}
+.spending-tx-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+.spending-tx-tbody tr:nth-child(even) {
+    background: rgba(241, 245, 249, 0.5);
+}
+.spending-tx-tbody tr:hover {
+    background: rgba(219, 234, 254, 0.35);
+}
+.spending-tx-thead th {
+    border-bottom: 1px solid var(--border-color);
+}
+.spending-section--insights {
+    order: 1;
+}
+.spending-mom-line { color: var(--text-color); }
+.spending-trailing { border-left: 3px solid var(--primary-color); padding-left: 0.6rem; }
+
+/* Category stack chart: custom legend (checkboxes) */
+button.spending-legend-ctrl {
+    background: none;
+    border: none;
+    color: var(--primary-color);
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0.2rem 0.35rem;
+    border-radius: 0.25rem;
+    font: inherit;
+    min-height: 2rem;
+    min-width: 2.75rem;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+button.spending-legend-ctrl:hover {
+    color: var(--secondary-color);
+    background: rgba(37, 99, 235, 0.08);
+    text-decoration: none;
+}
+button.spending-legend-ctrl:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+.spending-category-legend-cbs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 0.25rem 0.4rem;
+}
+label.spending-category-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    min-height: 0;
+    min-width: 0;
+    padding: 0.2rem 0.45rem 0.2rem 0.35rem;
+    border-radius: 0.3rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    line-height: 1.2;
+    color: var(--text-color);
+    border: 1px solid transparent;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+label.spending-category-legend-item:hover {
+    background: var(--background-color);
+    border-color: var(--border-color);
+}
+input.category-stack-legend-cb {
+    width: 1rem;
+    height: 1rem;
+    min-width: 1rem;
+    min-height: 1rem;
+    margin: 0;
+    flex-shrink: 0;
+    cursor: pointer;
+    accent-color: var(--primary-color);
+}
+span.spending-category-legend-swatch {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 0.1rem;
+    flex-shrink: 0;
+    background: var(--swatch, #64748b);
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+}
+label.spending-category-legend-item > span:last-of-type {
+    word-break: break-word;
+    max-width: 12rem;
+}
