@@ -109,6 +109,14 @@ SPENDING_ALLOWED_CATEGORIES = [
     'unclassified',
 ]
 SPENDING_CATEGORY_SET = set(SPENDING_ALLOWED_CATEGORIES)
+# Daily Budget: bill-like categories are reserved monthly (not daily discretionary).
+DAILY_BUDGET_BILL_CATEGORIES = frozenset({'housing', 'utilities', 'subscriptions', 'debt'})
+DAILY_BUDGET_IGNORE_CATEGORIES = frozenset({'savings'})
+DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
+DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
+DAILY_ENTRY_CATEGORIES = [
+    c for c in SPENDING_ALLOWED_CATEGORIES if c not in ('unclassified',)
+]
 
 
 def _sanitize_note(raw) -> str:
@@ -405,12 +413,54 @@ def _ensure_user_spending(data: dict, username: str) -> tuple[dict, bool]:
         'monthly_insights': {},
         'classification_overrides': {},
         'classification_cache': {},
+        'daily_budget': {},
     }
     for key, default in defaults.items():
         if key not in spending or not isinstance(spending.get(key), type(default)):
             spending[key] = default.copy() if isinstance(default, dict) else list(default)
             changed = True
+    db, db_changed = _ensure_daily_budget(spending)
+    if db_changed:
+        changed = True
     return spending, changed
+
+
+def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
+    changed = False
+    bucket = spending.get('daily_budget')
+    if not isinstance(bucket, dict):
+        bucket = {}
+        spending['daily_budget'] = bucket
+        changed = True
+    plan = bucket.get('plan')
+    if not isinstance(plan, dict):
+        plan = {}
+        bucket['plan'] = plan
+        changed = True
+    plan_defaults = {
+        'income_monthly': 0.0,
+        'bills_monthly': 0.0,
+        'savings_percent': 20.0,
+        'daily_mode': 'envelope',
+        'source_month': None,
+        'bill_items': [],
+        'updated_at': None,
+    }
+    for key, default in plan_defaults.items():
+        if key not in plan:
+            plan[key] = list(default) if isinstance(default, list) else default
+            changed = True
+    if plan.get('daily_mode') not in DAILY_BUDGET_MODES:
+        plan['daily_mode'] = 'envelope'
+        changed = True
+    if not isinstance(plan.get('bill_items'), list):
+        plan['bill_items'] = []
+        changed = True
+    goals = bucket.get('goals')
+    if not isinstance(goals, list):
+        bucket['goals'] = []
+        changed = True
+    return bucket, changed
 
 
 def _normalize_label(s: str) -> str:
@@ -527,9 +577,21 @@ def _apply_spending_preview_duplicate_marks(
             r['preview_duplicate_reason'] = 'upload'
             dup_upload += 1
         else:
-            r['preview_duplicate'] = False
-            r['preview_duplicate_reason'] = None
-            seen.add(fp)
+            manual = _daily_budget_fuzzy_match_manual(
+                spending,
+                date_str=str(r.get('date') or '')[:10],
+                amount=float(r.get('amount') or 0),
+                description=str(r.get('description') or ''),
+                direction=str(r.get('direction') or 'outgoing'),
+            )
+            if manual is not None:
+                r['preview_duplicate'] = True
+                r['preview_duplicate_reason'] = 'manual'
+                led += 1
+            else:
+                r['preview_duplicate'] = False
+                r['preview_duplicate_reason'] = None
+                seen.add(fp)
     month_prefix = f'{rm}|' if len(rm) == 7 else None
     client_fps = sorted(fp for fp in ledger_fps if month_prefix and fp.startswith(month_prefix))
     return led, dup_upload, client_fps
@@ -2496,6 +2558,512 @@ def _recompute_monthly_insights(spending: dict, months: set[str] | None = None) 
         insight_map[m] = _compute_monthly_insight(spending, m)
     spending['monthly_insights'] = insight_map
 
+# --- Daily Budget ----------------------------------------------------------------------------
+
+
+def _daily_budget_is_discretionary_tx(t: dict) -> bool:
+    """Outgoing non-bill spend that counts against the daily discretionary pool."""
+    if t.get('direction') != 'outgoing':
+        return False
+    if _spending_excluded_from_insight_metrics(t):
+        return False
+    cat = str(t.get('category') or 'other').strip().lower()
+    if cat in DAILY_BUDGET_BILL_CATEGORIES or cat in DAILY_BUDGET_IGNORE_CATEGORIES:
+        return False
+    return True
+
+
+def _daily_budget_plan_figures(plan: dict) -> dict:
+    try:
+        income = max(0.0, float(plan.get('income_monthly') or 0))
+    except (TypeError, ValueError):
+        income = 0.0
+    bill_items = plan.get('bill_items') if isinstance(plan.get('bill_items'), list) else []
+    included_items = [b for b in bill_items if isinstance(b, dict) and b.get('included', True)]
+    if included_items:
+        bills = 0.0
+        for b in included_items:
+            try:
+                bills += max(0.0, float(b.get('amount') or 0))
+            except (TypeError, ValueError):
+                continue
+        bills = round(bills, 2)
+    else:
+        try:
+            bills = max(0.0, float(plan.get('bills_monthly') or 0))
+        except (TypeError, ValueError):
+            bills = 0.0
+    try:
+        savings_percent = float(plan.get('savings_percent') or 0)
+    except (TypeError, ValueError):
+        savings_percent = 0.0
+    savings_percent = max(0.0, min(100.0, savings_percent))
+    savings_monthly = round(income * savings_percent / 100.0, 2)
+    discretionary = round(max(0.0, income - bills - savings_monthly), 2)
+    mode = str(plan.get('daily_mode') or 'envelope')
+    if mode not in DAILY_BUDGET_MODES:
+        mode = 'envelope'
+    return {
+        'income_monthly': round(income, 2),
+        'bills_monthly': round(bills, 2),
+        'savings_percent': round(savings_percent, 2),
+        'savings_monthly': savings_monthly,
+        'discretionary_monthly': discretionary,
+        'daily_mode': mode,
+    }
+
+
+def _daily_budget_spend_by_date(spending: dict, month_key: str) -> dict[str, float]:
+    by_day: dict[str, float] = defaultdict(float)
+    for t in spending.get('transactions') or []:
+        if not _daily_budget_is_discretionary_tx(t):
+            continue
+        d = str(t.get('date') or '')[:10]
+        if len(d) != 10 or d[:7] != month_key:
+            continue
+        try:
+            by_day[d] += float(t.get('amount') or 0)
+        except (TypeError, ValueError):
+            continue
+    return {k: round(v, 2) for k, v in by_day.items()}
+
+
+def _daily_budget_day_limits(
+    figures: dict,
+    month_key: str,
+    spend_by_date: dict[str, float],
+    as_of: date,
+) -> dict[str, float]:
+    """Effective daily spending allowance for each calendar day up to as_of (and full month for fixed)."""
+    first = _first_day_of_month(month_key)
+    last = _last_day_of_month(month_key)
+    if first is None or last is None:
+        return {}
+    days_in_month = last.day
+    discretionary = float(figures.get('discretionary_monthly') or 0)
+    base = round(discretionary / days_in_month, 2) if days_in_month else 0.0
+    mode = figures.get('daily_mode') or 'envelope'
+    limits: dict[str, float] = {}
+
+    if mode == 'fixed':
+        d = first
+        while d <= last:
+            limits[d.isoformat()] = base
+            d += timedelta(days=1)
+        return limits
+
+    if mode == 'carry_surplus':
+        leftover = 0.0
+        d = first
+        while d <= last:
+            allowance = round(base + leftover, 2)
+            limits[d.isoformat()] = allowance
+            spent = float(spend_by_date.get(d.isoformat(), 0) or 0)
+            leftover = max(0.0, round(allowance - spent, 2))
+            d += timedelta(days=1)
+        return limits
+
+    # envelope: for each day, remaining pool after prior spend ÷ remaining days (incl. that day)
+    spent_prior = 0.0
+    d = first
+    while d <= last:
+        days_left = (last - d).days + 1
+        remaining_pool = max(0.0, round(discretionary - spent_prior, 2))
+        day_limit = round(remaining_pool / days_left, 2) if days_left else 0.0
+        limits[d.isoformat()] = day_limit
+        spent_prior += float(spend_by_date.get(d.isoformat(), 0) or 0)
+        d += timedelta(days=1)
+    return limits
+
+
+def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
+    bucket, _ = _ensure_daily_budget(spending)
+    plan = bucket.get('plan') or {}
+    figures = _daily_budget_plan_figures(plan)
+    today = as_of or date.today()
+    month_key = today.strftime('%Y-%m')
+    first = _first_day_of_month(month_key)
+    last = _last_day_of_month(month_key)
+    days_in_month = last.day if last else 30
+    spend_by_date = _daily_budget_spend_by_date(spending, month_key)
+    limits = _daily_budget_day_limits(figures, month_key, spend_by_date, today)
+    today_key = today.isoformat()
+    spent_today = float(spend_by_date.get(today_key, 0) or 0)
+    daily_limit = float(limits.get(today_key, 0) or 0)
+    remaining_today = round(daily_limit - spent_today, 2)
+    spent_mtd = round(sum(spend_by_date.values()), 2)
+    discretionary = float(figures['discretionary_monthly'])
+
+    underspend_total = 0.0
+    day_rows = []
+    if first and last:
+        d = first
+        while d <= min(today, last):
+            key = d.isoformat()
+            lim = float(limits.get(key, 0) or 0)
+            spent = float(spend_by_date.get(key, 0) or 0)
+            under = round(max(0.0, lim - spent), 2)
+            underspend_total += under
+            day_rows.append({
+                'date': key,
+                'limit': lim,
+                'spent': spent,
+                'remaining': round(lim - spent, 2),
+                'underspend': under,
+            })
+            d += timedelta(days=1)
+    underspend_total = round(underspend_total, 2)
+
+    txs_today = []
+    for t in spending.get('transactions') or []:
+        if str(t.get('date') or '')[:10] != today_key:
+            continue
+        if t.get('direction') != 'outgoing':
+            continue
+        if _spending_excluded_from_insight_metrics(t):
+            continue
+        txs_today.append(t)
+    txs_today.sort(key=lambda r: (r.get('created_at') or '', r.get('description') or ''), reverse=True)
+
+    return {
+        'as_of': today_key,
+        'month': month_key,
+        'days_in_month': days_in_month,
+        'plan': figures,
+        'source_month': plan.get('source_month'),
+        'bill_items': plan.get('bill_items') or [],
+        'daily_limit': round(daily_limit, 2),
+        'spent_today': round(spent_today, 2),
+        'remaining_today': remaining_today,
+        'spent_mtd': spent_mtd,
+        'discretionary_remaining_month': round(max(0.0, discretionary - spent_mtd), 2),
+        'underspend_saved': underspend_total,
+        'days': day_rows,
+        'transactions_today': txs_today,
+        'goals': bucket.get('goals') or [],
+    }
+
+
+def _daily_budget_fuzzy_match_manual(
+    spending: dict,
+    *,
+    date_str: str,
+    amount: float,
+    description: str,
+    direction: str,
+) -> dict | None:
+    """Find a manual ledger row that likely duplicates an incoming statement line."""
+    amount = round(float(amount), 2)
+    desc_n = _normalize_label(description)
+    candidates = []
+    for t in spending.get('transactions') or []:
+        if str(t.get('source') or '') != 'manual':
+            continue
+        if t.get('bank_matched'):
+            continue
+        if str(t.get('direction') or '') != direction:
+            continue
+        if str(t.get('date') or '')[:10] != date_str:
+            continue
+        try:
+            if round(float(t.get('amount') or 0), 2) != amount:
+                continue
+        except (TypeError, ValueError):
+            continue
+        man_n = _normalize_label(str(t.get('description') or ''))
+        if not man_n and not desc_n:
+            ratio = 1.0
+        elif not man_n or not desc_n:
+            ratio = 0.55
+        else:
+            ratio = SequenceMatcher(None, man_n, desc_n).ratio()
+            if man_n in desc_n or desc_n in man_n:
+                ratio = max(ratio, 0.85)
+        if ratio >= DAILY_BUDGET_MANUAL_MATCH_RATIO or (ratio >= 0.55 and not man_n):
+            candidates.append((ratio, t))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: -x[0])
+    # Only auto-match when the best candidate is clearly unique enough
+    if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 0.05:
+        if candidates[0][0] < 0.9:
+            return None
+    return candidates[0][1]
+
+
+def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: str, fingerprint: str) -> None:
+    manual_tx['bank_matched'] = True
+    manual_tx['source_statement_id'] = statement_id
+    manual_tx['fingerprint'] = fingerprint
+    bank_desc = str(row.get('description') or '').strip()
+    if bank_desc:
+        manual_tx['bank_description'] = bank_desc[:500]
+        # Prefer richer bank label when manual title is empty/generic
+        man = str(manual_tx.get('description') or '').strip()
+        if not man or man.lower() in ('spend', 'expense', 'purchase'):
+            manual_tx['description'] = bank_desc[:500]
+    if manual_tx.get('category') in (None, '', 'unclassified') and row.get('category'):
+        cat = str(row.get('category')).strip().lower()
+        if cat in SPENDING_CATEGORY_SET:
+            manual_tx['category'] = cat
+
+
+def _normalize_daily_bill_items(raw_items) -> list:
+    out = []
+    if not isinstance(raw_items, list):
+        return out
+    for row in raw_items:
+        if not isinstance(row, dict):
+            continue
+        try:
+            amount = round(max(0.0, float(row.get('amount') or 0)), 2)
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        label = str(row.get('label') or row.get('description') or 'Bill').strip()[:120]
+        cat = str(row.get('category') or 'other').strip().lower()
+        if cat not in SPENDING_CATEGORY_SET:
+            cat = 'other'
+        out.append({
+            'id': str(row.get('id') or uuid.uuid4()),
+            'label': label,
+            'amount': amount,
+            'category': cat,
+            'included': bool(row.get('included', True)),
+            'source': str(row.get('source') or 'manual')[:40],
+        })
+    return out
+
+
+def _build_hybrid_bill_estimate(spending: dict, month_key: str, *, use_llm: bool = True) -> dict:
+    """Hybrid bills: category rollup + subscription signals + optional LLM regular-bill pass."""
+    mk = _normalize_spending_month_key(month_key)
+    if not mk:
+        return {'error': 'Invalid month', 'bill_items': [], 'income_monthly': 0.0}
+
+    insight = (spending.get('monthly_insights') or {}).get(mk) or {}
+    try:
+        income = float(insight.get('income_total') or 0)
+    except (TypeError, ValueError):
+        income = 0.0
+    if income <= 0:
+        # Fall back to summing incoming txs
+        for t in spending.get('transactions') or []:
+            if _report_month_for_spending_tx(t) != mk:
+                continue
+            if t.get('direction') != 'incoming':
+                continue
+            if _spending_excluded_from_insight_metrics(t):
+                continue
+            try:
+                income += float(t.get('amount') or 0)
+            except (TypeError, ValueError):
+                continue
+    income = round(income, 2)
+
+    category_totals: dict[str, float] = defaultdict(float)
+    merchant_totals: dict[str, dict] = {}
+    for t in spending.get('transactions') or []:
+        if _report_month_for_spending_tx(t) != mk:
+            continue
+        if t.get('direction') != 'outgoing':
+            continue
+        if _spending_excluded_from_insight_metrics(t):
+            continue
+        try:
+            amt = float(t.get('amount') or 0)
+        except (TypeError, ValueError):
+            continue
+        cat = str(t.get('category') or 'other').strip().lower()
+        if cat not in SPENDING_CATEGORY_SET:
+            cat = 'other'
+        if cat in DAILY_BUDGET_BILL_CATEGORIES:
+            category_totals[cat] += amt
+        label = _normalize_label(str(t.get('description') or ''))
+        if not label:
+            continue
+        slot = merchant_totals.setdefault(label, {
+            'label': str(t.get('description') or '')[:120],
+            'amount': 0.0,
+            'category': cat,
+            'norm': label,
+        })
+        slot['amount'] += amt
+        # Prefer bill-like category if any tx in the group has one
+        if cat in DAILY_BUDGET_BILL_CATEGORIES:
+            slot['category'] = cat
+
+    bill_items = []
+    seen_norms: set[str] = set()
+    # Prefer merchant-level lines for bill categories (avoids double-counting with signals)
+    for slot in sorted(merchant_totals.values(), key=lambda s: -float(s.get('amount') or 0)):
+        cat = slot['category']
+        if cat not in DAILY_BUDGET_BILL_CATEGORIES:
+            continue
+        amt = round(float(slot['amount'] or 0), 2)
+        if amt < 0.01:
+            continue
+        bill_items.append({
+            'id': str(uuid.uuid4()),
+            'label': slot['label'],
+            'amount': amt,
+            'category': cat,
+            'included': True,
+            'source': 'category',
+        })
+        seen_norms.add(slot['norm'])
+
+    # If a bill category had spend but no usable merchant labels, keep a category bucket
+    covered_cats = {b['category'] for b in bill_items}
+    for cat, amt in sorted(category_totals.items(), key=lambda x: -x[1]):
+        if cat in covered_cats or amt < 0.01:
+            continue
+        bill_items.append({
+            'id': str(uuid.uuid4()),
+            'label': f'{cat.replace("_", " ").title()} (category total)',
+            'amount': round(amt, 2),
+            'category': cat,
+            'included': True,
+            'source': 'category',
+        })
+    for sig in _subscription_signals_for_month(spending, mk):
+        label = str(sig.get('display_description') or sig.get('label') or 'Subscription')[:120]
+        try:
+            amt = float(sig.get('total_last_month') or sig.get('last_amount') or 0)
+        except (TypeError, ValueError):
+            amt = 0.0
+        if amt < 0.01:
+            continue
+        norm = _normalize_label(label)
+        # Skip if already covered loosely by category rollup merchants later
+        if norm in seen_norms:
+            continue
+        bill_items.append({
+            'id': str(uuid.uuid4()),
+            'label': label,
+            'amount': round(amt, 2),
+            'category': 'subscriptions',
+            'included': True,
+            'source': 'subscription_signal',
+        })
+        seen_norms.add(norm)
+
+    llm_candidates = []
+    for slot in merchant_totals.values():
+        cat = slot['category']
+        if cat in DAILY_BUDGET_BILL_CATEGORIES:
+            continue
+        if slot['amount'] < 15:
+            continue
+        llm_candidates.append(slot)
+
+    llm_flagged = []
+    if use_llm and llm_candidates:
+        llm_flagged = _llm_flag_regular_bills(llm_candidates[:40])
+        for item in llm_flagged:
+            norm = _normalize_label(item.get('label', ''))
+            if not norm or norm in seen_norms:
+                continue
+            bill_items.append({
+                'id': str(uuid.uuid4()),
+                'label': str(item.get('label') or '')[:120],
+                'amount': round(float(item.get('amount') or 0), 2),
+                'category': str(item.get('category') or 'other'),
+                'included': True,
+                'source': 'llm_bill',
+                'rationale': str(item.get('rationale') or '')[:240],
+            })
+            seen_norms.add(norm)
+
+    bills_total = round(sum(float(b['amount']) for b in bill_items if b.get('included', True)), 2)
+    return {
+        'month': mk,
+        'income_monthly': income,
+        'bill_items': bill_items,
+        'bills_monthly': bills_total,
+        'llm_used': bool(llm_flagged),
+        'llm_flagged_count': len(llm_flagged),
+    }
+
+
+def _llm_flag_regular_bills(candidates: list[dict]) -> list[dict]:
+    """Ask the model which merchant lines look like regular monthly bills (e.g. council tax)."""
+    client = _get_openai_client()
+    if not client or not candidates:
+        return []
+    model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
+    lines = []
+    for c in candidates:
+        lines.append(
+            f'- {c.get("label")}|amount={round(float(c.get("amount") or 0), 2)}|category={c.get("category")}'
+        )
+    system = (
+        'You identify regular monthly household bills from bank spending lines. '
+        'Regular bills include rent/mortgage, council tax, insurance, utilities, phone/broadband, '
+        'TV licence, childcare, loan repayments, and similar recurring obligations. '
+        'Do NOT flag groceries, dining, shopping, one-off purchases, or variable everyday spend. '
+        'Return JSON only: {"items":[{"description":"exact label from input","is_regular_bill":true,'
+        '"category":"one of housing|utilities|subscriptions|debt|other","reason":"short"}]}'
+    )
+    try:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': 'Lines:\n' + '\n'.join(lines)},
+            ],
+            response_format={'type': 'json_object'},
+            temperature=0.1,
+        )
+        raw = completion.choices[0].message.content or '{}'
+        parsed, jerr = _parse_llm_json_object(raw, context='daily_budget_bills')
+        if jerr or not isinstance(parsed, dict):
+            return []
+    except Exception as e:
+        logger.warning('LLM regular-bill detection failed: %s', e)
+        return []
+
+    by_norm = {_normalize_label(c.get('label', '')): c for c in candidates}
+    out = []
+    for item in parsed.get('items') or []:
+        if not isinstance(item, dict) or not item.get('is_regular_bill'):
+            continue
+        desc = str(item.get('description') or '').strip()
+        norm = _normalize_label(desc)
+        src = by_norm.get(norm)
+        if not src:
+            # fuzzy: match substring
+            for n, c in by_norm.items():
+                if norm and (norm in n or n in norm):
+                    src = c
+                    break
+        if not src:
+            continue
+        cat = str(item.get('category') or 'other').strip().lower()
+        if cat not in SPENDING_CATEGORY_SET:
+            cat = 'other'
+        if cat not in DAILY_BUDGET_BILL_CATEGORIES and cat != 'other':
+            cat = 'other'
+        out.append({
+            'label': src['label'],
+            'amount': round(float(src.get('amount') or 0), 2),
+            'category': cat if cat in DAILY_BUDGET_BILL_CATEGORIES else 'other',
+            'rationale': str(item.get('reason') or '').strip()[:240],
+        })
+    return out
+
+
+def _serialize_daily_budget_plan(plan: dict) -> dict:
+    figures = _daily_budget_plan_figures(plan)
+    return {
+        **figures,
+        'source_month': plan.get('source_month'),
+        'bill_items': plan.get('bill_items') or [],
+        'updated_at': plan.get('updated_at'),
+    }
+
+
 # --- LLM "savings coach" --------------------------------------------------------------------
 SAVINGS_ADVICE_TREND_MAX_PRIOR = 12
 SAVINGS_ADVICE_LLM_MAX_CONTEXT_CHARS = 200_000
@@ -4144,6 +4712,23 @@ def spending_tab():
         spending_categories=SPENDING_ALLOWED_CATEGORIES,
     )
 
+
+@app.route('/spending/daily')
+@login_required
+def daily_budget_tab():
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    months = sorted((spending.get('monthly_insights') or {}).keys(), reverse=True)
+    return render_template(
+        'daily_budget.html',
+        username=session.get('username'),
+        months=months,
+        spending_categories=DAILY_ENTRY_CATEGORIES,
+        daily_modes=sorted(DAILY_BUDGET_MODES),
+    )
+
 @app.route('/loan/<loan_id>')
 @login_required
 def loan_details(loan_id):
@@ -5203,6 +5788,19 @@ def spending_statement_import():
         if fp in existing_fingerprints:
             skipped += 1
             continue
+        manual_match = _daily_budget_fuzzy_match_manual(
+            spending,
+            date_str=row['date'],
+            amount=row['amount'],
+            description=row['description'],
+            direction=row['direction'],
+        )
+        if manual_match is not None:
+            _daily_budget_claim_manual_match(manual_match, row, statement_id, fp)
+            existing_fingerprints.add(fp)
+            skipped += 1
+            affected_months.add(report_month)
+            continue
         existing_fingerprints.add(fp)
         tx = {
             'id': str(uuid.uuid4()),
@@ -5216,6 +5814,7 @@ def spending_statement_import():
             'confidence': row['confidence'],
             'rationale': row['rationale'],
             'source_statement_id': statement_id,
+            'source': 'statement',
             'created_at': now_iso,
             'fingerprint': fp,
         }
@@ -5657,6 +6256,276 @@ def spending_pair_reapply():
         'reconciliation': reconciliation,
         'insight': (spending.get('monthly_insights') or {}).get(report_month),
     })
+
+
+@app.route('/api/spending/daily/status', methods=['GET'])
+@login_required
+def spending_daily_status():
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    as_of_raw = (request.args.get('date') or '').strip()
+    as_of = _parse_iso_date(as_of_raw) if as_of_raw else date.today()
+    if as_of is None:
+        return jsonify({'error': 'Invalid date'}), 400
+    status = _daily_budget_status(spending, as_of=as_of)
+    return jsonify({'ok': True, **status})
+
+
+@app.route('/api/spending/daily/entry', methods=['POST'])
+@login_required
+def spending_daily_entry_create():
+    payload = request.get_json(silent=True) or {}
+    try:
+        amount = float(payload.get('amount'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Valid amount is required'}), 400
+    if amount <= 0:
+        return jsonify({'error': 'Amount must be positive'}), 400
+    amount = round(amount, 2)
+    title = str(payload.get('title') or payload.get('description') or '').strip()[:500]
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+    category = str(payload.get('category') or 'other').strip().lower()
+    if category not in SPENDING_CATEGORY_SET or category == 'unclassified':
+        category = 'other'
+    date_raw = str(payload.get('date') or '').strip()
+    d = _parse_iso_date(date_raw) if date_raw else date.today()
+    if d is None:
+        return jsonify({'error': 'Invalid date'}), 400
+
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+
+    d_str = d.strftime('%Y-%m-%d')
+    month_key = d.strftime('%Y-%m')
+    fp = _spending_fingerprint(month_key, d_str, amount, 'outgoing', title)
+    existing = {str(t.get('fingerprint')) for t in (spending.get('transactions') or []) if t.get('fingerprint')}
+    if fp in existing:
+        return jsonify({'error': 'An identical spend is already logged', 'fingerprint': fp}), 409
+
+    now_iso = datetime.utcnow().isoformat() + 'Z'
+    tx = {
+        'id': str(uuid.uuid4()),
+        'date': d_str,
+        'month': month_key,
+        'report_month': month_key,
+        'description': title,
+        'amount': amount,
+        'direction': 'outgoing',
+        'category': category,
+        'confidence': 1.0,
+        'rationale': 'manual daily entry',
+        'source': 'manual',
+        'created_at': now_iso,
+        'fingerprint': fp,
+    }
+    spending.setdefault('transactions', []).append(tx)
+    _recompute_monthly_insights(spending, {month_key})
+    save_data(data)
+    status = _daily_budget_status(spending, as_of=d)
+    return jsonify({'ok': True, 'transaction': tx, 'status': status})
+
+
+@app.route('/api/spending/daily/entry/<tx_id>', methods=['DELETE'])
+@login_required
+def spending_daily_entry_delete(tx_id):
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    txs = spending.get('transactions') or []
+    target = None
+    for t in txs:
+        if str(t.get('id')) == str(tx_id):
+            target = t
+            break
+    if target is None:
+        return jsonify({'error': 'Transaction not found'}), 404
+    if str(target.get('source') or '') != 'manual':
+        return jsonify({'error': 'Only manual daily entries can be deleted here'}), 400
+    month_key = _report_month_for_spending_tx(target) or str(target.get('month') or '')
+    spending['transactions'] = [t for t in txs if str(t.get('id')) != str(tx_id)]
+    if month_key:
+        _recompute_monthly_insights(spending, {month_key})
+    save_data(data)
+    status = _daily_budget_status(spending)
+    return jsonify({'ok': True, 'status': status})
+
+
+@app.route('/api/spending/daily/plan', methods=['GET', 'PUT'])
+@login_required
+def spending_daily_plan():
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    bucket, _ = _ensure_daily_budget(spending)
+    plan = bucket['plan']
+
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'plan': _serialize_daily_budget_plan(plan)})
+
+    payload = request.get_json(silent=True) or {}
+    if 'income_monthly' in payload:
+        try:
+            plan['income_monthly'] = round(max(0.0, float(payload.get('income_monthly'))), 2)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid income_monthly'}), 400
+    if 'savings_percent' in payload:
+        try:
+            pct = float(payload.get('savings_percent'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid savings_percent'}), 400
+        plan['savings_percent'] = round(max(0.0, min(100.0, pct)), 2)
+    if 'daily_mode' in payload:
+        mode = str(payload.get('daily_mode') or '').strip()
+        if mode not in DAILY_BUDGET_MODES:
+            return jsonify({'error': f'daily_mode must be one of {sorted(DAILY_BUDGET_MODES)}'}), 400
+        plan['daily_mode'] = mode
+    if 'bill_items' in payload:
+        plan['bill_items'] = _normalize_daily_bill_items(payload.get('bill_items'))
+        plan['bills_monthly'] = round(
+            sum(float(b['amount']) for b in plan['bill_items'] if b.get('included', True)),
+            2,
+        )
+    elif 'bills_monthly' in payload:
+        try:
+            plan['bills_monthly'] = round(max(0.0, float(payload.get('bills_monthly'))), 2)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid bills_monthly'}), 400
+    if 'source_month' in payload:
+        sm = payload.get('source_month')
+        if sm in (None, ''):
+            plan['source_month'] = None
+        else:
+            plan['source_month'] = _normalize_spending_month_key(str(sm))
+    plan['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+    save_data(data)
+    status = _daily_budget_status(spending)
+    return jsonify({'ok': True, 'plan': _serialize_daily_budget_plan(plan), 'status': status})
+
+
+@app.route('/api/spending/daily/plan/from-statements', methods=['POST'])
+@login_required
+def spending_daily_plan_from_statements():
+    payload = request.get_json(silent=True) or {}
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    months = sorted((spending.get('monthly_insights') or {}).keys(), reverse=True)
+    month = _normalize_spending_month_key(str(payload.get('month') or ''))
+    if not month:
+        month = months[0] if months else None
+    if not month:
+        return jsonify({
+            'error': 'No statement months available. Import a statement in Monthly Spending first.',
+            'months': [],
+        }), 400
+    use_llm = payload.get('use_llm', True)
+    if isinstance(use_llm, str):
+        use_llm = use_llm.strip().lower() not in ('0', 'false', 'no')
+    estimate = _build_hybrid_bill_estimate(spending, month, use_llm=bool(use_llm))
+    if estimate.get('error'):
+        return jsonify({'error': estimate['error']}), 400
+
+    apply = payload.get('apply', False)
+    if apply:
+        bucket, _ = _ensure_daily_budget(spending)
+        plan = bucket['plan']
+        plan['income_monthly'] = float(estimate['income_monthly'])
+        plan['bill_items'] = estimate['bill_items']
+        plan['bills_monthly'] = float(estimate['bills_monthly'])
+        plan['source_month'] = month
+        plan['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        save_data(data)
+        status = _daily_budget_status(spending)
+        return jsonify({
+            'ok': True,
+            'estimate': estimate,
+            'plan': _serialize_daily_budget_plan(plan),
+            'status': status,
+            'available_months': months,
+        })
+
+    return jsonify({'ok': True, 'estimate': estimate, 'available_months': months})
+
+
+@app.route('/api/spending/daily/goals', methods=['GET', 'POST'])
+@login_required
+def spending_daily_goals():
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    bucket, _ = _ensure_daily_budget(spending)
+    goals = bucket.setdefault('goals', [])
+
+    if request.method == 'GET':
+        status = _daily_budget_status(spending)
+        return jsonify({
+            'ok': True,
+            'goals': goals,
+            'underspend_saved': status.get('underspend_saved', 0),
+        })
+
+    payload = request.get_json(silent=True) or {}
+    name = str(payload.get('name') or '').strip()[:120]
+    if not name:
+        return jsonify({'error': 'Goal name is required'}), 400
+    try:
+        target = round(max(0.01, float(payload.get('target_amount'))), 2)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Valid target_amount is required'}), 400
+    goal = {
+        'id': str(uuid.uuid4()),
+        'name': name,
+        'target_amount': target,
+        'created_at': datetime.utcnow().isoformat() + 'Z',
+    }
+    goals.append(goal)
+    save_data(data)
+    status = _daily_budget_status(spending)
+    return jsonify({'ok': True, 'goal': goal, 'goals': goals, 'underspend_saved': status.get('underspend_saved', 0)})
+
+
+@app.route('/api/spending/daily/goals/<goal_id>', methods=['PATCH', 'DELETE'])
+@login_required
+def spending_daily_goal_item(goal_id):
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    bucket, _ = _ensure_daily_budget(spending)
+    goals = bucket.setdefault('goals', [])
+    idx = next((i for i, g in enumerate(goals) if str(g.get('id')) == str(goal_id)), None)
+    if idx is None:
+        return jsonify({'error': 'Goal not found'}), 404
+
+    if request.method == 'DELETE':
+        goals.pop(idx)
+        save_data(data)
+        return jsonify({'ok': True, 'goals': goals})
+
+    payload = request.get_json(silent=True) or {}
+    goal = goals[idx]
+    if 'name' in payload:
+        name = str(payload.get('name') or '').strip()[:120]
+        if not name:
+            return jsonify({'error': 'Goal name is required'}), 400
+        goal['name'] = name
+    if 'target_amount' in payload:
+        try:
+            goal['target_amount'] = round(max(0.01, float(payload.get('target_amount'))), 2)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid target_amount'}), 400
+    save_data(data)
+    status = _daily_budget_status(spending)
+    return jsonify({'ok': True, 'goal': goal, 'goals': goals, 'underspend_saved': status.get('underspend_saved', 0)})
 
 
 if __name__ == '__main__':

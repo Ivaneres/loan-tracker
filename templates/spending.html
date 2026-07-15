@@ -4,28 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monthly Spending</title>
+    {% include 'partials/fonts.html' %}
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="spending-page min-h-screen">
     <div class="spending-shell container mx-auto py-6 px-4 sm:px-6">
-        <header class="spending-header card mb-6">
+        <header class="spending-header mb-6">
             <div class="spending-header-inner max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
                 <div class="flex flex-wrap items-center gap-4 lg:gap-6">
-                    <div class="text-2xl font-bold" style="color: var(--text-color);">Finance Tracker</div>
-                    <nav class="spending-top-nav flex gap-1 p-1 rounded" aria-label="Primary">
-                        <a href="/" class="px-3 py-1.5 rounded text-sm font-medium" style="color: var(--text-color);">Loan Tracker</a>
-                        <a href="/spending" class="px-3 py-1.5 rounded text-sm font-medium spending-nav-active">Monthly Spending</a>
-                    </nav>
+                    <a href="/" class="app-brand">Finance Tracker</a>
+                    {% with active='spending' %}{% include 'partials/app_nav.html' %}{% endwith %}
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
-                    <a href="#spending-insights" class="spending-skip text-sm" style="color: var(--primary-color);">Insights</a>
-                    <span class="text-gray-300" aria-hidden="true">|</span>
-                    <a href="#spending-import" class="spending-skip text-sm" style="color: var(--primary-color);">Import</a>
+                    <a href="#spending-insights" class="spending-skip text-sm">Insights</a>
+                    <span style="color: var(--line);" aria-hidden="true">|</span>
+                    <a href="#spending-import" class="spending-skip text-sm">Import</a>
                 </div>
                 <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
-                    <span class="text-sm" style="color: var(--text-color); opacity: 0.85;">Signed in as {{ username }}</span>
-                    <a href="/logout" class="spending-btn spending-btn--muted">Logout</a>
+                    <span class="app-session">Signed in as {{ username }}</span>
+                    <a href="/logout" class="app-btn app-btn--muted">Logout</a>
                 </div>
             </div>
         </header>

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Daily Budget</title>
+    {% include 'partials/fonts.html' %}
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="db-page">
+    <div class="db-shell">
+        <header class="db-header">
+            <div class="db-brand-row">
+                <a href="/" class="db-brand">Finance Tracker</a>
+                {% with active='daily' %}{% include 'partials/app_nav.html' %}{% endwith %}
+                <div class="db-session">
+                    <span class="db-session-user">{{ username }}</span>
+                    <a href="/logout" class="db-link-quiet">Logout</a>
+                </div>
+            </div>
+        </header>
+
+        <nav class="db-panel-tabs" role="tablist" aria-label="Daily Budget panels">
+            <button type="button" class="db-panel-tab db-panel-tab--active" data-panel="today" role="tab" aria-selected="true">Today</button>
+            <button type="button" class="db-panel-tab" data-panel="plan" role="tab" aria-selected="false">Plan</button>
+            <button type="button" class="db-panel-tab" data-panel="goals" role="tab" aria-selected="false">Goals</button>
+        </nav>
+
+        <p id="db-status-msg" class="db-flash hidden" role="status" aria-live="polite"></p>
+
+        <section id="panel-today" class="db-panel" role="tabpanel">
+            <div class="db-hero">
+                <p class="db-hero-kicker" id="db-hero-date">Today</p>
+                <p class="db-hero-label">Left to spend</p>
+                <p class="db-hero-value" id="db-remaining">£0.00</p>
+                <div class="db-hero-bar" aria-hidden="true">
+                    <div class="db-hero-bar-fill" id="db-remaining-bar"></div>
+                </div>
+                <div class="db-hero-meta">
+                    <div>
+                        <span class="db-meta-label">Limit</span>
+                        <span class="db-meta-value" id="db-daily-limit">£0.00</span>
+                    </div>
+                    <div>
+                        <span class="db-meta-label">Spent</span>
+                        <span class="db-meta-value" id="db-spent-today">£0.00</span>
+                    </div>
+                    <div>
+                        <span class="db-meta-label">Saved</span>
+                        <span class="db-meta-value db-meta-value--accent" id="db-underspend">£0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <form id="db-entry-form" class="db-entry" autocomplete="off">
+                <label class="db-entry-amount-wrap">
+                    <span class="db-entry-currency">£</span>
+                    <input id="db-amount" class="db-entry-amount" type="text" inputmode="decimal" placeholder="0.00" required aria-label="Amount">
+                </label>
+                <label class="db-field">
+                    <span>What for?</span>
+                    <input id="db-title" type="text" maxlength="200" placeholder="Coffee, lunch…" required>
+                </label>
+                <fieldset class="db-cats">
+                    <legend>Category</legend>
+                    <div class="db-cat-grid" id="db-cat-grid">
+                        {% for cat in spending_categories %}
+                        <button type="button" class="db-cat{% if cat == 'dining' %} db-cat--selected{% endif %}" data-category="{{ cat }}">{{ cat }}</button>
+                        {% endfor %}
+                    </div>
+                    <input type="hidden" id="db-category" value="dining">
+                </fieldset>
+                <button type="submit" class="db-cta" id="db-add-btn">Add spend</button>
+            </form>
+
+            <div class="db-today-list-wrap">
+                <h2 class="db-section-title">Today’s spends</h2>
+                <ul id="db-today-list" class="db-today-list"></ul>
+                <p id="db-today-empty" class="db-empty">Nothing logged yet — tap above when you spend.</p>
+            </div>
+        </section>
+
+        <!-- Plan -->
+        <section id="panel-plan" class="db-panel hidden" role="tabpanel" hidden>
+            <div class="db-card">
+                <h2 class="db-section-title">Budget plan</h2>
+                <p class="db-lead">Income, bills, and how much of your pay you want to lock away as savings. What’s left becomes your daily spend limit.</p>
+
+                <div class="db-field-grid">
+                    <label class="db-field">
+                        <span>Monthly income</span>
+                        <input id="plan-income" type="number" min="0" step="0.01" inputmode="decimal">
+                    </label>
+                    <label class="db-field">
+                        <span>Savings goal (% of income)</span>
+                        <input id="plan-savings-pct" type="number" min="0" max="100" step="0.5" inputmode="decimal">
+                    </label>
+                </div>
+
+                <div class="db-plan-math" id="plan-math" aria-live="polite"></div>
+
+                <fieldset class="db-mode-fieldset">
+                    <legend>Daily limit mode</legend>
+                    <div class="db-mode-grid" id="plan-mode-grid">
+                        <label class="db-mode">
+                            <input type="radio" name="daily_mode" value="fixed">
+                            <span class="db-mode-card">
+                                <strong>Fixed</strong>
+                                <small>Same limit every day. Leftover doesn’t roll.</small>
+                            </span>
+                        </label>
+                        <label class="db-mode">
+                            <input type="radio" name="daily_mode" value="envelope" checked>
+                            <span class="db-mode-card">
+                                <strong>Envelope</strong>
+                                <small>What’s left ÷ days left. Overspend tightens later days.</small>
+                            </span>
+                        </label>
+                        <label class="db-mode">
+                            <input type="radio" name="daily_mode" value="carry_surplus">
+                            <span class="db-mode-card">
+                                <strong>Carry surplus</strong>
+                                <small>Unused budget rolls into tomorrow.</small>
+                            </span>
+                        </label>
+                    </div>
+                </fieldset>
+
+                <div class="db-pull">
+                    <div class="db-pull-head">
+                        <h3 class="db-subsection-title">Monthly bills</h3>
+                        <div class="db-pull-actions">
+                            <select id="plan-source-month" class="db-select" title="Statement month">
+                                <option value="">No statements yet</option>
+                                {% for month in months %}
+                                <option value="{{ month }}">{{ month }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="button" id="plan-pull-btn" class="db-btn db-btn--ghost">Pull from statements</button>
+                        </div>
+                    </div>
+                    <p class="db-hint">Hybrid estimate: bill categories + recurring merchants, plus AI for things like council tax when needed. Tick what counts.</p>
+                    <ul id="plan-bill-list" class="db-bill-list"></ul>
+                    <p id="plan-bills-empty" class="db-empty">No bill lines yet — pull from a statement or add manually below.</p>
+                    <div class="db-bill-add">
+                        <input id="bill-add-label" type="text" placeholder="Bill name" maxlength="120">
+                        <input id="bill-add-amount" type="number" min="0" step="0.01" placeholder="£" inputmode="decimal">
+                        <button type="button" id="bill-add-btn" class="db-btn db-btn--ghost">Add</button>
+                    </div>
+                </div>
+
+                <p id="plan-save-feedback" class="db-plan-feedback hidden" role="status" aria-live="polite"></p>
+                <p id="plan-last-saved" class="db-plan-last-saved hidden"></p>
+                <button type="button" id="plan-save-btn" class="db-cta">Save plan</button>
+            </div>
+        </section>
+
+        <!-- Goals -->
+        <section id="panel-goals" class="db-panel hidden" role="tabpanel" hidden>
+            <div class="db-card">
+                <h2 class="db-section-title">Savings from underspend</h2>
+                <p class="db-lead">Money you didn’t spend of your daily allowance this month — separate from the % you locked in the plan.</p>
+                <p class="db-goals-hero">
+                    <span class="db-goals-hero-label">Saved this month</span>
+                    <span class="db-goals-hero-value" id="goals-saved">£0.00</span>
+                </p>
+
+                <form id="goal-form" class="db-goal-form">
+                    <label class="db-field">
+                        <span>New goal</span>
+                        <input id="goal-name" type="text" maxlength="120" placeholder="Emergency fund" required>
+                    </label>
+                    <label class="db-field">
+                        <span>Target £</span>
+                        <input id="goal-target" type="number" min="1" step="0.01" required>
+                    </label>
+                    <button type="submit" class="db-btn db-btn--solid">Add goal</button>
+                </form>
+
+                <ul id="goals-list" class="db-goals-list"></ul>
+                <p id="goals-empty" class="db-empty">No goals yet — add one to track progress against underspend.</p>
+
+                <h3 class="db-subsection-title mt-8">This month, day by day</h3>
+                <div class="db-day-chart" id="goals-day-chart"></div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        window.DAILY_BUDGET_CATEGORIES = {{ spending_categories | tojson }};
+        window.DAILY_BUDGET_MONTHS = {{ months | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='daily_budget.js') }}"></script>
+</body>
+</html>

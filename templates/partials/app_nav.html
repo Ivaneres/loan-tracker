@@ -1,0 +1,6 @@
+{# Primary nav. Set active to: loans | spending | daily #}
+<nav class="app-nav" aria-label="Primary">
+    <a href="/" class="{% if active == 'loans' %}app-nav-active{% endif %}"{% if active == 'loans' %} aria-current="page"{% endif %}>Loans</a>
+    <a href="/spending" class="{% if active == 'spending' %}app-nav-active{% endif %}"{% if active == 'spending' %} aria-current="page"{% endif %}>Monthly</a>
+    <a href="/spending/daily" class="{% if active == 'daily' %}app-nav-active{% endif %}"{% if active == 'daily' %} aria-current="page"{% endif %}>Daily</a>
+</nav>
