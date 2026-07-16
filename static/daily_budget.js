@@ -461,6 +461,7 @@
     $('plan-pull-btn').addEventListener('click', async () => {
       const month = $('plan-source-month').value || undefined;
       const btn = $('plan-pull-btn');
+      const prevLabel = btn.textContent;
       btn.disabled = true;
       btn.textContent = 'Pulling…';
       try {
@@ -476,12 +477,12 @@
         const llmNote = est.llm_flagged_count
           ? ' · AI flagged ' + est.llm_flagged_count + ' regular bill(s)'
           : '';
-        flash('Loaded from ' + (est.month || 'statements') + llmNote + '. Review bills, then Save plan.', 'ok');
+        flash('Loaded from ' + (est.month || 'statements') + llmNote + '. Review bills, then Save plan.', 'ok', 'plan-save-feedback');
       } catch (e) {
-        flash(e.message, 'error');
+        flash(e.message, 'error', 'plan-save-feedback');
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Pull from statements';
+        btn.textContent = prevLabel;
       }
     });
 

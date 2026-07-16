@@ -12,8 +12,10 @@
     <div class="db-shell">
         <header class="db-header">
             <div class="db-brand-row">
-                <a href="/" class="db-brand">Finance Tracker</a>
-                {% with active='daily' %}{% include 'partials/app_nav.html' %}{% endwith %}
+                <div class="db-brand-left">
+                    <a href="/" class="db-brand">Finance Tracker</a>
+                    {% with active='daily' %}{% include 'partials/app_nav.html' %}{% endwith %}
+                </div>
                 <div class="db-session">
                     <span class="db-session-user">{{ username }}</span>
                     <a href="/logout" class="db-link-quiet">Logout</a>
@@ -128,31 +130,43 @@
                 </fieldset>
 
                 <div class="db-pull">
-                    <div class="db-pull-head">
-                        <h3 class="db-subsection-title">Monthly bills</h3>
-                        <div class="db-pull-actions">
+                    <h3 class="db-subsection-title db-subsection-title--flush">Monthly bills</h3>
+                    <p class="db-hint">Pull bill categories and recurring merchants from a statement month. Tick what counts toward your reserved bills.</p>
+
+                    <div class="db-pull-toolbar">
+                        <label class="db-field db-field--compact">
+                            <span>Statement month</span>
                             <select id="plan-source-month" class="db-select" title="Statement month">
                                 <option value="">No statements yet</option>
                                 {% for month in months %}
                                 <option value="{{ month }}">{{ month }}</option>
                                 {% endfor %}
                             </select>
-                            <button type="button" id="plan-pull-btn" class="db-btn db-btn--ghost">Pull from statements</button>
-                        </div>
+                        </label>
+                        <button type="button" id="plan-pull-btn" class="db-btn db-btn--ghost db-pull-btn">Pull from statements</button>
                     </div>
-                    <p class="db-hint">Hybrid estimate: bill categories + recurring merchants, plus AI for things like council tax when needed. Tick what counts.</p>
+
                     <ul id="plan-bill-list" class="db-bill-list"></ul>
                     <p id="plan-bills-empty" class="db-empty">No bill lines yet — pull from a statement or add manually below.</p>
+
                     <div class="db-bill-add">
-                        <input id="bill-add-label" type="text" placeholder="Bill name" maxlength="120">
-                        <input id="bill-add-amount" type="number" min="0" step="0.01" placeholder="£" inputmode="decimal">
-                        <button type="button" id="bill-add-btn" class="db-btn db-btn--ghost">Add</button>
+                        <label class="db-field db-field--compact db-bill-add-name">
+                            <span>Add bill</span>
+                            <input id="bill-add-label" type="text" placeholder="Rent, council tax…" maxlength="120">
+                        </label>
+                        <label class="db-field db-field--compact db-bill-add-amt">
+                            <span>Amount</span>
+                            <input id="bill-add-amount" type="number" min="0" step="0.01" placeholder="0.00" inputmode="decimal">
+                        </label>
+                        <button type="button" id="bill-add-btn" class="db-btn db-btn--ghost db-bill-add-btn">Add</button>
                     </div>
                 </div>
 
-                <p id="plan-save-feedback" class="db-plan-feedback hidden" role="status" aria-live="polite"></p>
-                <p id="plan-last-saved" class="db-plan-last-saved hidden"></p>
-                <button type="button" id="plan-save-btn" class="db-cta">Save plan</button>
+                <div class="db-plan-footer">
+                    <p id="plan-save-feedback" class="db-plan-feedback hidden" role="status" aria-live="polite"></p>
+                    <p id="plan-last-saved" class="db-plan-last-saved hidden"></p>
+                    <button type="button" id="plan-save-btn" class="db-cta">Save plan</button>
+                </div>
             </div>
         </section>
 
@@ -181,7 +195,7 @@
                 <ul id="goals-list" class="db-goals-list"></ul>
                 <p id="goals-empty" class="db-empty">No goals yet — add one to track progress against underspend.</p>
 
-                <h3 class="db-subsection-title mt-8">This month, day by day</h3>
+                <h3 class="db-subsection-title">This month, day by day</h3>
                 <div class="db-day-chart" id="goals-day-chart"></div>
             </div>
         </section>
