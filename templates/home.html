@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home — Finance Tracker</title>
+    {% include 'partials/fonts.html' %}
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="app-page home-page min-h-screen">
+    <div class="app-shell">
+        {% with active='home' %}{% include 'partials/app_header.html' %}{% endwith %}
+
+        <section class="home-spotlight" aria-label="At a glance">
+            <a class="home-spotlight-hero{% if daily_has_plan and daily_remaining < 0 %} home-spotlight-hero--over{% endif %}" href="/spending/daily">
+                <p class="home-spotlight-kicker">Today</p>
+                {% if daily_has_plan %}
+                <p class="home-spotlight-label">Left to spend</p>
+                <p class="home-spotlight-value">£{{ "{:,.2f}".format(daily_remaining) }}</p>
+                <p class="home-spotlight-meta">
+                    Limit £{{ "{:,.2f}".format(daily_limit) }}
+                    · spent £{{ "{:,.2f}".format(daily_spent) }}
+                </p>
+                {% else %}
+                <p class="home-spotlight-label">Daily budget</p>
+                <p class="home-spotlight-value home-spotlight-value--prompt">Set a plan</p>
+                <p class="home-spotlight-meta">Pull bills from a statement month to unlock your daily limit</p>
+                {% endif %}
+            </a>
+            <div class="home-spotlight-side">
+                <a class="home-spotlight-stat" href="/spending{% if latest_month %}?month={{ latest_month }}{% endif %}">
+                    <span class="home-spotlight-stat-label">Monthly</span>
+                    {% if latest_month %}
+                    <span class="home-spotlight-stat-value">£{{ "{:,.2f}".format(latest_net) }}</span>
+                    <span class="home-spotlight-stat-meta">
+                        Net {{ latest_month }}{% if latest_savings_rate is not none %} · {{ "%.1f"|format(latest_savings_rate) }}% saved{% endif %}
+                    </span>
+                    {% else %}
+                    <span class="home-spotlight-stat-value home-spotlight-stat-value--muted">—</span>
+                    <span class="home-spotlight-stat-meta">Import a statement below</span>
+                    {% endif %}
+                </a>
+                <a class="home-spotlight-stat" href="/loans">
+                    <span class="home-spotlight-stat-label">Loans</span>
+                    {% if loan_count %}
+                    <span class="home-spotlight-stat-value">£{{ "{:,.2f}".format(loan_total) }}</span>
+                    <span class="home-spotlight-stat-meta">{{ loan_count }} active · outstanding</span>
+                    {% else %}
+                    <span class="home-spotlight-stat-value home-spotlight-stat-value--muted">—</span>
+                    <span class="home-spotlight-stat-meta">Track balances and repayments</span>
+                    {% endif %}
+                </a>
+            </div>
+        </section>
+
+        <section id="import" class="home-section card spending-section spending-section--import" tabindex="-1">
+            <h2 class="home-section-h">Import a statement</h2>
+            <p class="home-section-sub">Upload PDF, CSV, or TXT. Pick the stats month and date range — only lines in that range are kept.</p>
+            <p class="spending-hint home-import-hint text-xs mb-4">Prefer CSV when PDFs are messy. Multiple banks = multiple imports.</p>
+
+            <div class="import-form">
+                <div class="import-fields">
+                    <label class="import-field" for="report-period-month">
+                        <span class="import-label">Stats month</span>
+                        <input id="report-period-month" type="month" class="spending-control" />
+                    </label>
+                    <label class="import-field" for="period-start">
+                        <span class="import-label">Period start</span>
+                        <input id="period-start" type="date" class="spending-control" />
+                    </label>
+                    <label class="import-field" for="period-end">
+                        <span class="import-label">Period end</span>
+                        <input id="period-end" type="date" class="spending-control" />
+                    </label>
+                </div>
+                <button type="button" id="period-reset-btn" class="spending-btn spending-btn--muted import-reset">Reset range from month</button>
+
+                <label class="import-field import-field--file" for="spending-file">
+                    <span class="import-label">Statement file</span>
+                    <input id="spending-file" type="file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="spending-control import-file-input" />
+                </label>
+
+                <div class="import-actions">
+                    <button type="button" id="spending-preview-btn" class="spending-btn spending-btn--primary">Upload &amp; preview</button>
+                    <button type="button" id="spending-import-btn" class="spending-btn spending-btn--ok" disabled>Import selected</button>
+                    <button type="button" id="spending-clear-btn" class="spending-btn spending-btn--muted">Clear</button>
+                </div>
+            </div>
+
+            <p id="spending-status" class="text-sm mt-3 hidden"></p>
+            <div id="home-import-next" class="home-import-next hidden" role="status"></div>
+            <div id="spending-preview-summary" class="text-sm mt-2 hidden" style="color: var(--text-color);"></div>
+            <details id="spending-pipeline-panel" class="mt-4 border rounded-lg p-3 text-sm hidden" style="border-color: var(--border-color); background: var(--background-color);">
+                <summary class="cursor-pointer font-medium select-none" style="color: var(--text-color);">How this file was read (intermediate representations)</summary>
+                <p id="spending-pipeline-summary" class="mt-2 text-xs leading-relaxed spending-muted"></p>
+                <p id="spending-pipeline-note" class="mt-1 text-xs italic hidden"></p>
+                <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div>
+                        <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Extracted text</div>
+                        <pre id="spending-pipeline-extract" class="text-xs p-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
+                    </div>
+                    <div>
+                        <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Layout column hints (PDF only)</div>
+                        <pre id="spending-pipeline-hints" class="text-xs p-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Direction hints from geometry (sample)</div>
+                    <pre id="spending-pipeline-direction" class="text-xs p-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
+                </div>
+            </details>
+            <div id="spending-preview-wrap" class="overflow-x-auto mt-4 hidden import-preview-wrap">
+                <table class="min-w-full text-sm" style="border-color: var(--border-color);">
+                    <thead style="background: var(--background-color);">
+                        <tr>
+                            <th class="px-3 py-2 text-left">Include</th>
+                            <th class="px-3 py-2 text-left">Duplicate <span class="text-gray-400 font-normal text-xs">(import)</span></th>
+                            <th class="px-3 py-2 text-left">Date</th>
+                            <th class="px-3 py-2 text-left">Description</th>
+                            <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
+                            <th class="px-3 py-2 text-left">Amount (£)</th>
+                            <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
+                            <th class="px-3 py-2 text-left">Category</th>
+                        </tr>
+                    </thead>
+                    <tbody id="spending-preview-tbody" class="bg-white"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="home-section card" aria-labelledby="home-recent-heading">
+            <h2 id="home-recent-heading" class="home-section-h">Recent statements</h2>
+            <p class="home-section-sub">Imports that feed Monthly insights and Daily plan estimates.</p>
+            {% if recent_statements %}
+            <ul class="home-statements">
+                {% for s in recent_statements %}
+                <li>
+                    <span>
+                        <strong>{{ s.file_name or 'Statement' }}</strong>
+                        · {{ s.report_month or '—' }}
+                        {% if s.period_start and s.period_end %}
+                        <span class="spending-muted">({{ s.period_start }} → {{ s.period_end }})</span>
+                        {% endif %}
+                    </span>
+                    <span class="spending-muted">
+                        {{ s.imported_count or 0 }} imported
+                        {% if s.uploaded_at %} · {{ s.uploaded_at[:10] }}{% endif %}
+                    </span>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="home-statements-empty">No statements yet — upload one above to get started.</p>
+            {% endif %}
+        </section>
+    </div>
+
+    <script>
+        window.SPENDING_CATEGORIES = {{ spending_categories | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='spending.js') }}"></script>
+</body>
+</html>

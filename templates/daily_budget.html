@@ -8,20 +8,9 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="db-page">
-    <div class="db-shell">
-        <header class="db-header">
-            <div class="db-brand-row">
-                <div class="db-brand-left">
-                    <a href="/" class="db-brand">Finance Tracker</a>
-                    {% with active='daily' %}{% include 'partials/app_nav.html' %}{% endwith %}
-                </div>
-                <div class="db-session">
-                    <span class="db-session-user">{{ username }}</span>
-                    <a href="/logout" class="db-link-quiet">Logout</a>
-                </div>
-            </div>
-        </header>
+<body class="app-page db-page">
+    <div class="app-shell">
+        {% with active='daily' %}{% include 'partials/app_header.html' %}{% endwith %}
 
         <nav class="db-panel-tabs" role="tablist" aria-label="Daily Budget panels">
             <button type="button" class="db-panel-tab db-panel-tab--active" data-panel="today" role="tab" aria-selected="true">Today</button>

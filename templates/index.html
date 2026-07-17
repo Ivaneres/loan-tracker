@@ -9,69 +9,67 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="app-page">
-    <div class="container mx-auto py-8">
-        <header class="app-header">
-            <div class="app-header-left">
-                <a href="/" class="text-gray-600 hover:text-gray-900" aria-label="Back to loans">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                    </svg>
-                </a>
-                <div id="loan-name-display" class="text-3xl font-bold text-gray-900">{{ loan_name }}</div>
-                {% if not loan_deleted %}
-                <button id="edit-loan-name" class="icon-button edit-name-button">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                    </svg>
-                </button>
-                {% endif %}
-                <div id="loan-name-edit" class="loan-name-edit" style="display: none;">
-                    <input type="text" id="loan-name-input" value="{{ loan_name }}" class="loan-name-input" {% if loan_deleted %}disabled{% endif %}>
+    <div class="app-shell loan-detail-page">
+        <header class="app-header loan-detail-header">
+            <div class="app-header-top">
+                <div class="loan-detail-title">
+                    <a href="/loans" class="loan-back" aria-label="Back to loans">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                    </a>
+                    <div id="loan-name-display" class="loan-detail-name">{{ loan_name }}</div>
                     {% if not loan_deleted %}
-                    <button id="save-loan-name" class="icon-button save-button">Save</button>
-                    <button id="cancel-loan-name" class="icon-button cancel-button">Cancel</button>
+                    <button id="edit-loan-name" class="icon-button edit-name-button" type="button">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                        </svg>
+                    </button>
                     {% endif %}
+                    <div id="loan-name-edit" class="loan-name-edit" style="display: none;">
+                        <input type="text" id="loan-name-input" value="{{ loan_name }}" class="loan-name-input" {% if loan_deleted %}disabled{% endif %}>
+                        {% if not loan_deleted %}
+                        <button id="save-loan-name" class="icon-button save-button" type="button">Save</button>
+                        <button id="cancel-loan-name" class="icon-button cancel-button" type="button">Cancel</button>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="app-header-right loan-detail-actions">
+                    <span class="app-session">Signed in as {{ username }}</span>
+                    <button id="deleteLoanBtn" class="app-btn app-btn--danger" type="button">
+                        {% if loan_deleted %}Recover Loan{% else %}Delete Loan{% endif %}
+                    </button>
+                    <a href="/logout" class="app-btn app-btn--muted">Logout</a>
                 </div>
             </div>
-            <div class="app-header-right">
-                {% with active='loans' %}{% include 'partials/app_nav.html' %}{% endwith %}
-                <span class="app-session hidden md:inline">Signed in as {{ username }}</span>
-                <button id="deleteLoanBtn" class="app-btn app-btn--danger">
-                    {% if loan_deleted %}Recover Loan{% else %}Delete Loan{% endif %}
-                </button>
-                <a href="/logout" class="app-btn app-btn--muted">Logout</a>
-            </div>
+            {% with active='loans' %}{% include 'partials/app_nav.html' %}{% endwith %}
         </header>
-        <div class="loan-summary mb-8">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-4">Loan Summary</h2>
-                <div class="summary-details">
-                    <div class="current-balance-container mb-4">
-                        <p>Current Balance</p>
-                        <h3 class="balance-amount text-2xl font-bold" id="current-balance">£{{ "{:,.2f}".format(loan_amount) }}</h3>
-                        <div class="balance-details flex space-x-8 mt-2">
-                            <div class="balance-stat">
-                                <span class="stat-label">Total Loan Quantity</span>
-                                <span class="stat-value">£{{ "{:,.2f}".format(total_loan_quantity) }}</span>
-                            </div>
-                            <div class="balance-stat">
-                                <span class="stat-label">Total Paid</span>
-                                <span class="stat-value">£{{ "{:,.2f}".format(total_paid) }}</span>
-                            </div>
-                        </div>
+        <section class="loan-summary mb-6" aria-label="Loan summary">
+            <div class="money-hero loan-money-hero">
+                <p class="money-hero-kicker">Current balance</p>
+                <p class="money-hero-label">{{ loan_name }}</p>
+                <p class="money-hero-value balance-amount" id="current-balance">£{{ "{:,.2f}".format(loan_amount) }}</p>
+                <div class="money-hero-stats">
+                    <div class="money-hero-stat">
+                        <span class="money-hero-stat-label">Total quantity</span>
+                        <span class="money-hero-stat-value">£{{ "{:,.2f}".format(total_loan_quantity) }}</span>
+                    </div>
+                    <div class="money-hero-stat">
+                        <span class="money-hero-stat-label">Total paid</span>
+                        <span class="money-hero-stat-value">£{{ "{:,.2f}".format(total_paid) }}</span>
                     </div>
                 </div>
             </div>
-        </div>
+        </section>
         <div class="interest-settings mb-8">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-4">Interest Settings</h2>
+            <div class="card loan-panel">
+                <h2 class="app-section-title mb-4">Interest Settings</h2>
                 <div class="settings-details">
                     <p>
                         Interest Rate:
                         <span class="interest-rate-container">
-                            <input type="number" id="interest-rate-input" value="{{ "{:,.2f}".format(interest_rate) }}" min="0" max="100" step="0.01" class="interest-rate-input border border-gray-300 rounded px-2 py-1" disabled {% if loan_deleted %}readonly{% endif %}>
+                            <input type="number" id="interest-rate-input" value="{{ "{:,.2f}".format(interest_rate) }}" min="0" max="100" step="0.01" class="interest-rate-input app-control" disabled {% if loan_deleted %}readonly{% endif %}>
                             <small>% APR</small>
                             {% if not loan_deleted %}
                             <button id="edit-interest-rate" class="icon-button ml-2">Edit</button>
@@ -82,7 +80,7 @@
                     <p class="mt-2">
                         Interest Day:
                         <span class="interest-day-container">
-                            <input type="number" id="interest-day" value="{{ interest_day }}" min="1" max="31" class="interest-day-input border border-gray-300 rounded px-2 py-1" disabled {% if loan_deleted %}readonly{% endif %}>
+                            <input type="number" id="interest-day" value="{{ interest_day }}" min="1" max="31" class="interest-day-input app-control" disabled {% if loan_deleted %}readonly{% endif %}>
                             <small>of each month</small>
                             {% if not loan_deleted %}
                             <button id="edit-interest-day" class="icon-button ml-2">Edit</button>
@@ -94,9 +92,9 @@
             </div>
         </div>
         <div class="expected-bills mb-8" id="expected-bills-section" data-baseline-count="{{ (bill_baseline|length) if bill_baseline else 0 }}" data-default-notify-email="{{ default_notify_email or '' }}">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-2">Expected monthly bills</h2>
-                <p class="text-sm text-gray-600 mb-4">Upload a statement to capture likely recurring debits (broader match than import). Uncheck anything that is not a shared bill, set when you want a monthly email reminder, then save. Regular import below will flag differences vs this baseline.</p>
+            <div class="card loan-panel">
+                <h2 class="app-section-title mb-2">Expected monthly bills</h2>
+                <p class="app-section-lead">Upload a statement to capture likely recurring debits (broader match than import). Uncheck anything that is not a shared bill, set when you want a monthly email reminder, then save. Regular import below will flag differences vs this baseline.</p>
                 {% if bill_baseline and bill_baseline|length > 0 %}
                 <p id="baseline-summary" class="text-sm text-gray-800 mb-4">
                     <strong>{{ bill_baseline|length }}</strong> expected bill(s) saved.
@@ -112,11 +110,11 @@
                 {% endif %}
                 {% if not loan_deleted %}
                 <div class="mb-4 max-w-xl">
-                    <label for="baseline-reminder-email" class="block text-gray-700 text-sm font-medium mb-1">Reminder email (optional)</label>
-                    <p class="text-xs text-gray-500 mb-2">Monthly statement reminders are sent here when SMTP is configured. Leave empty to use the server default from the environment.</p>
+                    <label for="baseline-reminder-email" class="import-label">Reminder email (optional)</label>
+                    <p class="spending-hint text-xs mb-2">Monthly statement reminders are sent here when SMTP is configured. Leave empty to use the server default from the environment.</p>
                     <div class="flex flex-wrap gap-2 items-center">
-                        <input type="email" id="baseline-reminder-email" name="baseline_reminder_email" autocomplete="email" placeholder="{{ default_notify_email or 'Uses FINANCE_TRACKER_NOTIFY_EMAIL from server' }}" value="{{ bill_reminder_email }}" class="border border-gray-300 rounded px-3 py-2 flex-1 min-w-[220px] max-w-md">
-                        <button type="button" id="baseline-reminder-email-save-btn" class="hidden bg-gray-700 hover:bg-gray-800 text-white font-semibold py-2 px-4 rounded text-sm">Save email</button>
+                        <input type="email" id="baseline-reminder-email" name="baseline_reminder_email" autocomplete="email" placeholder="{{ default_notify_email or 'Uses FINANCE_TRACKER_NOTIFY_EMAIL from server' }}" value="{{ bill_reminder_email }}" class="app-control flex-1 min-w-[220px] max-w-md">
+                        <button type="button" id="baseline-reminder-email-save-btn" class="hidden app-btn app-btn--muted text-sm">Save email</button>
                     </div>
                 </div>
                 {% if bill_baseline and bill_baseline|length > 0 %}
@@ -124,7 +122,7 @@
                     <h3 class="text-sm font-semibold text-gray-800 mb-2">Saved expected bills</h3>
                     <div class="overflow-x-auto mb-2">
                         <table class="min-w-full divide-y divide-gray-200 text-sm">
-                            <thead class="bg-gray-50">
+                            <thead class="loan-thead">
                                 <tr>
                                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
                                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bank (£)</th>
@@ -160,41 +158,41 @@
                             </tbody>
                         </table>
                     </div>
-                    <button type="button" id="baseline-saved-save-btn" class="hidden bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded text-sm">Save changes</button>
+                    <button type="button" id="baseline-saved-save-btn" class="hidden app-btn app-btn--primary text-sm">Save changes</button>
                 </div>
                 {% endif %}
                 <div id="baseline-merge-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" aria-modal="true" role="dialog" aria-labelledby="baseline-merge-modal-title">
                     <div id="baseline-merge-modal-backdrop" class="absolute inset-0 bg-black opacity-40" aria-hidden="true"></div>
-                    <div class="relative bg-white rounded-lg shadow-xl max-w-md w-full p-6 z-10">
+                    <div class="relative card loan-panel max-w-md w-full p-6 z-10">
                         <h3 id="baseline-merge-modal-title" class="text-lg font-semibold text-gray-900 mb-2">Update expected bills</h3>
-                        <p class="text-sm text-gray-600 mb-4">You already have saved expected bills. How should this statement be used?</p>
+                        <p class="app-section-lead">You already have saved expected bills. How should this statement be used?</p>
                         <div class="flex flex-col gap-2 mb-4">
-                            <button type="button" id="baseline-modal-replace-btn" class="w-full text-left bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium py-3 px-4 rounded border border-gray-200">Replace baseline with this upload</button>
-                            <button type="button" id="baseline-modal-merge-btn" class="w-full text-left bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-medium py-3 px-4 rounded border border-indigo-200">Merge with saved baseline</button>
+                            <button type="button" id="baseline-modal-replace-btn" class="w-full text-left app-btn app-btn--ghost">Replace baseline with this upload</button>
+                            <button type="button" id="baseline-modal-merge-btn" class="w-full text-left app-btn app-btn--primary">Merge with saved baseline</button>
                         </div>
-                        <button type="button" id="baseline-modal-cancel-btn" class="text-sm bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 py-2 px-4 rounded">Cancel</button>
+                        <button type="button" id="baseline-modal-cancel-btn" class="app-btn app-btn--ghost text-sm">Cancel</button>
                     </div>
                 </div>
                 <div id="baseline-import-controls" class="mb-4 flex flex-wrap items-end gap-4">
                     <div>
-                        <label for="baseline-file" class="block text-gray-700 text-sm mb-1">Statement for baseline</label>
-                        <input type="file" id="baseline-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="border border-gray-300 rounded px-3 py-2">
+                        <label for="baseline-file" class="import-label">Statement for baseline</label>
+                        <input type="file" id="baseline-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="app-control">
                     </div>
-                    <button type="button" id="baseline-preview-btn" class="bg-indigo-500 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded">Upload &amp; preview</button>
+                    <button type="button" id="baseline-preview-btn" class="app-btn app-btn--primary">Upload &amp; preview</button>
                 </div>
                 <p id="baseline-preview-status" class="text-sm mb-2" style="display:none;"></p>
                 <div id="baseline-setup-results" style="display:none;">
                     <div class="flex flex-wrap gap-4 mb-4">
                         <div>
-                            <label for="baseline-reminder-day" class="block text-gray-700 text-sm mb-1">Reminder day of month (1–31)</label>
-                            <input type="number" id="baseline-reminder-day" min="1" max="31" value="{{ bill_reminder.day_of_month if bill_reminder and bill_reminder.day_of_month else 1 }}" class="border border-gray-300 rounded px-3 py-2 w-24">
+                            <label for="baseline-reminder-day" class="import-label">Reminder day of month (1–31)</label>
+                            <input type="number" id="baseline-reminder-day" min="1" max="31" value="{{ bill_reminder.day_of_month if bill_reminder and bill_reminder.day_of_month else 1 }}" class="app-control w-24">
                         </div>
-                        <p class="text-xs text-gray-500 self-end pb-2 flex-1 min-w-[200px]">Reminder email is set in the field above.</p>
+                        <p class="spending-hint text-xs self-end pb-2 flex-1 min-w-[200px]">Reminder email is set in the field above.</p>
                     </div>
                     <p id="baseline-period-hint" class="text-sm text-gray-600 mb-2" style="display:none;"></p>
                     <div class="overflow-x-auto mb-4">
                         <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                            <thead class="loan-thead">
                                 <tr>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Include</th>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -208,8 +206,8 @@
                             <tbody id="baseline-candidate-tbody" class="bg-white divide-y divide-gray-200"></tbody>
                         </table>
                     </div>
-                    <button type="button" id="baseline-save-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2">Save expected bills</button>
-                    <button type="button" id="baseline-clear-btn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">Clear</button>
+                    <button type="button" id="baseline-save-btn" class="app-btn app-btn--primary mr-2">Save expected bills</button>
+                    <button type="button" id="baseline-clear-btn" class="app-btn app-btn--muted">Clear</button>
                 </div>
                 {% else %}
                 <p class="text-gray-500">Baseline is disabled for deleted loans.</p>
@@ -217,16 +215,16 @@
             </div>
         </div>
         <div class="statement-import mb-8" id="statement-import-section">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-2">Import from bank statement</h2>
-                <p class="text-sm text-gray-600 mb-4">Upload a PDF, CSV, or text export. The app sends the text to OpenAI to find household bill debits; your share defaults to 50% of each debit. Uncheck any row you do not want, edit amounts if needed, then import.</p>
+            <div class="card loan-panel">
+                <h2 class="app-section-title mb-2">Import from bank statement</h2>
+                <p class="app-section-lead">Upload a PDF, CSV, or text export. The app sends the text to OpenAI to find household bill debits; your share defaults to 50% of each debit. Uncheck any row you do not want, edit amounts if needed, then import.</p>
                 {% if not loan_deleted %}
                 <div id="statement-import-controls" class="mb-4 flex flex-wrap items-end gap-4">
                     <div>
-                        <label for="statement-file" class="block text-gray-700 text-sm mb-1">Statement file</label>
-                        <input type="file" id="statement-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="border border-gray-300 rounded px-3 py-2">
+                        <label for="statement-file" class="import-label">Statement file</label>
+                        <input type="file" id="statement-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="app-control">
                     </div>
-                    <button type="button" id="statement-preview-btn" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Upload &amp; preview</button>
+                    <button type="button" id="statement-preview-btn" class="app-btn app-btn--primary">Upload &amp; preview</button>
                 </div>
                 <p id="statement-preview-status" class="text-sm mb-2" style="display:none;"></p>
                 <p id="statement-truncated-hint" class="text-sm text-amber-800 mb-2" style="display:none;">Statement text was truncated before analysis; check for missing rows.</p>
@@ -239,7 +237,7 @@
                 <div id="statement-import-results" style="display:none;">
                     <div class="overflow-x-auto mb-4">
                         <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                            <thead class="loan-thead">
                                 <tr>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Include</th>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
@@ -251,8 +249,8 @@
                             <tbody id="statement-import-tbody" class="bg-white divide-y divide-gray-200"></tbody>
                         </table>
                     </div>
-                    <button type="button" id="statement-import-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mr-2">Import selected</button>
-                    <button type="button" id="statement-clear-btn" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded">Clear</button>
+                    <button type="button" id="statement-import-btn" class="app-btn app-btn--primary mr-2">Import selected</button>
+                    <button type="button" id="statement-clear-btn" class="app-btn app-btn--muted">Clear</button>
                 </div>
                 {% else %}
                 <p class="text-gray-500">Import is disabled for deleted loans.</p>
@@ -260,34 +258,41 @@
             </div>
         </div>
         <div class="actions mb-8">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-4">Add Transaction</h2>
+            <div class="card loan-panel">
+                <h2 class="app-section-title mb-4">Add Transaction</h2>
                 <form id="transaction-form">
                     <div class="mb-4">
-                        <label for="amount" class="block text-gray-700">Amount (£)</label>
-                        <input type="number" id="amount" step="0.01" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                        <label for="amount" class="import-label">Amount (£)</label>
+                        <input type="number" id="amount" step="0.01" required class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
                     </div>
                     <div class="mb-4">
-                        <label for="type" class="block text-gray-700">Type</label>
-                        <select id="type" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                        <label for="type" class="import-label">Type</label>
+                        <select id="type" required class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
                             <option value="repayment">Repayment</option>
                             <option value="addition">Addition to Loan</option>
                         </select>
                     </div>
                     <div class="mb-4">
-                        <label for="description" class="block text-gray-700">Description</label>
-                        <input type="text" id="description" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                        <label for="description" class="import-label">Description</label>
+                        <input type="text" id="description" required class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
                     </div>
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" {% if loan_deleted %}disabled{% endif %}>Add Transaction</button>
+                    <button type="submit" class="app-btn app-btn--primary" {% if loan_deleted %}disabled{% endif %}>Add Transaction</button>
                 </form>
-                <button id="apply-interest" class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded mt-4" {% if loan_deleted %}disabled{% endif %}>Apply Monthly Interest</button>
+                <button id="apply-interest" class="app-btn app-btn--muted mt-4" {% if loan_deleted %}disabled{% endif %}>Apply Monthly Interest</button>
+                <div class="mt-4 flex flex-wrap items-end gap-3">
+                    <div>
+                        <label for="interest-month" class="import-label">Apply interest for month</label>
+                        <input type="month" id="interest-month" class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
+                    </div>
+                    <button type="button" id="apply-interest-for-month" class="app-btn app-btn--muted" {% if loan_deleted %}disabled{% endif %}>Apply interest for month</button>
+                </div>
             </div>
         </div>
         <div class="recurring-payments mb-8">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-4">Recurring Payments</h2>
+            <div class="card loan-panel">
+                <h2 class="app-section-title mb-4">Recurring Payments</h2>
                 <table id="recurring-payments-table" class="min-w-full divide-y divide-gray-200 mb-4">
-                    <thead class="bg-gray-50">
+                    <thead class="loan-thead">
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Schedule</th>
@@ -305,7 +310,7 @@
                                 <td class="px-6 py-4 whitespace-nowrap">{{ rp.start_date }}</td>
                                 <td class="px-6 py-4 whitespace-nowrap">{{ rp.next_payment_date }}</td>
                                 <td class="px-6 py-4 whitespace-nowrap">
-                                    <button class="delete-recurring-btn bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded" data-id="{{ loop.index0 }}" {% if loan_deleted %}disabled{% endif %}>Delete</button>
+                                    <button class="delete-recurring-btn app-btn app-btn--danger text-sm" data-id="{{ loop.index0 }}" {% if loan_deleted %}disabled{% endif %}>Delete</button>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -316,35 +321,35 @@
                 </table>
                 <form id="recurring-payment-form" class="mt-4">
                     <div class="mb-4">
-                        <label for="recurring-amount" class="block text-gray-700">Amount (£)</label>
-                        <input type="number" id="recurring-amount" step="0.01" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                        <label for="recurring-amount" class="import-label">Amount (£)</label>
+                        <input type="number" id="recurring-amount" step="0.01" required class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
                     </div>
                     <div class="mb-4">
-                        <label for="recurring-schedule" class="block text-gray-700">Schedule</label>
-                        <select id="recurring-schedule" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                        <label for="recurring-schedule" class="import-label">Schedule</label>
+                        <select id="recurring-schedule" required class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
                             <option value="monthly">Monthly</option>
                             <option value="bi-weekly">Bi-Weekly</option>
                             <option value="weekly">Weekly</option>
                         </select>
                     </div>
                     <div class="mb-4">
-                        <label for="recurring-start-date" class="block text-gray-700">Start Date</label>
-                        <input type="date" id="recurring-start-date" required class="w-full border border-gray-300 rounded px-3 py-2 mt-1" {% if loan_deleted %}disabled{% endif %}>
+                        <label for="recurring-start-date" class="import-label">Start Date</label>
+                        <input type="date" id="recurring-start-date" required class="app-control w-full mt-1" {% if loan_deleted %}disabled{% endif %}>
                     </div>
-                    <button type="submit" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" {% if loan_deleted %}disabled{% endif %}>Add Recurring Payment</button>
+                    <button type="submit" class="app-btn app-btn--primary" {% if loan_deleted %}disabled{% endif %}>Add Recurring Payment</button>
                 </form>
             </div>
         </div>
         <div class="transactions">
-            <div class="bg-white rounded shadow p-6">
-                <h2 class="text-xl font-semibold mb-4">Audit Log</h2>
+            <div class="card loan-panel">
+                <h2 class="app-section-title mb-4">Audit Log</h2>
                 <div class="mb-4 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
                     <div class="flex-1 min-w-[12rem]">
-                        <label for="audit-search" class="block text-gray-700 text-sm mb-1">Search</label>
+                        <label for="audit-search" class="import-label">Search</label>
                         <input type="search" id="audit-search" placeholder="Filter by type, amount, description, user…" autocomplete="off" class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
                     </div>
                     <div>
-                        <label for="audit-date-op" class="block text-gray-700 text-sm mb-1">Date filter</label>
+                        <label for="audit-date-op" class="import-label">Date filter</label>
                         <select id="audit-date-op" class="border border-gray-300 rounded px-3 py-2 text-sm bg-white">
                             <option value="">Any date</option>
                             <option value="lt">Before (&lt;)</option>
@@ -354,22 +359,22 @@
                         </select>
                     </div>
                     <div id="audit-date-single-wrap" class="audit-date-input-group">
-                        <label for="audit-date-single" class="block text-gray-700 text-sm mb-1">Date</label>
+                        <label for="audit-date-single" class="import-label">Date</label>
                         <input type="date" id="audit-date-single" class="border border-gray-300 rounded px-3 py-2 text-sm">
                     </div>
                     <div id="audit-date-between-wrap" class="audit-date-input-group hidden flex flex-wrap gap-3 items-end">
                         <div>
-                            <label for="audit-date-start" class="block text-gray-700 text-sm mb-1">From</label>
+                            <label for="audit-date-start" class="import-label">From</label>
                             <input type="date" id="audit-date-start" class="border border-gray-300 rounded px-3 py-2 text-sm">
                         </div>
                         <div>
-                            <label for="audit-date-end" class="block text-gray-700 text-sm mb-1">To</label>
+                            <label for="audit-date-end" class="import-label">To</label>
                             <input type="date" id="audit-date-end" class="border border-gray-300 rounded px-3 py-2 text-sm">
                         </div>
                     </div>
                 </div>
                 <table id="transactions-table" class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
+                    <thead class="loan-thead">
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                             <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>

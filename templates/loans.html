@@ -9,22 +9,38 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="app-page">
-    <div class="container">
-        <header class="app-header">
-            <div class="app-header-left">
-                <a href="/" class="app-brand">Finance Tracker</a>
-                {% with active='loans' %}{% include 'partials/app_nav.html' %}{% endwith %}
+    <div class="app-shell">
+        {% with active='loans' %}{% include 'partials/app_header.html' %}{% endwith %}
+
+        <section class="home-spotlight loans-spotlight" aria-label="Loans overview">
+            <div class="money-hero loan-money-hero">
+                <p class="money-hero-kicker">Loans</p>
+                <p class="money-hero-label">Outstanding</p>
+                {% if loan_count %}
+                <p class="money-hero-value">£{{ "{:,.2f}".format(loan_total) }}</p>
+                <p class="money-hero-meta">{{ loan_count }} active loan{% if loan_count != 1 %}s{% endif %}</p>
+                {% else %}
+                <p class="money-hero-value money-hero-value--prompt">No loans yet</p>
+                <p class="money-hero-meta">Add a loan to track balances and repayments</p>
+                {% endif %}
             </div>
-            <div class="app-header-right">
-                <span class="app-session">Signed in as {{ username }}</span>
-                <a href="/logout" class="app-btn app-btn--muted">Logout</a>
+            <div class="home-spotlight-side">
+                <div class="glass-stat">
+                    <span class="glass-stat-label">Active</span>
+                    <span class="glass-stat-value">{{ loan_count }}</span>
+                    <span class="glass-stat-meta">Open balances</span>
+                </div>
+                <button type="button" id="add-loan" class="glass-stat loans-add-tile">
+                    <span class="glass-stat-label">New</span>
+                    <span class="glass-stat-value">Add loan</span>
+                    <span class="glass-stat-meta">Name, amount, rate</span>
+                </button>
             </div>
-        </header>
+        </section>
 
         <div class="app-surface loans-list">
             <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
-                <h2 class="mb-0">Active Loans</h2>
-                <button type="button" id="add-loan" class="app-btn app-btn--primary">Add New Loan</button>
+                <h2 class="app-section-title mb-0">All loans</h2>
             </div>
             <div class="overflow-x-auto">
                 <table id="loans-table" class="app-table">
@@ -45,7 +61,7 @@
                                     <span class="app-badge">Deleted</span>
                                 {% endif %}
                             </td>
-                            <td class="{{ 'text-red-600' if loan.current_balance > 0 else '' }}">
+                            <td class="{{ 'text-warn' if loan.current_balance > 0 else '' }}">
                                 £{{ "{:,.2f}".format(loan.current_balance) }}
                             </td>
                             <td>£{{ "{:,.2f}".format(loan.total_loan_quantity) }}</td>
@@ -59,19 +75,19 @@
 
         <div id="add-loan-modal" class="fixed inset-0 flex items-center justify-center app-modal-backdrop z-50" style="display: none;">
             <div class="app-modal p-8 w-full max-w-md fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                <h2>Add New Loan</h2>
+                <h2 class="app-section-title">Add New Loan</h2>
                 <form id="new-loan-form" class="space-y-4">
                     <div>
-                        <label for="loan-name">Loan Name</label>
-                        <input type="text" id="loan-name" required>
+                        <label for="loan-name" class="import-label">Loan Name</label>
+                        <input type="text" id="loan-name" class="app-control w-full" required>
                     </div>
                     <div>
-                        <label for="loan-amount">Initial Amount (£)</label>
-                        <input type="number" id="loan-amount" step="0.01" required>
+                        <label for="loan-amount" class="import-label">Initial Amount (£)</label>
+                        <input type="number" id="loan-amount" class="app-control w-full" step="0.01" required>
                     </div>
                     <div>
-                        <label for="loan-interest-rate">Interest Rate (%)</label>
-                        <input type="number" id="loan-interest-rate" step="0.01" min="0" max="100" required>
+                        <label for="loan-interest-rate" class="import-label">Interest Rate (%)</label>
+                        <input type="number" id="loan-interest-rate" class="app-control w-full" step="0.01" min="0" max="100" required>
                     </div>
                     <div class="flex justify-end gap-2 pt-2">
                         <button type="button" class="app-btn app-btn--ghost" onclick="closeModal()">Cancel</button>

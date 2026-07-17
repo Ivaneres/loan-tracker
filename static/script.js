@@ -85,6 +85,8 @@ document.addEventListener('DOMContentLoaded', function() {
         transactionFormMobile: document.getElementById('transaction-form-mobile'),
         applyInterestButton: document.getElementById('apply-interest'),
         applyInterestButtonMobile: document.getElementById('apply-interest-mobile'),
+        interestMonthInput: document.getElementById('interest-month'),
+        applyInterestForMonthButton: document.getElementById('apply-interest-for-month'),
         deleteLoanButton: document.getElementById('deleteLoanBtn'),
         deleteLoanButtonMobile: document.getElementById('deleteLoanBtnMobile'),
         recurringPaymentForm: document.getElementById('recurring-payment-form'),
@@ -377,8 +379,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function applyMonthlyInterest() {
         try {
-            const response = await fetch(`/api/loan/${loanId}/apply_interest`, { method: 'POST' });
+            const response = await fetch(`/api/loan/${loanId}/apply_interest`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
             const data = await response.json();
+            if (!response.ok) {
+                alert(data.error || 'Failed to apply interest');
+                return;
+            }
             updateUI(data);
         } catch (error) {
             console.error('Error:', error);
@@ -389,6 +399,44 @@ document.addEventListener('DOMContentLoaded', function() {
     [el.applyInterestButton, el.applyInterestButtonMobile].forEach((button) => {
         if (button) button.addEventListener('click', applyMonthlyInterest);
     });
+
+    if (el.interestMonthInput) {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        el.interestMonthInput.value = `${yyyy}-${mm}`;
+    }
+
+    async function applyInterestForMonth() {
+        const value = el.interestMonthInput?.value;
+        if (!value || !/^\d{4}-\d{2}$/.test(value)) {
+            alert('Choose a month first');
+            return;
+        }
+        const [yearStr, monthStr] = value.split('-');
+        const year = parseInt(yearStr, 10);
+        const month = parseInt(monthStr, 10);
+        try {
+            const response = await fetch(`/api/loan/${loanId}/apply_interest`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ year, month })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error || 'Failed to apply interest');
+                return;
+            }
+            updateUI(data);
+        } catch (error) {
+            console.error('Error:', error);
+            alert('Failed to apply interest');
+        }
+    }
+
+    if (el.applyInterestForMonthButton) {
+        el.applyInterestForMonthButton.addEventListener('click', applyInterestForMonth);
+    }
 
     async function deleteOrRecoverLoan(button) {
         const isRecovering = button.textContent.trim() === 'Recover Loan';

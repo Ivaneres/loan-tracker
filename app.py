@@ -3320,6 +3320,48 @@ def should_apply_interest(target_day):
     last_day_of_month = monthrange(today.year, today.month)[1]
     return today.day == last_day_of_month
 
+
+def resolve_interest_as_of_date(year, month, interest_day):
+    """Return the interest date for a month, clamping interest_day to the month length."""
+    year = int(year)
+    month = int(month)
+    interest_day = int(interest_day)
+    if not (1 <= month <= 12):
+        raise ValueError(f'Invalid month: {month}')
+    if interest_day < 1:
+        raise ValueError(f'Invalid interest day: {interest_day}')
+    last_day = monthrange(year, month)[1]
+    return date(year, month, min(interest_day, last_day))
+
+
+def loan_balance_as_of_end_of_day(transactions, as_of_date):
+    """Sum transaction amounts with date <= as_of (end-of-day balance before a new interest row)."""
+    if isinstance(as_of_date, date):
+        as_of_str = as_of_date.strftime('%Y-%m-%d')
+    else:
+        as_of_str = str(as_of_date)
+    total = 0.0
+    for tx in transactions or []:
+        tx_date = str(tx.get('date') or '')
+        if tx_date and tx_date <= as_of_str:
+            total += float(tx.get('amount') or 0)
+    return total
+
+
+def interest_applied_in_month(transactions, year, month):
+    """True if any interest transaction falls in the given calendar year/month."""
+    prefix = f'{int(year):04d}-{int(month):02d}'
+    for tx in transactions or []:
+        if tx.get('type') == 'interest' and str(tx.get('date') or '').startswith(prefix):
+            return True
+    return False
+
+
+def compute_monthly_interest_amount(balance, rate):
+    """Simple APR/12 monthly interest, rounded to 2 decimal places."""
+    return round((float(balance) * (float(rate) / 100)) / 12, 2)
+
+
 def apply_monthly_interest(loan_id):
     data = load_data()
     if loan_id not in data['loans']:
@@ -3330,15 +3372,18 @@ def apply_monthly_interest(loan_id):
     
     if not should_apply_interest(target_day):
         return  # Skip if not the correct day
+
+    today = date.today()
+    if interest_applied_in_month(loan.get('transactions'), today.year, today.month):
+        return  # Already applied for this calendar month
     
     current_amount = loan['loan_amount']
     rate = loan['interest_rate']
     
-    # Calculate monthly interest
-    monthly_interest = (current_amount * (rate / 100)) / 12
+    monthly_interest = compute_monthly_interest_amount(current_amount, rate)
     
     new_transaction = {
-        'date': datetime.now().strftime('%Y-%m-%d'),
+        'date': today.strftime('%Y-%m-%d'),
         'type': 'interest',
         'amount': monthly_interest,
         'description': f'Monthly interest at {rate}% APR (automated)',
@@ -4683,18 +4728,92 @@ def logout():
 @login_required
 def index():
     data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+
+    daily = _daily_budget_status(spending)
+    plan_figures = daily.get('plan') or {}
+    daily_has_plan = float(plan_figures.get('income_monthly') or 0) > 0
+
+    insight_map = spending.get('monthly_insights') or {}
+    months = sorted(insight_map.keys(), reverse=True)
+    latest_month = months[0] if months else None
+    latest_insight = insight_map.get(latest_month) if latest_month else None
+    latest_net = 0.0
+    latest_savings_rate = None
+    if isinstance(latest_insight, dict):
+        try:
+            latest_net = float(latest_insight.get('net') or 0)
+        except (TypeError, ValueError):
+            latest_net = 0.0
+        try:
+            sr = latest_insight.get('savings_rate')
+            latest_savings_rate = float(sr) if sr is not None else None
+        except (TypeError, ValueError):
+            latest_savings_rate = None
+
+    loans = data.get('loans') or {}
+    active_loans = [loan for loan in loans.values() if not loan.get('deleted')]
+    loan_count = len(active_loans)
+    loan_total = 0.0
+    for loan in active_loans:
+        try:
+            loan_total += float(loan.get('loan_amount') or 0)
+        except (TypeError, ValueError):
+            pass
+    loan_total = round(loan_total, 2)
+
+    statements = list(spending.get('statements') or [])
+    statements.sort(key=lambda s: str(s.get('uploaded_at') or ''), reverse=True)
+    recent_statements = statements[:8]
+
+    return render_template(
+        'home.html',
+        username=session.get('username'),
+        spending_categories=SPENDING_ALLOWED_CATEGORIES,
+        daily_has_plan=daily_has_plan,
+        daily_remaining=float(daily.get('remaining_today') or 0),
+        daily_limit=float(daily.get('daily_limit') or 0),
+        daily_spent=float(daily.get('spent_today') or 0),
+        latest_month=latest_month,
+        latest_net=latest_net,
+        latest_savings_rate=latest_savings_rate,
+        loan_count=loan_count,
+        loan_total=loan_total,
+        recent_statements=recent_statements,
+    )
+
+
+@app.route('/loans')
+@login_required
+def loans_list():
+    data = load_data()
     loans_summary = []
+    loan_total = 0.0
+    active_count = 0
     for loan_id, loan in data['loans'].items():
         total_loan_quantity, total_paid = calculate_loan_stats(loan['transactions'])
+        deleted = loan.get('deleted', False)
+        balance = float(loan['loan_amount'] or 0)
+        if not deleted:
+            active_count += 1
+            loan_total += balance
         loans_summary.append({
             'id': loan_id,
             'name': loan['name'],
             'current_balance': loan['loan_amount'],
             'total_loan_quantity': total_loan_quantity,
             'total_paid': total_paid,
-            'deleted': loan.get('deleted', False)
+            'deleted': deleted
         })
-    return render_template('loans.html', loans=loans_summary, username=session.get('username'))
+    return render_template(
+        'loans.html',
+        loans=loans_summary,
+        username=session.get('username'),
+        loan_count=active_count,
+        loan_total=round(loan_total, 2),
+    )
 
 
 @app.route('/spending')
@@ -4734,7 +4853,7 @@ def daily_budget_tab():
 def loan_details(loan_id):
     data = load_data()
     if loan_id not in data['loans']:
-        return redirect(url_for('index'))
+        return redirect(url_for('loans_list'))
     
     loan = data['loans'][loan_id]
     total_loan_quantity, total_paid = calculate_loan_stats(loan['transactions'])
@@ -4887,29 +5006,66 @@ def add_transaction(loan_id):
     return jsonify(loan)
 
 @app.route('/api/loan/<loan_id>/apply_interest', methods=['POST'])
+@login_required
 def apply_interest(loan_id):
     data = load_data()
     if loan_id not in data['loans']:
         return jsonify({'error': 'Loan not found'}), 404
-    
+
     loan = data['loans'][loan_id]
-    current_amount = loan['loan_amount']
+    if loan.get('deleted'):
+        return jsonify({'error': 'Loan is deleted'}), 400
+
+    body = request.get_json(silent=True) or {}
+    year = body.get('year')
+    month = body.get('month')
     rate = loan['interest_rate']
-    
-    # Calculate monthly interest
-    monthly_interest = (current_amount * (rate / 100)) / 12
-    
-    new_transaction = {
-        'date': datetime.now().strftime('%Y-%m-%d'),
-        'type': 'interest',
-        'amount': monthly_interest,
-        'description': f'Monthly interest at {rate}% APR',
-        'user': session['username']
-    }
-    
+    username = session['username']
+
+    if year is not None or month is not None:
+        if year is None or month is None:
+            return jsonify({'error': 'Both year and month are required'}), 400
+        try:
+            year = int(year)
+            month = int(month)
+            as_of = resolve_interest_as_of_date(year, month, loan.get('interest_day', 1))
+        except (TypeError, ValueError) as e:
+            return jsonify({'error': str(e) or 'Invalid year or month'}), 400
+
+        if interest_applied_in_month(loan.get('transactions'), year, month):
+            return jsonify({
+                'error': f'Interest has already been applied for {year:04d}-{month:02d}'
+            }), 400
+
+        balance = loan_balance_as_of_end_of_day(loan.get('transactions'), as_of)
+        monthly_interest = compute_monthly_interest_amount(balance, rate)
+        as_of_str = as_of.strftime('%Y-%m-%d')
+        new_transaction = {
+            'date': as_of_str,
+            'type': 'interest',
+            'amount': monthly_interest,
+            'description': f'Monthly interest at {rate}% APR (as of {as_of_str})',
+            'user': username,
+        }
+    else:
+        today = date.today()
+        if interest_applied_in_month(loan.get('transactions'), today.year, today.month):
+            return jsonify({
+                'error': f'Interest has already been applied for {today.year:04d}-{today.month:02d}'
+            }), 400
+
+        monthly_interest = compute_monthly_interest_amount(loan['loan_amount'], rate)
+        new_transaction = {
+            'date': today.strftime('%Y-%m-%d'),
+            'type': 'interest',
+            'amount': monthly_interest,
+            'description': f'Monthly interest at {rate}% APR',
+            'user': username,
+        }
+
     loan['transactions'].append(new_transaction)
     loan['loan_amount'] += monthly_interest
-    
+
     save_data(data)
     return jsonify(loan)
 

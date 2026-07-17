@@ -725,8 +725,8 @@ document.addEventListener('DOMContentLoaded', () => {
     /** @type {object|null} */
     let lastSavingsAdviceData = null;
     const CHART_STACK_COLORS = [
-        '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#64748b',
-        '#0d9488', '#ca8a04', '#4f46e5', '#b45309', '#0e7490', '#9d174d', '#3f6212', '#1e3a8a',
+        '#0d7a62', '#065f4c', '#2a9d8f', '#5c6f6a', '#c2410c', '#1e3a8a',
+        '#0e7490', '#3f6212', '#b45309', '#4f46e5', '#9d174d', '#64748b', '#0f1c1a', '#14b8a6',
     ];
 
     function labelForStackCategoryKey(key) {
@@ -939,8 +939,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         {
                             label: 'Net',
                             data: net,
-                            borderColor: '#1d4ed8',
-                            backgroundColor: 'rgba(29, 78, 216, 0.12)',
+                            borderColor: '#0d7a62',
+                            backgroundColor: 'rgba(13, 122, 98, 0.12)',
                             borderWidth: 2,
                             fill: false,
                             tension: 0.2,
@@ -1250,6 +1250,11 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (importBtn) importBtn.disabled = true;
         spendingPreviewLedgerFps = null;
+        const homeNext = document.getElementById('home-import-next');
+        if (homeNext) {
+            homeNext.classList.add('hidden');
+            homeNext.innerHTML = '';
+        }
     }
 
     function fillPipelinePre(el, previewObj) {
@@ -2021,6 +2026,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (insightEmpty) insightEmpty.classList.add('hidden');
             if (insightContent) insightContent.classList.remove('hidden');
 
+            const heroKicker = document.getElementById('spending-hero-kicker');
+            if (heroKicker) heroKicker.textContent = month;
+
             const kpiNote = document.getElementById('kpi-exclude-note');
             if (kpiNote) {
                 kpiNote.classList.remove('hidden');
@@ -2229,7 +2237,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 setStatus(msg, false);
                 clearPreview();
-                await loadMonths(data.report_month || (data.months && data.months.length ? data.months[0] : null));
+                const homeNext = document.getElementById('home-import-next');
+                const reportMonth = data.report_month || (data.months && data.months.length ? data.months[0] : null);
+                if (homeNext && reportMonth) {
+                    homeNext.classList.remove('hidden');
+                    homeNext.innerHTML =
+                        `Imported into <strong>${reportMonth}</strong>. ` +
+                        `<a href="/spending?month=${encodeURIComponent(reportMonth)}">Open Monthly insights</a>` +
+                        `<a href="/spending/daily">Update Daily plan</a>`;
+                }
+                if (monthSelect) {
+                    await loadMonths(reportMonth);
+                }
             } catch (e) {
                 setStatus(e.message || 'Import failed', true);
             } finally {
@@ -2519,5 +2538,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    loadMonths(null);
+    const initialMonth = (() => {
+        try {
+            const q = new URLSearchParams(window.location.search).get('month');
+            return q || null;
+        } catch (e) {
+            return null;
+        }
+    })();
+    if (monthSelect) {
+        loadMonths(initialMonth);
+    }
 });

@@ -8,77 +8,70 @@
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body class="spending-page min-h-screen">
-    <div class="spending-shell container mx-auto py-6 px-4 sm:px-6">
-        <header class="spending-header mb-6">
-            <div class="spending-header-inner max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
-                <div class="flex flex-wrap items-center gap-4 lg:gap-6">
-                    <a href="/" class="app-brand">Finance Tracker</a>
-                    {% with active='spending' %}{% include 'partials/app_nav.html' %}{% endwith %}
-                </div>
-                <div class="flex items-center gap-2 flex-wrap">
-                    <a href="#spending-insights" class="spending-skip text-sm">Insights</a>
-                    <span style="color: var(--line);" aria-hidden="true">|</span>
-                    <a href="#spending-import" class="spending-skip text-sm">Import</a>
-                </div>
-                <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
-                    <span class="app-session">Signed in as {{ username }}</span>
-                    <a href="/logout" class="app-btn app-btn--muted">Logout</a>
-                </div>
-            </div>
-        </header>
+<body class="app-page spending-page min-h-screen">
+    <div class="app-shell">
+        {% with active='spending' %}{% include 'partials/app_header.html' %}{% endwith %}
+
+        <p class="spending-sub text-sm mb-4">
+            <a href="/#import" class="spending-skip">Import statements on Home</a>
+            to refresh insights for a month.
+        </p>
 
         <section id="spending-insights" class="spending-section card spending-section--insights mb-8" tabindex="-1">
-            <div class="mb-4 flex flex-wrap justify-between items-end gap-4">
+            <div class="mb-4 spending-toolbar">
                 <div>
                     <h2 class="spending-h2">This month</h2>
                     <p class="spending-sub text-sm">Budget snapshot and trends from your imported statements.</p>
                 </div>
-                <div class="flex flex-wrap items-end gap-2">
-                    <div>
-                        <label for="insight-month-select" class="block text-sm mb-1" style="color: var(--text-color);">Month</label>
-                        <select id="insight-month-select" class="spending-control min-w-[180px]" title="Select reporting month for insights">
+                <div class="spending-toolbar-controls">
+                    <div class="spending-toolbar-month">
+                        <label for="insight-month-select" class="import-label">Month</label>
+                        <select id="insight-month-select" class="spending-control" title="Select reporting month for insights">
                             <option value="">No data yet</option>
                             {% for month in months %}
                             <option value="{{ month }}">{{ month }}</option>
                             {% endfor %}
                         </select>
                     </div>
-                    <button type="button" id="recategorize-month-btn" class="spending-btn spending-btn--teal text-sm py-2 px-3 disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Re-run AI categorisation for outgoing lines in this month (manual overrides are kept)">Re-run categorisation</button>
-                    <button type="button" id="recompute-insights-btn" class="spending-btn spending-btn--muted text-sm py-2 px-3 disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Recalculate all monthly figures (KPIs, charts, budget hints) from your stored transactions. Use if numbers look stale after an app update.">Recompute insights</button>
-                    <button type="button" id="delete-month-btn" class="spending-btn spending-btn--danger text-sm py-2 px-3 disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Remove all transactions and insights for the selected month">Delete month</button>
+                    <div class="spending-toolbar-actions">
+                        <button type="button" id="recategorize-month-btn" class="spending-btn spending-btn--primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Re-run AI categorisation for outgoing lines in this month (manual overrides are kept)">Re-run categorisation</button>
+                        <button type="button" id="recompute-insights-btn" class="spending-btn spending-btn--muted text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Recalculate all monthly figures (KPIs, charts, budget hints) from your stored transactions. Use if numbers look stale after an app update.">Recompute insights</button>
+                        <button type="button" id="delete-month-btn" class="spending-btn spending-btn--danger text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Remove all transactions and insights for the selected month">Delete month</button>
+                    </div>
                 </div>
             </div>
             <p id="insight-action-status" role="status" aria-live="polite" class="hidden text-sm mt-0 mb-3 rounded-md px-3 py-2 border"></p>
 
-            <div id="insight-empty" class="text-sm spending-muted">No monthly insights yet. Import a statement in the section below to get started.</div>
+            <div id="insight-empty" class="text-sm spending-muted">No monthly insights yet. <a href="/#import" class="spending-skip">Import a statement on Home</a> to get started.</div>
             <div id="insight-content" class="hidden">
                 <p id="kpi-exclude-note" class="spending-hint text-xs mb-3 hidden">Income and outgoing above exclude internal transfers (paired legs) and lines you mark <strong>Exclude from totals</strong> in the month list.</p>
 
-                <p id="kpi-mom-summary" class="spending-mom-line text-sm mb-2 hidden" role="status"></p>
-                <p id="kpi-trailing-line" class="spending-trailing text-sm mb-4 hidden" style="color: var(--text-color); opacity: 0.88;"></p>
-
-                <div class="spending-kpi-grid mb-6">
-                    <div class="spending-metric spending-metric--income">
-                        <div class="spending-metric__label">Income</div>
-                        <div id="kpi-income" class="spending-metric__value tabular-nums">£0.00</div>
-                        <p id="kpi-income-delta" class="spending-metric__delta hidden" aria-label="Change vs last month"></p>
+                <div class="home-spotlight spending-spotlight mb-6">
+                    <div class="money-hero spending-money-hero">
+                        <p class="money-hero-kicker" id="spending-hero-kicker">This month</p>
+                        <p class="money-hero-label">Net</p>
+                        <p class="money-hero-value" id="kpi-net">£0.00</p>
+                        <p id="kpi-net-delta" class="money-hero-delta spending-metric__delta hidden" aria-label="Change vs last month"></p>
+                        <p id="kpi-mom-summary" class="money-hero-meta spending-mom-line text-sm hidden" role="status"></p>
+                        <p id="kpi-trailing-line" class="money-hero-meta spending-trailing text-sm hidden"></p>
                     </div>
-                    <div class="spending-metric spending-metric--outgoing">
-                        <div class="spending-metric__label">Outgoing</div>
-                        <div id="kpi-outgoing" class="spending-metric__value tabular-nums">£0.00</div>
-                        <p id="kpi-outgoing-delta" class="spending-metric__delta hidden" aria-label="Change vs last month"></p>
-                    </div>
-                    <div class="spending-metric spending-metric--net">
-                        <div class="spending-metric__label">Net</div>
-                        <div id="kpi-net" class="spending-metric__value tabular-nums">£0.00</div>
-                        <p id="kpi-net-delta" class="spending-metric__delta hidden" aria-label="Change vs last month"></p>
-                    </div>
-                    <div class="spending-metric spending-metric--savings">
-                        <div class="spending-metric__label">Savings rate</div>
-                        <div id="kpi-savings-rate" class="spending-metric__value tabular-nums">—</div>
-                        <p id="kpi-savings-sub" class="spending-metric__sub text-xs hidden"></p>
-                        <p id="kpi-savings-delta" class="spending-metric__delta hidden" aria-label="Savings rate change"></p>
+                    <div class="home-spotlight-side">
+                        <div class="glass-stat spending-metric spending-metric--income">
+                            <span class="glass-stat-label">Income</span>
+                            <span id="kpi-income" class="glass-stat-value tabular-nums">£0.00</span>
+                            <p id="kpi-income-delta" class="spending-metric__delta hidden" aria-label="Change vs last month"></p>
+                        </div>
+                        <div class="glass-stat spending-metric spending-metric--outgoing">
+                            <span class="glass-stat-label">Outgoing</span>
+                            <span id="kpi-outgoing" class="glass-stat-value tabular-nums">£0.00</span>
+                            <p id="kpi-outgoing-delta" class="spending-metric__delta hidden" aria-label="Change vs last month"></p>
+                        </div>
+                        <div class="glass-stat spending-metric spending-metric--savings">
+                            <span class="glass-stat-label">Savings rate</span>
+                            <span id="kpi-savings-rate" class="glass-stat-value tabular-nums">—</span>
+                            <p id="kpi-savings-sub" class="glass-stat-meta spending-metric__sub hidden"></p>
+                            <p id="kpi-savings-delta" class="spending-metric__delta hidden" aria-label="Savings rate change"></p>
+                        </div>
                     </div>
                 </div>
 
@@ -96,7 +89,7 @@
                     <p class="spending-hint text-xs mb-1">Suggestions using this month and recent months&rsquo; trends &mdash; not personalised financial advice.</p>
                     <p id="savings-coach-hint" class="spending-hint text-xs mb-2">Sends that month&rsquo;s insights, individual transaction lines (capped) for the selected month, a small line-item sample for recent prior months, and multi-month trend totals. Data is sent to the configured AI.</p>
                     <div class="flex flex-wrap gap-2 items-center mb-2">
-                        <button type="button" id="savings-coach-generate-btn" class="spending-btn spending-btn--teal text-sm py-2 px-3" disabled>Generate ideas</button>
+                        <button type="button" id="savings-coach-generate-btn" class="spending-btn spending-btn--primary text-sm py-2 px-3" disabled>Generate ideas</button>
                         <button type="button" id="savings-coach-regenerate-btn" class="spending-btn spending-btn--muted text-sm py-2 px-3 hidden" disabled>Regenerate</button>
                     </div>
                     <p id="savings-coach-status" class="savings-coach-status text-sm hidden mb-2" role="status" aria-live="polite"></p>
@@ -150,13 +143,13 @@
                     <div id="spending-chart-sr" class="sr-only"></div>
                 </div>
 
-                <div id="transfer-reconciliation-panel" class="spending-recon hidden border rounded-lg p-4 mb-6 text-sm" style="border-color: var(--border-color); background: rgba(37, 99, 235, 0.06);">
+                <div id="transfer-reconciliation-panel" class="spending-recon hidden border rounded-lg p-4 mb-6 text-sm" style="border-color: var(--line); background: rgba(13, 122, 98, 0.07);">
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <h3 class="font-semibold" style="color: var(--text-color);">Internal transfer reconciliation</h3>
                             <p id="transfer-reconciliation-summary" class="mt-1" style="color: var(--text-color);"></p>
                         </div>
-                        <button type="button" id="reapply-pair-btn" class="spending-btn spending-btn--indigo text-sm py-2 px-3 shrink-0">Re-run auto matching</button>
+                        <button type="button" id="reapply-pair-btn" class="spending-btn spending-btn--primary text-sm py-2 px-3 shrink-0">Re-run auto matching</button>
                     </div>
                 </div>
 
@@ -310,74 +303,6 @@
                         </table>
                     </div>
                 </div>
-            </div>
-        </section>
-
-        <section id="spending-import" class="spending-section card spending-section--import" tabindex="-1">
-            <h2 class="spending-h2">Import a statement</h2>
-            <p class="spending-sub text-sm mb-4">Upload PDF, CSV, or TXT. Set the stats month and date range. Only lines in that range are kept. Import multiple files if you use several banks.</p>
-            <p class="spending-hint text-xs mb-4">After import, the app can auto-match internal transfers. Use <strong>Re-run auto matching</strong> or <strong>Unlink</strong> in insights if something looks off. For messy PDFs, try your bank&rsquo;s <strong>CSV</strong> export when possible.</p>
-            <div class="flex flex-wrap gap-4 items-end mb-4">
-                <div>
-                    <label for="report-period-month" class="block text-sm mb-1" style="color: var(--text-color);">Stats month</label>
-                    <input id="report-period-month" type="month" class="spending-control" />
-                </div>
-                <div>
-                    <label for="period-start" class="block text-sm mb-1" style="color: var(--text-color);">Period start</label>
-                    <input id="period-start" type="date" class="spending-control" />
-                </div>
-                <div>
-                    <label for="period-end" class="block text-sm mb-1" style="color: var(--text-color);">Period end</label>
-                    <input id="period-end" type="date" class="spending-control" />
-                </div>
-                <button type="button" id="period-reset-btn" class="spending-btn spending-btn--muted text-sm py-2 px-3">Reset range from month</button>
-            </div>
-            <div class="flex flex-wrap gap-3 items-end">
-                <div>
-                    <label for="spending-file" class="block text-sm mb-1" style="color: var(--text-color);">Statement file</label>
-                    <input id="spending-file" type="file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="spending-control" />
-                </div>
-                <button id="spending-preview-btn" class="spending-btn spending-btn--primary">Upload &amp; preview</button>
-                <button id="spending-import-btn" class="spending-btn spending-btn--ok" disabled>Import selected</button>
-                <button id="spending-clear-btn" class="spending-btn spending-btn--muted">Clear</button>
-            </div>
-            <p id="spending-status" class="text-sm mt-3 hidden"></p>
-            <div id="spending-preview-summary" class="text-sm mt-2 hidden" style="color: var(--text-color);"></div>
-            <details id="spending-pipeline-panel" class="mt-4 border rounded-lg p-3 text-sm hidden" style="border-color: var(--border-color); background: var(--background-color);">
-                <summary class="cursor-pointer font-medium select-none" style="color: var(--text-color);">How this file was read (intermediate representations)</summary>
-                <p id="spending-pipeline-summary" class="mt-2 text-xs leading-relaxed spending-muted"></p>
-                <p id="spending-pipeline-note" class="mt-1 text-xs italic hidden"></p>
-                <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div>
-                        <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Extracted text</div>
-                        <pre id="spending-pipeline-extract" class="text-xs p-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
-                    </div>
-                    <div>
-                        <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Layout column hints (PDF only)</div>
-                        <pre id="spending-pipeline-hints" class="text-xs p-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
-                    </div>
-                </div>
-                <div class="mt-3">
-                    <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Direction hints from geometry (sample)</div>
-                    <pre id="spending-pipeline-direction" class="text-xs p-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
-                </div>
-            </details>
-            <div id="spending-preview-wrap" class="overflow-x-auto mt-4 hidden">
-                <table class="min-w-full text-sm" style="border-color: var(--border-color);">
-                    <thead style="background: var(--background-color);">
-                        <tr>
-                            <th class="px-3 py-2 text-left">Include</th>
-                            <th class="px-3 py-2 text-left">Duplicate <span class="text-gray-400 font-normal text-xs">(import)</span></th>
-                            <th class="px-3 py-2 text-left">Date</th>
-                            <th class="px-3 py-2 text-left">Description</th>
-                            <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
-                            <th class="px-3 py-2 text-left">Amount (£)</th>
-                            <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
-                            <th class="px-3 py-2 text-left">Category</th>
-                        </tr>
-                    </thead>
-                    <tbody id="spending-preview-tbody" class="bg-white"></tbody>
-                </table>
             </div>
         </section>
     </div>
