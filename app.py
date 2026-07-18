@@ -1319,15 +1319,21 @@ def _classify_outgoing_descriptions_llm(descriptions: list[str]) -> dict:
         'confidence must be between 0 and 1.'
     )
     user_msg = 'Descriptions:\n' + '\n'.join(f'- {d}' for d in descriptions[:150])
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user_msg},
-        ],
-        response_format={'type': 'json_object'},
-        temperature=0.1,
-    )
+    try:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user_msg},
+            ],
+            response_format={'type': 'json_object'},
+            temperature=0.1,
+        )
+    except Exception as e:
+        # Timeout / connection / API error: don't crash the import. Callers
+        # fall back to the 'other' category for anything left unclassified.
+        logger.warning('outgoing classification LLM call failed: %s', e)
+        return {}
     raw = completion.choices[0].message.content or '{}'
     parsed, jerr = _parse_llm_json_object(raw, context='spending_classify')
     if jerr:
@@ -3433,6 +3439,27 @@ def calculate_loan_stats(transactions):
     return total_loan_quantity, total_paid
 
 
+def _openai_timeout_seconds() -> float:
+    """Per-request OpenAI timeout. Kept below the gunicorn worker timeout so a
+    hung upstream connection surfaces as a handled error instead of the worker
+    being force-killed (WORKER TIMEOUT / SystemExit)."""
+    raw = os.getenv('OPENAI_TIMEOUT', '').strip()
+    try:
+        val = float(raw) if raw else 25.0
+    except ValueError:
+        val = 25.0
+    return val if val > 0 else 25.0
+
+
+def _openai_max_retries() -> int:
+    raw = os.getenv('OPENAI_MAX_RETRIES', '').strip()
+    try:
+        val = int(raw) if raw else 2
+    except ValueError:
+        val = 2
+    return max(0, val)
+
+
 def _get_openai_client():
     if OpenAI is None:
         return None
@@ -3440,7 +3467,11 @@ def _get_openai_client():
     if not api_key:
         return None
     base_url = os.getenv('OPENAI_BASE_URL', '').strip() or None
-    kwargs = {'api_key': api_key}
+    kwargs = {
+        'api_key': api_key,
+        'timeout': _openai_timeout_seconds(),
+        'max_retries': _openai_max_retries(),
+    }
     if base_url:
         kwargs['base_url'] = base_url
     return OpenAI(**kwargs)
