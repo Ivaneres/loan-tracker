@@ -132,8 +132,7 @@
         <section class="home-section card" aria-labelledby="home-recent-heading">
             <h2 id="home-recent-heading" class="home-section-h">Recent statements</h2>
             <p class="home-section-sub">Imports that feed Monthly insights and Daily plan estimates.</p>
-            {% if recent_statements %}
-            <ul class="home-statements">
+            <ul class="home-statements" id="home-statements-list"{% if not recent_statements %} hidden{% endif %}>
                 {% for s in recent_statements %}
                 <li>
                     <span>
@@ -150,9 +149,7 @@
                 </li>
                 {% endfor %}
             </ul>
-            {% else %}
-            <p class="home-statements-empty">No statements yet — upload one above to get started.</p>
-            {% endif %}
+            <p class="home-statements-empty" id="home-statements-empty"{% if recent_statements %} hidden{% endif %}>No statements yet — upload one above to get started.</p>
         </section>
     </div>
 

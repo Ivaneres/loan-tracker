@@ -4919,8 +4919,17 @@ def loan_details(loan_id):
     smtp_configured = _get_smtp_config() is not None
     default_notify_email = os.getenv('FINANCE_TRACKER_NOTIFY_EMAIL', '').strip()
 
+    user_bucket = (data.get('users') or {}).get(session['username']) or {}
+    user_spending = user_bucket.get('spending') or {}
+    outgoing_spending = [
+        t for t in (user_spending.get('transactions') or [])
+        if t.get('direction') == 'outgoing'
+    ]
+    spending_months = sorted(_spending_report_months_with_data(outgoing_spending), reverse=True)
+
     return render_template('index.html',
                          loan_id=loan_id,
+                         spending_months=spending_months,
                          username=session.get('username'),
                          loan_name=loan['name'],
                          loan_amount=loan['loan_amount'],
@@ -5436,6 +5445,84 @@ def statement_import(loan_id):
 
     save_data(data)
     return jsonify(loan)
+
+
+@app.route('/api/loan/<loan_id>/statement/from-spending', methods=['POST'])
+@login_required
+def statement_from_spending(loan_id):
+    """Reuse transactions already imported on the home screen as loan-repayment
+    candidates. Instead of re-uploading a file, this rebuilds statement text from
+    the outgoing lines already extracted for the selected month(s) and re-runs the
+    household-bill LLM filter so the review table matches the file-upload flow.
+    Body: {"report_month": "YYYY-MM" | "all"}."""
+    data = load_data()
+    if loan_id not in data['loans']:
+        return jsonify({'error': 'Loan not found'}), 404
+    loan = data['loans'][loan_id]
+    if loan.get('deleted'):
+        return jsonify({'error': 'Loan is deleted'}), 400
+
+    if not _get_openai_client():
+        return jsonify({'error': 'Statement import is not configured (set OPENAI_API_KEY).'}), 503
+
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+
+    payload = request.get_json(silent=True) or {}
+    month_raw = str(payload.get('report_month') or '').strip()
+    outgoing = [
+        t for t in (spending.get('transactions') or [])
+        if t.get('direction') == 'outgoing'
+    ]
+    if month_raw and month_raw.lower() != 'all':
+        month = _normalize_spending_month_key(month_raw)
+        if not month:
+            return jsonify({'error': 'Invalid report_month (use YYYY-MM).'}), 400
+        outgoing = [t for t in outgoing if _report_month_for_spending_tx(t) == month]
+
+    lines = []
+    for t in sorted(outgoing, key=lambda x: str(x.get('date') or '')):
+        try:
+            amt = abs(float(t.get('amount') or 0))
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        d = str(t.get('date') or '')
+        desc = str(t.get('description') or '').strip()
+        lines.append(f'{d}  {desc}  -\u00a3{amt:.2f}')
+
+    if not lines:
+        return jsonify({
+            'candidates': [],
+            'truncated': False,
+            'source_count': 0,
+            'message': 'No imported outgoing transactions found for the selected period. '
+                       'Import a statement on the home screen first.',
+        })
+
+    pseudo_text = '\n'.join(lines)
+
+    try:
+        raw_txs = _extract_transactions_llm(pseudo_text)
+    except Exception as e:
+        logger.exception('LLM extraction from imported spending failed')
+        return jsonify({'error': str(e)}), 500
+
+    candidates = _normalize_candidates(raw_txs)
+    _mark_duplicates(candidates, loan)
+    out = {
+        'candidates': candidates,
+        'truncated': len(pseudo_text) > STATEMENT_MAX_CHARS_FOR_LLM,
+        'source_count': len(lines),
+    }
+    bl = loan.get('bill_baseline')
+    if bl:
+        diff = _compare_to_baseline(candidates, bl)
+        if diff is not None:
+            out['baseline_diff'] = diff
+    return jsonify(out)
 
 
 @app.route('/api/loan/<loan_id>/statement/baseline-preview', methods=['POST'])
@@ -6062,6 +6149,7 @@ def spending_statement_import():
         'period_end': period['period_end'],
         'months': sorted({report_month}),
         'reconciliation': reconciliation,
+        'statement': statement_record,
     })
 
 

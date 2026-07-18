@@ -2184,6 +2184,38 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function prependRecentStatement(statement) {
+        if (!statement) return;
+        const list = document.getElementById('home-statements-list');
+        if (!list) return;
+        const empty = document.getElementById('home-statements-empty');
+
+        const fileName = statement.file_name || 'Statement';
+        const reportMonth = statement.report_month || '—';
+        const periodStart = statement.period_start;
+        const periodEnd = statement.period_end;
+        const importedCount = statement.imported_count || 0;
+        const uploadedAt = statement.uploaded_at ? String(statement.uploaded_at).slice(0, 10) : '';
+
+        const periodHtml = periodStart && periodEnd
+            ? ` <span class="spending-muted">(${escapeHtml(periodStart)} → ${escapeHtml(periodEnd)})</span>`
+            : '';
+        const uploadedHtml = uploadedAt ? ` · ${escapeHtml(uploadedAt)}` : '';
+
+        const li = document.createElement('li');
+        li.innerHTML =
+            `<span><strong>${escapeHtml(fileName)}</strong> · ${escapeHtml(reportMonth)}${periodHtml}</span>` +
+            `<span class="spending-muted">${importedCount} imported${uploadedHtml}</span>`;
+
+        list.insertBefore(li, list.firstChild);
+        list.hidden = false;
+        if (empty) empty.hidden = true;
+
+        while (list.children.length > 8) {
+            list.removeChild(list.lastChild);
+        }
+    }
+
     if (importBtn) {
         importBtn.addEventListener('click', async () => {
             if (!previewTbody) return;
@@ -2237,6 +2269,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 setStatus(msg, false);
                 clearPreview();
+                prependRecentStatement(data.statement);
                 const homeNext = document.getElementById('home-import-next');
                 const reportMonth = data.report_month || (data.months && data.months.length ? data.months[0] : null);
                 if (homeNext && reportMonth) {

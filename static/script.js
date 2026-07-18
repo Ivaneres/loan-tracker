@@ -671,6 +671,46 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    const statementSpendingMonth = document.getElementById('statement-spending-month');
+    const statementSpendingBtn = document.getElementById('statement-spending-btn');
+
+    if (statementSpendingBtn) {
+        statementSpendingBtn.addEventListener('click', async function() {
+            const month = statementSpendingMonth && statementSpendingMonth.value ? statementSpendingMonth.value : 'all';
+            showStatementStatus('Scanning imported statements…', false);
+            statementSpendingBtn.disabled = true;
+            clearStatementRows();
+            if (statementTruncatedHint) statementTruncatedHint.style.display = 'none';
+            try {
+                const response = await fetch(`/api/loan/${loanId}/statement/from-spending`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ report_month: month })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `Failed to read imported statements (${response.status})`);
+                }
+                if (statementTruncatedHint) {
+                    statementTruncatedHint.style.display = data.truncated ? 'block' : 'none';
+                }
+                if (!data.candidates || !data.candidates.length) {
+                    showStatementStatus(data.message || 'No household bill debits found in the imported statements.', false);
+                    renderBaselineDiff(data.baseline_diff || null);
+                    return;
+                }
+                showStatementStatus(`Found ${data.candidates.length} candidate(s) from imported statements. Review and import.`, false);
+                renderStatementCandidates(data.candidates);
+                renderBaselineDiff(data.baseline_diff || null);
+            } catch (e) {
+                console.error(e);
+                showStatementStatus(e.message || 'Failed to read imported statements', true);
+            } finally {
+                statementSpendingBtn.disabled = false;
+            }
+        });
+    }
+
     if (statementImportBtn) {
         statementImportBtn.addEventListener('click', async function() {
             const tbody = document.getElementById('statement-import-tbody');

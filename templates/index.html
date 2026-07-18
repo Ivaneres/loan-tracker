@@ -217,7 +217,7 @@
         <div class="statement-import mb-8" id="statement-import-section">
             <div class="card loan-panel">
                 <h2 class="app-section-title mb-2">Import from bank statement</h2>
-                <p class="app-section-lead">Upload a PDF, CSV, or text export. The app sends the text to OpenAI to find household bill debits; your share defaults to 50% of each debit. Uncheck any row you do not want, edit amounts if needed, then import.</p>
+                <p class="app-section-lead">Upload a PDF, CSV, or text export, or reuse a statement you already imported on the home screen. The app finds household bill debits; your share defaults to 50% of each debit. Uncheck any row you do not want, edit amounts if needed, then import.</p>
                 {% if not loan_deleted %}
                 <div id="statement-import-controls" class="mb-4 flex flex-wrap items-end gap-4">
                     <div>
@@ -225,6 +225,22 @@
                         <input type="file" id="statement-file" accept=".pdf,.csv,.txt,application/pdf,text/csv,text/plain" class="app-control">
                     </div>
                     <button type="button" id="statement-preview-btn" class="app-btn app-btn--primary">Upload &amp; preview</button>
+                </div>
+                <div id="statement-spending-controls" class="mb-4 flex flex-wrap items-end gap-4">
+                    <div>
+                        <label for="statement-spending-month" class="import-label">Or use an already-imported statement</label>
+                        <select id="statement-spending-month" class="app-control">
+                            {% if spending_months %}
+                            <option value="all">All imported months</option>
+                            {% for m in spending_months %}
+                            <option value="{{ m }}">{{ m }}</option>
+                            {% endfor %}
+                            {% else %}
+                            <option value="" disabled selected>No imported statements yet</option>
+                            {% endif %}
+                        </select>
+                    </div>
+                    <button type="button" id="statement-spending-btn" class="app-btn app-btn--ghost"{% if not spending_months %} disabled{% endif %}>Pull from imported statements</button>
                 </div>
                 <p id="statement-preview-status" class="text-sm mb-2" style="display:none;"></p>
                 <p id="statement-truncated-hint" class="text-sm text-amber-800 mb-2" style="display:none;">Statement text was truncated before analysis; check for missing rows.</p>
