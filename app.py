@@ -22,9 +22,12 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from pypdf import PdfReader
 
 try:
-    from openai import OpenAI
+    from openai import OpenAI, APITimeoutError
 except ImportError:  # pragma: no cover
     OpenAI = None  # type: ignore[misc, assignment]
+
+    class APITimeoutError(Exception):  # type: ignore[no-redef]
+        pass
 
 logger = logging.getLogger(__name__)
 
@@ -869,15 +872,23 @@ def _extract_spending_transactions_llm(statement_text: str, period_hint: str | N
     if truncated:
         user_msg += '\n\n(Note: text was truncated.)'
 
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user_msg},
-        ],
-        response_format={'type': 'json_object'},
-        temperature=0.1,
-    )
+    try:
+        completion = client.with_options(
+            timeout=_openai_extraction_timeout_seconds()
+        ).chat.completions.create(
+            model=model,
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user_msg},
+            ],
+            response_format={'type': 'json_object'},
+            temperature=0.1,
+        )
+    except APITimeoutError as e:
+        raise RuntimeError(
+            'The statement was too large to process within the time limit. '
+            'Try a CSV export from your bank, or narrow the date range and import in smaller chunks.'
+        ) from e
     raw = completion.choices[0].message.content or '{}'
     data, jerr = _parse_llm_json_object(raw, context='spending_transactions')
     if jerr:
@@ -3439,16 +3450,28 @@ def calculate_loan_stats(transactions):
     return total_loan_quantity, total_paid
 
 
-def _openai_timeout_seconds() -> float:
-    """Per-request OpenAI timeout. Kept below the gunicorn worker timeout so a
-    hung upstream connection surfaces as a handled error instead of the worker
-    being force-killed (WORKER TIMEOUT / SystemExit)."""
-    raw = os.getenv('OPENAI_TIMEOUT', '').strip()
+def _openai_env_timeout(name: str, default: float) -> float:
+    raw = os.getenv(name, '').strip()
     try:
-        val = float(raw) if raw else 25.0
+        val = float(raw) if raw else default
     except ValueError:
-        val = 25.0
-    return val if val > 0 else 25.0
+        val = default
+    return val if val > 0 else default
+
+
+def _openai_timeout_seconds() -> float:
+    """Default per-request OpenAI timeout for the lighter calls (classification,
+    layout hints, advice). A hung upstream connection surfaces as a handled
+    error instead of the worker being force-killed (WORKER TIMEOUT / SystemExit).
+    """
+    return _openai_env_timeout('OPENAI_TIMEOUT', 60.0)
+
+
+def _openai_extraction_timeout_seconds() -> float:
+    """Statement extraction sends the whole statement and asks for exhaustive
+    JSON, so it legitimately needs much longer than the other calls. This MUST
+    stay below the gunicorn worker --timeout or the worker will be killed."""
+    return _openai_env_timeout('OPENAI_EXTRACTION_TIMEOUT', 120.0)
 
 
 def _openai_max_retries() -> int:
