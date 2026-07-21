@@ -22,6 +22,18 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from pypdf import PdfReader
 
 try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    def load_dotenv(*args, **kwargs):  # type: ignore[misc]
+        return False
+
+# Load variables from a local .env file so config works regardless of how the
+# app is launched (gunicorn, `flask run`, `python app.py`, tests, etc.).
+# gunicorn imports the module directly and never invokes the Flask CLI, so we
+# cannot rely on Flask's automatic .env loading here.
+load_dotenv()
+
+try:
     from openai import OpenAI, APITimeoutError
 except ImportError:  # pragma: no cover
     OpenAI = None  # type: ignore[misc, assignment]
