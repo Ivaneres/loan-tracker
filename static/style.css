@@ -3066,6 +3066,52 @@ body.db-page button.db-today-del:hover {
     transition: width 0.35s ease;
 }
 
+.db-day-insight {
+    margin: -0.15rem 0 0.75rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: var(--db-ink);
+}
+
+.db-day-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+    margin-bottom: 0.85rem;
+}
+
+@media (min-width: 480px) {
+    .db-day-stats {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+}
+
+.db-day-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.55rem 0.6rem;
+    border-radius: 0.75rem;
+    background: rgba(15, 28, 26, 0.04);
+    border: 1px solid transparent;
+}
+
+.db-day-stat-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--db-muted);
+    font-weight: 600;
+}
+
+.db-day-stat-value {
+    font-family: var(--font-money);
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: var(--db-ink);
+    letter-spacing: -0.01em;
+}
+
 .db-day-chart {
     display: flex;
     gap: 0.25rem;
@@ -3073,14 +3119,42 @@ body.db-page button.db-today-del:hover {
     overflow-x: auto;
     padding: 0.5rem 0 0.25rem;
     min-height: 7.5rem;
+    scroll-snap-type: x proximity;
 }
 
 .db-day-col {
-    flex: 0 0 1.15rem;
+    flex: 0 0 1.25rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 0.25rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    scroll-snap-align: center;
+    border-radius: 0.45rem;
+    transition: transform 0.18s ease, background 0.18s ease;
+}
+
+.db-day-col:hover,
+.db-day-col:focus-visible {
+    background: rgba(13, 122, 98, 0.08);
+    outline: none;
+}
+
+.db-day-col--selected {
+    background: rgba(13, 122, 98, 0.12);
+    transform: translateY(-2px);
+}
+
+.db-day-col--today > span {
+    color: var(--db-accent-deep);
+    font-weight: 700;
+}
+
+.db-day-col--weekend > span {
+    opacity: 0.75;
 }
 
 .db-day-bars {
@@ -3108,6 +3182,21 @@ body.db-page button.db-today-del:hover {
 .db-day-spend {
     background: var(--db-accent);
     opacity: 0.85;
+    transition: height 0.3s ease;
+}
+
+.db-day-spend--clear {
+    background: rgba(13, 122, 98, 0.28);
+    opacity: 1;
+    height: 0 !important;
+}
+
+.db-day-spend--under {
+    background: var(--db-accent);
+}
+
+.db-day-spend--exact {
+    background: var(--db-accent-deep);
 }
 
 .db-day-spend--over {
@@ -3117,6 +3206,127 @@ body.db-page button.db-today-del:hover {
 .db-day-col > span {
     font-size: 0.62rem;
     color: var(--db-muted);
+}
+
+.db-day-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem 1rem;
+    margin-top: 0.55rem;
+    font-size: 0.75rem;
+    color: var(--db-muted);
+}
+
+.db-day-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.db-day-swatch {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 0.15rem;
+    display: inline-block;
+}
+
+.db-day-swatch--under {
+    background: var(--db-accent);
+}
+
+.db-day-swatch--clear {
+    background: rgba(13, 122, 98, 0.28);
+    box-shadow: inset 0 0 0 1px rgba(13, 122, 98, 0.35);
+}
+
+.db-day-swatch--over {
+    background: var(--db-warn);
+}
+
+.db-day-detail {
+    margin-top: 0.85rem;
+    padding: 0.85rem 0.95rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid var(--db-line);
+    animation: db-day-detail-in 0.28s ease;
+}
+
+@keyframes db-day-detail-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.db-day-detail-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+}
+
+.db-day-detail-top strong {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--db-ink);
+}
+
+.db-day-detail-status {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.45rem;
+    border-radius: 0.4rem;
+    background: rgba(13, 122, 98, 0.12);
+    color: var(--db-accent-deep);
+}
+
+.db-day-detail-status--over {
+    background: rgba(194, 65, 12, 0.12);
+    color: var(--db-warn);
+}
+
+.db-day-detail-status--clear {
+    background: rgba(13, 122, 98, 0.08);
+    color: var(--db-muted);
+}
+
+.db-day-detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+.db-day-detail-grid .db-meta-label {
+    display: block;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--db-muted);
+    font-weight: 600;
+    margin-bottom: 0.1rem;
+}
+
+.db-day-detail-grid .db-meta-value {
+    font-family: var(--font-money);
+    font-weight: 600;
+    color: var(--db-ink);
+}
+
+.db-day-detail-outcome {
+    margin: 0;
+    font-size: 0.88rem;
+    color: var(--db-muted);
+    line-height: 1.4;
 }
 
 .db-page .hidden {

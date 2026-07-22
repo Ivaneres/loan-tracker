@@ -2705,6 +2705,92 @@ def _daily_budget_day_limits(
     return limits
 
 
+def _daily_budget_day_insights(day_rows: list[dict]) -> dict:
+    """Annotate day rows and summarise month pace for the Goals day chart."""
+    if not day_rows:
+        return {
+            'days_elapsed': 0,
+            'days_under': 0,
+            'days_over': 0,
+            'days_clear': 0,
+            'under_streak': 0,
+            'avg_spent': 0.0,
+            'avg_limit': 0.0,
+            'overspend_total': 0.0,
+            'best_day': None,
+            'worst_day': None,
+        }
+
+    days_under = 0
+    days_over = 0
+    days_clear = 0
+    overspend_total = 0.0
+    best_day = None
+    worst_day = None
+
+    for row in day_rows:
+        lim = float(row.get('limit') or 0)
+        spent = float(row.get('spent') or 0)
+        remaining = round(lim - spent, 2)
+        under = round(max(0.0, lim - spent), 2)
+        over = round(max(0.0, spent - lim), 2)
+        if spent <= 0.005:
+            status = 'clear'
+            days_clear += 1
+            days_under += 1
+        elif remaining < -0.005:
+            status = 'over'
+            days_over += 1
+            overspend_total += over
+            if worst_day is None or over > float(worst_day.get('overspend') or 0):
+                worst_day = {
+                    'date': row.get('date'),
+                    'spent': spent,
+                    'limit': lim,
+                    'overspend': over,
+                }
+        elif remaining <= 0.005:
+            status = 'exact'
+            days_under += 1
+        else:
+            status = 'under'
+            days_under += 1
+            if under > 0 and (best_day is None or under > float(best_day.get('underspend') or 0)):
+                best_day = {
+                    'date': row.get('date'),
+                    'spent': spent,
+                    'limit': lim,
+                    'underspend': under,
+                }
+        row['status'] = status
+        row['underspend'] = under
+        row['overspend'] = over
+        row['remaining'] = remaining
+
+    under_streak = 0
+    for row in reversed(day_rows):
+        if row.get('status') in ('under', 'clear', 'exact'):
+            under_streak += 1
+        else:
+            break
+
+    n = len(day_rows)
+    avg_spent = round(sum(float(r.get('spent') or 0) for r in day_rows) / n, 2)
+    avg_limit = round(sum(float(r.get('limit') or 0) for r in day_rows) / n, 2)
+    return {
+        'days_elapsed': n,
+        'days_under': days_under,
+        'days_over': days_over,
+        'days_clear': days_clear,
+        'under_streak': under_streak,
+        'avg_spent': avg_spent,
+        'avg_limit': avg_limit,
+        'overspend_total': round(overspend_total, 2),
+        'best_day': best_day,
+        'worst_day': worst_day,
+    }
+
+
 def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     bucket, _ = _ensure_daily_budget(spending)
     plan = bucket.get('plan') or {}
@@ -2739,9 +2825,12 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
                 'spent': spent,
                 'remaining': round(lim - spent, 2),
                 'underspend': under,
+                'weekday': d.weekday(),
+                'is_today': key == today_key,
             })
             d += timedelta(days=1)
     underspend_total = round(underspend_total, 2)
+    day_insights = _daily_budget_day_insights(day_rows)
 
     txs_today = []
     for t in spending.get('transactions') or []:
@@ -2768,6 +2857,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'discretionary_remaining_month': round(max(0.0, discretionary - spent_mtd), 2),
         'underspend_saved': underspend_total,
         'days': day_rows,
+        'day_insights': day_insights,
         'transactions_today': txs_today,
         'goals': bucket.get('goals') or [],
     }

@@ -269,6 +269,203 @@
     setPlanSavedLabel(plan.updated_at);
   }
 
+  let selectedDayKey = null;
+
+  function formatDayLabel(iso) {
+    if (!iso) return '';
+    const d = new Date(iso + 'T12:00:00');
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+
+  function buildDayInsightSummary(insights, days) {
+    const n = Number(insights && insights.days_elapsed) || (days && days.length) || 0;
+    if (!n) return 'No days yet this month — log spends on Today to see the pattern.';
+    const under = Number(insights.days_under) || 0;
+    const over = Number(insights.days_over) || 0;
+    const streak = Number(insights.under_streak) || 0;
+    const parts = [
+      'Under on ' + under + ' of ' + n + ' day' + (n === 1 ? '' : 's'),
+    ];
+    if (streak >= 2) {
+      parts.push(streak + '-day streak');
+    }
+    const best = insights.best_day;
+    if (best && Number(best.underspend) > 0) {
+      parts.push('best day saved ' + money(best.underspend));
+    }
+    if (over > 0) {
+      parts.push(over + ' over (' + money(insights.overspend_total) + ')');
+    } else if (under === n) {
+      parts.push('every day on track');
+    }
+    return parts.join(' · ');
+  }
+
+  function renderDayDetail(day) {
+    const detail = $('goals-day-detail');
+    if (!detail) return;
+    if (!day) {
+      detail.hidden = true;
+      detail.innerHTML = '';
+      return;
+    }
+    const lim = Number(day.limit) || 0;
+    const spent = Number(day.spent) || 0;
+    const under = Number(day.underspend) || 0;
+    const over = Number(day.overspend) || Math.max(0, spent - lim);
+    const status = day.status || (spent <= 0 ? 'clear' : spent > lim ? 'over' : 'under');
+    let outcome;
+    if (status === 'clear') {
+      outcome = 'Clear day — saved the full ' + money(lim) + ' allowance';
+    } else if (status === 'over') {
+      outcome = 'Over by ' + money(over);
+    } else if (status === 'exact') {
+      outcome = 'Hit the limit exactly';
+    } else {
+      outcome = 'Saved ' + money(under) + ' toward underspend';
+    }
+    detail.hidden = false;
+    detail.innerHTML =
+      '<div class="db-day-detail-top">' +
+      '<strong></strong>' +
+      '<span class="db-day-detail-status db-day-detail-status--' +
+      status +
+      '"></span>' +
+      '</div>' +
+      '<div class="db-day-detail-grid">' +
+      '<div><span class="db-meta-label">Spent</span><span class="db-meta-value"></span></div>' +
+      '<div><span class="db-meta-label">Limit</span><span class="db-meta-value"></span></div>' +
+      '</div>' +
+      '<p class="db-day-detail-outcome"></p>';
+    detail.querySelector('strong').textContent = formatDayLabel(day.date);
+    detail.querySelector('.db-day-detail-status').textContent =
+      status === 'clear' ? 'Clear' : status === 'over' ? 'Over' : status === 'exact' ? 'Exact' : 'Under';
+    detail.querySelectorAll('.db-meta-value')[0].textContent = money(spent);
+    detail.querySelectorAll('.db-meta-value')[1].textContent = money(lim);
+    detail.querySelector('.db-day-detail-outcome').textContent = outcome;
+  }
+
+  function renderDayByDay(status) {
+    const days = status.days || [];
+    const insights = status.day_insights || {};
+    const insightEl = $('goals-day-insight');
+    const statsEl = $('goals-day-stats');
+    const legendEl = $('goals-day-legend');
+    const chart = $('goals-day-chart');
+
+    if (insightEl) {
+      insightEl.textContent = buildDayInsightSummary(insights, days);
+    }
+
+    if (statsEl) {
+      if (!days.length) {
+        statsEl.hidden = true;
+        statsEl.innerHTML = '';
+      } else {
+        statsEl.hidden = false;
+        const cells = [
+          { label: 'Under', value: String(Number(insights.days_under) || 0) },
+          { label: 'Over', value: String(Number(insights.days_over) || 0) },
+          { label: 'Clear', value: String(Number(insights.days_clear) || 0) },
+          {
+            label: 'Avg spend',
+            value: money(insights.avg_spent),
+          },
+          {
+            label: 'Streak',
+            value: String(Number(insights.under_streak) || 0),
+          },
+        ];
+        statsEl.innerHTML = cells
+          .map(
+            (c) =>
+              '<div class="db-day-stat"><span class="db-day-stat-label">' +
+              c.label +
+              '</span><span class="db-day-stat-value"></span></div>'
+          )
+          .join('');
+        Array.from(statsEl.querySelectorAll('.db-day-stat-value')).forEach((el, i) => {
+          el.textContent = cells[i].value;
+        });
+      }
+    }
+
+    if (legendEl) {
+      legendEl.hidden = !days.length;
+    }
+
+    if (!chart) return;
+    chart.innerHTML = '';
+
+    if (!days.length) {
+      selectedDayKey = null;
+      renderDayDetail(null);
+      return;
+    }
+
+    const peak = days.reduce((m, day) => Math.max(m, Number(day.limit) || 0, Number(day.spent) || 0), 1);
+    let focus = days.find((d) => d.date === selectedDayKey);
+    if (!focus) {
+      focus = days.find((d) => d.is_today) || days[days.length - 1];
+      selectedDayKey = focus ? focus.date : null;
+    }
+
+    days.forEach((day) => {
+      const lim = Number(day.limit) || 0;
+      const spent = Number(day.spent) || 0;
+      const statusName =
+        day.status || (spent <= 0 ? 'clear' : spent > lim + 0.005 ? 'over' : spent >= lim - 0.005 ? 'exact' : 'under');
+      const spendH = Math.round((spent / peak) * 100);
+      const limH = Math.round((lim / peak) * 100);
+      const col = document.createElement('button');
+      col.type = 'button';
+      col.className =
+        'db-day-col' +
+        (day.is_today ? ' db-day-col--today' : '') +
+        (day.date === selectedDayKey ? ' db-day-col--selected' : '') +
+        (Number(day.weekday) >= 5 ? ' db-day-col--weekend' : '');
+      col.setAttribute('role', 'listitem');
+      col.setAttribute(
+        'aria-label',
+        formatDayLabel(day.date) +
+          ': spent ' +
+          money(spent) +
+          ' of ' +
+          money(lim) +
+          ', ' +
+          statusName
+      );
+      col.dataset.date = day.date;
+      col.innerHTML =
+        '<div class="db-day-bars">' +
+        '<div class="db-day-lim" style="height:' +
+        limH +
+        '%"></div>' +
+        '<div class="db-day-spend db-day-spend--' +
+        statusName +
+        (spent > lim ? ' db-day-spend--over' : '') +
+        '" style="height:' +
+        Math.max(spendH, spent > 0 ? 4 : 0) +
+        '%"></div>' +
+        '</div>' +
+        '<span>' +
+        String(day.date).slice(-2) +
+        '</span>';
+      col.addEventListener('click', () => {
+        selectedDayKey = day.date;
+        renderDayByDay(status);
+      });
+      chart.appendChild(col);
+    });
+
+    renderDayDetail(focus);
+  }
+
   function renderGoals(status) {
     $('goals-saved').textContent = money(status.underspend_saved);
     const goals = status.goals || [];
@@ -294,33 +491,7 @@
       list.appendChild(li);
     });
 
-    const chart = $('goals-day-chart');
-    chart.innerHTML = '';
-    (status.days || []).forEach((day) => {
-      const lim = Number(day.limit) || 0;
-      const spent = Number(day.spent) || 0;
-      const max = Math.max(lim, spent, 1);
-      const col = document.createElement('div');
-      col.className = 'db-day-col';
-      col.title = day.date + ': spent ' + money(spent) + ' / ' + money(lim);
-      const spendH = Math.round((spent / max) * 100);
-      const limH = Math.round((lim / max) * 100);
-      col.innerHTML =
-        '<div class="db-day-bars">' +
-        '<div class="db-day-lim" style="height:' +
-        limH +
-        '%"></div>' +
-        '<div class="db-day-spend' +
-        (spent > lim ? ' db-day-spend--over' : '') +
-        '" style="height:' +
-        spendH +
-        '%"></div>' +
-        '</div>' +
-        '<span>' +
-        String(day.date).slice(-2) +
-        '</span>';
-      chart.appendChild(col);
-    });
+    renderDayByDay(status);
   }
 
   function applyStatus(status) {

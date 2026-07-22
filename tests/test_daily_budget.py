@@ -129,6 +129,45 @@ class TestDailyBudgetStatus(unittest.TestCase):
         # limit 10/day; leftover 8+8
         self.assertEqual(status['underspend_saved'], 16.0)
 
+    def test_day_insights_track_under_over_clear_and_streak(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-01', amount=2, category='dining'),   # under, saved 8
+                _tx(id='2', date='2024-01-02', amount=15, category='dining'),  # over by 5
+                # 2024-01-03 clear
+                _tx(id='3', date='2024-01-04', amount=1, category='dining'),   # under, saved 9 → best
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 4))
+        insights = status['day_insights']
+        self.assertEqual(insights['days_elapsed'], 4)
+        self.assertEqual(insights['days_over'], 1)
+        self.assertEqual(insights['days_clear'], 1)
+        self.assertEqual(insights['days_under'], 3)  # under + clear + under
+        self.assertEqual(insights['under_streak'], 2)  # clear + under at end
+        self.assertEqual(insights['overspend_total'], 5.0)
+        self.assertEqual(insights['best_day']['date'], '2024-01-04')
+        self.assertEqual(insights['best_day']['underspend'], 9.0)
+        self.assertEqual(insights['worst_day']['date'], '2024-01-02')
+        self.assertEqual(insights['worst_day']['overspend'], 5.0)
+
+        by_date = {d['date']: d for d in status['days']}
+        self.assertEqual(by_date['2024-01-01']['status'], 'under')
+        self.assertEqual(by_date['2024-01-02']['status'], 'over')
+        self.assertEqual(by_date['2024-01-03']['status'], 'clear')
+        self.assertTrue(by_date['2024-01-04']['is_today'])
+
 
 class TestManualImportDedup(unittest.TestCase):
     def test_fuzzy_match_manual_by_date_amount_and_label(self):
