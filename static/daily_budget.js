@@ -941,8 +941,8 @@
           method: 'PUT',
           body: JSON.stringify(body),
         });
-        fillPlanForm(data.plan);
         if (data.status) applyStatus(data.status);
+        fillPlanForm(data.plan);
         pulsePlanMath();
         const savedMsg = 'Plan saved — daily limit updated on Today.';
         flash(savedMsg, 'ok', 'plan-save-feedback');
