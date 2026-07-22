@@ -842,14 +842,16 @@
       const label = String(category || '').replace(/_/g, ' ');
       return label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
     };
+    let lastAutoTitle = categoryTitle($('db-category').value);
     titleInput.addEventListener('input', () => {
       titleClear.classList.toggle('hidden', !titleInput.value);
     });
     titleClear.addEventListener('click', () => {
       setTitle('');
+      lastAutoTitle = '';
       titleInput.focus();
     });
-    setTitle(categoryTitle($('db-category').value));
+    setTitle(lastAutoTitle);
 
     const grid = $('db-cat-grid');
     if (grid) {
@@ -859,7 +861,12 @@
         grid.querySelectorAll('.db-cat').forEach((b) => b.classList.remove('db-cat--selected'));
         btn.classList.add('db-cat--selected');
         $('db-category').value = btn.dataset.category;
-        setTitle(categoryTitle(btn.dataset.category));
+        const nextAutoTitle = categoryTitle(btn.dataset.category);
+        const current = String(titleInput.value || '');
+        if (!current.trim() || current === lastAutoTitle) {
+          setTitle(nextAutoTitle);
+        }
+        lastAutoTitle = nextAutoTitle;
       });
     }
 
@@ -889,7 +896,8 @@
         });
         applyStatus(data.status);
         $('db-amount').value = '';
-        setTitle(categoryTitle($('db-category').value));
+        lastAutoTitle = categoryTitle($('db-category').value);
+        setTitle(lastAutoTitle);
         $('db-amount').focus();
         flash('Logged', 'ok');
       } catch (e) {
