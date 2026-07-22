@@ -49,10 +49,13 @@
                     <span class="db-entry-currency">£</span>
                     <input id="db-amount" class="db-entry-amount" type="text" inputmode="decimal" placeholder="0.00" required aria-label="Amount">
                 </label>
-                <label class="db-field">
-                    <span>What for?</span>
-                    <input id="db-title" type="text" maxlength="200" placeholder="Coffee, lunch…" required>
-                </label>
+                <div class="db-field">
+                    <label for="db-title">What for?</label>
+                    <div class="db-title-input-wrap">
+                        <input id="db-title" type="text" maxlength="200" value="Dining" placeholder="Coffee, lunch…" required>
+                        <button type="button" id="db-title-clear" class="db-title-clear" aria-label="Clear what for">×</button>
+                    </div>
+                </div>
                 <fieldset class="db-cats">
                     <legend>Category</legend>
                     <div class="db-cat-grid" id="db-cat-grid">

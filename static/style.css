@@ -2355,7 +2355,8 @@ body.db-page {
     min-width: 0;
 }
 
-.db-field > span {
+.db-field > span,
+.db-field > label {
     display: block;
     font-size: 0.78rem;
     font-weight: 600;
@@ -2363,6 +2364,41 @@ body.db-page {
     margin-bottom: 0.35rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+}
+
+.db-title-input-wrap {
+    position: relative;
+}
+
+.db-title-input-wrap input {
+    padding-right: 3.25rem;
+}
+
+.db-title-clear {
+    position: absolute;
+    top: 50%;
+    right: 0.2rem;
+    width: 2.75rem;
+    height: 2.75rem;
+    transform: translateY(-50%);
+    border: 0;
+    border-radius: 0.7rem;
+    background: transparent;
+    color: var(--db-muted);
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.db-title-clear:hover,
+.db-title-clear:focus-visible {
+    background: rgba(15, 118, 110, 0.1);
+    color: var(--db-ink);
+}
+
+.db-title-clear.hidden {
+    display: none;
 }
 
 .db-field input,

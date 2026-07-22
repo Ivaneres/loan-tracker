@@ -368,6 +368,25 @@
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
     });
 
+    const titleInput = $('db-title');
+    const titleClear = $('db-title-clear');
+    const setTitle = (value) => {
+      titleInput.value = value;
+      titleClear.classList.toggle('hidden', !value);
+    };
+    const categoryTitle = (category) => {
+      const label = String(category || '').replace(/_/g, ' ');
+      return label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
+    };
+    titleInput.addEventListener('input', () => {
+      titleClear.classList.toggle('hidden', !titleInput.value);
+    });
+    titleClear.addEventListener('click', () => {
+      setTitle('');
+      titleInput.focus();
+    });
+    setTitle(categoryTitle($('db-category').value));
+
     const grid = $('db-cat-grid');
     if (grid) {
       grid.addEventListener('click', (ev) => {
@@ -376,6 +395,7 @@
         grid.querySelectorAll('.db-cat').forEach((b) => b.classList.remove('db-cat--selected'));
         btn.classList.add('db-cat--selected');
         $('db-category').value = btn.dataset.category;
+        setTitle(categoryTitle(btn.dataset.category));
       });
     }
 
@@ -405,7 +425,7 @@
         });
         applyStatus(data.status);
         $('db-amount').value = '';
-        $('db-title').value = '';
+        setTitle(categoryTitle($('db-category').value));
         $('db-amount').focus();
         flash('Logged', 'ok');
       } catch (e) {
