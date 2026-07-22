@@ -2371,51 +2371,63 @@ body.db-page {
 }
 
 .db-title-input-wrap input {
-    padding-right: 3.25rem;
+    padding-right: 3.5rem;
 }
 
 .db-title-clear {
     position: absolute;
     top: 0;
     bottom: 0;
-    right: 0.35rem;
-    width: 2.75rem;
-    height: 2.75rem;
-    min-width: 2.75rem;
-    min-height: 2.75rem;
+    right: 0.3rem;
+    width: 2.5rem;
+    height: 2.5rem;
+    min-width: 2.5rem;
+    min-height: 2.5rem;
     margin: auto 0;
     padding: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     border: 0;
-    border-radius: 0.7rem;
-    background: transparent;
+    border-radius: 999px;
+    background: rgba(15, 28, 26, 0.06);
     color: var(--db-muted);
     font-family: inherit;
-    font-size: 1.35rem;
+    font-size: 1.25rem;
     font-weight: 500;
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
 }
 
 body.db-page button.db-title-clear {
     padding: 0;
-    background: transparent;
+    background: rgba(15, 28, 26, 0.06);
     color: var(--db-muted);
 }
 
 .db-title-clear:hover,
 .db-title-clear:focus-visible {
-    background: rgba(15, 118, 110, 0.1);
+    background: rgba(15, 118, 110, 0.12);
     color: var(--db-ink);
+}
+
+.db-title-clear:active {
+    background: rgba(15, 28, 26, 0.14);
+    color: var(--db-ink);
+    transform: scale(0.96);
 }
 
 body.db-page button.db-title-clear:hover,
 body.db-page button.db-title-clear:focus-visible {
-    background: rgba(15, 118, 110, 0.1);
+    background: rgba(15, 118, 110, 0.12);
+    color: var(--db-ink);
+}
+
+body.db-page button.db-title-clear:active {
+    background: rgba(15, 28, 26, 0.14);
     color: var(--db-ink);
 }
 
@@ -3520,16 +3532,16 @@ body.login-page {
     }
 
     .db-title-clear {
-        width: 3rem;
-        height: 3rem;
-        min-width: 3rem;
-        min-height: 3rem;
-        right: 0.25rem;
-        font-size: 1.45rem;
+        width: 3.25rem;
+        height: 3.25rem;
+        min-width: 3.25rem;
+        min-height: 3.25rem;
+        right: 0.15rem;
+        font-size: 1.35rem;
     }
 
     .db-title-input-wrap input {
-        padding-right: 3.5rem;
+        padding-right: 3.85rem;
     }
 
     /* Monthly KPIs: 2-up on phone */
