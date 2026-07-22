@@ -271,7 +271,7 @@
 
   let selectedDayKey = null;
   let lastDayStatus = null;
-  let dayModalOpener = null;
+  let dayTooltipOpen = false;
 
   function formatDayLabel(iso) {
     if (!iso) return '';
@@ -291,6 +291,18 @@
       day.status ||
       (spent <= 0 ? 'clear' : spent > lim + 0.005 ? 'over' : spent >= lim - 0.005 ? 'exact' : 'under')
     );
+  }
+
+  function dayDeltaLabel(day) {
+    const lim = Number(day.limit) || 0;
+    const spent = Number(day.spent) || 0;
+    const under = Number(day.underspend) || Math.max(0, lim - spent);
+    const over = Number(day.overspend) || Math.max(0, spent - lim);
+    const status = dayStatusName(day);
+    if (status === 'clear') return 'Saved ' + money(lim);
+    if (status === 'over') return 'Over ' + money(over);
+    if (status === 'exact') return 'Exact';
+    return 'Saved ' + money(under);
   }
 
   function buildDayInsightSummary(insights, days) {
@@ -317,68 +329,59 @@
     return parts.join(' · ');
   }
 
-  function closeDayModal() {
-    const modal = $('goals-day-modal');
-    if (!modal) return;
-    modal.classList.add('hidden');
-    modal.hidden = true;
-    document.body.classList.remove('db-day-modal-open');
-    if (dayModalOpener && typeof dayModalOpener.focus === 'function') {
-      dayModalOpener.focus();
-    }
-    dayModalOpener = null;
+  function hideDayTooltip() {
+    const tip = document.querySelector('#goals-day-tooltip');
+    if (tip) tip.setAttribute('visibility', 'hidden');
+    dayTooltipOpen = false;
+    selectedDayKey = null;
+    highlightSelectedDot();
   }
 
-  function openDayModal(day, opener) {
-    const modal = $('goals-day-modal');
-    const title = $('goals-day-modal-title');
-    const body = $('goals-day-modal-body');
-    if (!modal || !title || !body || !day) return;
+  function showDayTooltip(day, dot, chartWidth, chartHeight, padT, padR) {
+    const tip = document.querySelector('#goals-day-tooltip');
+    if (!tip || !dot || !day) return;
 
-    const lim = Number(day.limit) || 0;
-    const spent = Number(day.spent) || 0;
-    const under = Number(day.underspend) || Math.max(0, lim - spent);
-    const over = Number(day.overspend) || Math.max(0, spent - lim);
+    const hit = dot.querySelector('.db-day-dot-hit');
+    if (!hit) return;
+    const cx = Number(hit.getAttribute('cx'));
+    const cy = Number(hit.getAttribute('cy'));
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+
     const status = dayStatusName(day);
-    let outcome;
-    if (status === 'clear') {
-      outcome = 'Clear day — saved the full ' + money(lim) + ' allowance';
-    } else if (status === 'over') {
-      outcome = 'Over by ' + money(over);
-    } else if (status === 'exact') {
-      outcome = 'Hit the limit exactly';
-    } else {
-      outcome = 'Saved ' + money(under) + ' toward underspend';
+    const boxW = 118;
+    const boxH = 50;
+    let x = cx + 12;
+    let y = cy - boxH - 10;
+    if (x + boxW > chartWidth - padR) x = cx - boxW - 12;
+    if (x < 4) x = 4;
+    if (y < padT) y = cy + 14;
+    if (y + boxH > chartHeight - 6) y = Math.max(padT, cy - boxH - 10);
+
+    tip.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ')');
+    tip.querySelector('.db-day-tooltip-box').setAttribute('width', String(boxW));
+    tip.querySelector('.db-day-tooltip-box').setAttribute('height', String(boxH));
+    tip.querySelector('.db-day-tooltip-title').textContent = formatDayLabel(day.date);
+    tip.querySelector('.db-day-tooltip-amounts').textContent =
+      money(day.spent) + ' / ' + money(day.limit);
+    const delta = tip.querySelector('.db-day-tooltip-delta');
+    delta.textContent = dayDeltaLabel(day);
+    delta.setAttribute('class', 'db-day-tooltip-delta db-day-tooltip-delta--' + status);
+    tip.setAttribute('visibility', 'visible');
+    dayTooltipOpen = true;
+  }
+
+  function toggleDayTooltip(day, dot, chartWidth, chartHeight, padT, padR) {
+    if (dayTooltipOpen && selectedDayKey === day.date) {
+      hideDayTooltip();
+      return;
     }
-
     selectedDayKey = day.date;
-    dayModalOpener = opener || null;
-    title.textContent = formatDayLabel(day.date);
-    body.innerHTML =
-      '<span class="db-day-detail-status db-day-detail-status--' +
-      status +
-      '"></span>' +
-      '<div class="db-day-detail-grid">' +
-      '<div><span class="db-meta-label">Spent</span><span class="db-meta-value" data-k="spent"></span></div>' +
-      '<div><span class="db-meta-label">Limit</span><span class="db-meta-value" data-k="limit"></span></div>' +
-      '</div>' +
-      '<p class="db-day-detail-outcome"></p>';
-    body.querySelector('.db-day-detail-status').textContent =
-      status === 'clear' ? 'Clear' : status === 'over' ? 'Over' : status === 'exact' ? 'Exact' : 'Under';
-    body.querySelector('[data-k="spent"]').textContent = money(spent);
-    body.querySelector('[data-k="limit"]').textContent = money(lim);
-    body.querySelector('.db-day-detail-outcome').textContent = outcome;
-
-    modal.classList.remove('hidden');
-    modal.hidden = false;
-    document.body.classList.add('db-day-modal-open');
-    const closeBtn = modal.querySelector('.db-day-modal-close');
-    if (closeBtn) closeBtn.focus();
-    if (lastDayStatus) highlightSelectedDot(lastDayStatus);
+    highlightSelectedDot();
+    showDayTooltip(day, dot, chartWidth, chartHeight, padT, padR);
     scrollDayChartToDate(day.date);
   }
 
-  function highlightSelectedDot(status) {
+  function highlightSelectedDot() {
     const chart = $('goals-day-chart');
     if (!chart) return;
     chart.querySelectorAll('.db-day-dot').forEach((dot) => {
@@ -387,7 +390,6 @@
       dot.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
   }
-
   const DAY_CHART_SLOT = 44;
   const DAY_CHART_HIT_RADIUS = 22;
   const DAY_CHART_MARK_RADIUS = 6.5;
@@ -417,8 +419,11 @@
       chart.innerHTML = '';
       chart.style.width = '';
       chart.style.minWidth = '';
+      hideDayTooltip();
       return;
     }
+
+    const reopenDate = dayTooltipOpen ? selectedDayKey : null;
 
     wrap.classList.remove('hidden');
     wrap.hidden = false;
@@ -543,23 +548,43 @@
           );
         })
         .join('') +
-      xLabels;
+      xLabels +
+      '<g id="goals-day-tooltip" class="db-day-tooltip" visibility="hidden" pointer-events="none">' +
+      '<rect class="db-day-tooltip-box" x="0" y="0" width="118" height="50" rx="8" ry="8"></rect>' +
+      '<text class="db-day-tooltip-title" x="10" y="15"></text>' +
+      '<text class="db-day-tooltip-amounts" x="10" y="31"></text>' +
+      '<text class="db-day-tooltip-delta" x="10" y="44"></text>' +
+      '</g>';
 
     chart.querySelectorAll('.db-day-dot').forEach((dot) => {
       const day = days.find((d) => d.date === dot.dataset.date);
       if (!day) return;
-      const open = () => openDayModal(day, dot);
+      const open = (ev) => {
+        ev.stopPropagation();
+        toggleDayTooltip(day, dot, width, height, padT, padR);
+      };
       dot.addEventListener('click', open);
       dot.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
-          open();
+          open(ev);
         }
       });
     });
 
-    const focusDate = selectedDayKey || (days.find((d) => d.is_today) || days[days.length - 1]).date;
-    requestAnimationFrame(() => scrollDayChartToDate(focusDate));
+    const focusDate = reopenDate || selectedDayKey || (days.find((d) => d.is_today) || days[days.length - 1]).date;
+    requestAnimationFrame(() => {
+      scrollDayChartToDate(focusDate);
+      if (reopenDate) {
+        selectedDayKey = reopenDate;
+        const dot = chart.querySelector('.db-day-dot[data-date="' + reopenDate + '"]');
+        const day = days.find((d) => d.date === reopenDate);
+        if (dot && day) {
+          highlightSelectedDot();
+          showDayTooltip(day, dot, width, height, padT, padR);
+        }
+      }
+    });
   }
 
   function renderDayByDay(status) {
@@ -605,7 +630,7 @@
     if (!days.length) {
       selectedDayKey = null;
       renderDayLineChart([]);
-      closeDayModal();
+      hideDayTooltip();
       return;
     }
 
@@ -690,15 +715,12 @@
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
     });
 
-    const dayModal = $('goals-day-modal');
-    if (dayModal) {
-      dayModal.querySelectorAll('[data-close-day-modal]').forEach((el) => {
-        el.addEventListener('click', closeDayModal);
-      });
-      document.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Escape' && !dayModal.hidden) closeDayModal();
-      });
-    }
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('.db-day-dot')) hideDayTooltip();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') hideDayTooltip();
+    });
 
     const titleInput = $('db-title');
     const titleClear = $('db-title-clear');

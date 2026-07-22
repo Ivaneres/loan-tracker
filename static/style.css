@@ -3259,153 +3259,44 @@ body.db-page button.db-today-del:hover {
     color: var(--db-muted);
 }
 
-.db-day-modal {
-    position: fixed;
-    inset: 0;
-    z-index: 80;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    padding: 1rem;
+.db-day-tooltip-box {
+    fill: rgba(15, 28, 26, 0.94);
+    stroke: rgba(255, 255, 255, 0.14);
+    stroke-width: 1;
+    filter: drop-shadow(0 6px 14px rgba(15, 28, 26, 0.22));
 }
 
-.db-day-modal.hidden,
-.db-day-modal[hidden] {
-    display: none !important;
-}
-
-.db-day-modal-backdrop {
-    position: absolute;
-    inset: 0;
-    background: rgba(15, 28, 26, 0.42);
-    animation: db-day-modal-fade 0.2s ease;
-}
-
-.db-day-modal-sheet {
-    position: relative;
-    width: min(100%, 26rem);
-    background: var(--db-surface-solid);
-    border-radius: 1.15rem 1.15rem 1rem 1rem;
-    border: 1px solid var(--db-line);
-    box-shadow: var(--db-shadow);
-    padding: 1.1rem 1.15rem 1.25rem;
-    animation: db-day-modal-up 0.24s ease;
-}
-
-.db-day-modal-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-}
-
-.db-day-modal-title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 1.15rem;
+.db-day-tooltip-title {
+    fill: rgba(255, 255, 255, 0.72);
+    font-size: 9px;
     font-weight: 600;
-    color: var(--db-ink);
+    font-family: "DM Sans", system-ui, sans-serif;
 }
 
-.db-day-modal-close {
-    border: 0;
-    background: rgba(15, 28, 26, 0.06);
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 999px;
-    font-size: 1.35rem;
-    line-height: 1;
-    color: var(--db-muted);
-    cursor: pointer;
-    flex-shrink: 0;
-}
-
-.db-day-modal-body .db-day-detail-status {
-    display: inline-block;
-    margin-bottom: 0.7rem;
-}
-
-.db-day-detail-status {
-    font-size: 0.72rem;
+.db-day-tooltip-amounts {
+    fill: #fff;
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    padding: 0.2rem 0.45rem;
-    border-radius: 0.4rem;
-    background: rgba(13, 122, 98, 0.12);
-    color: var(--db-accent-deep);
+    font-family: Outfit, "DM Sans", system-ui, sans-serif;
 }
 
-.db-day-detail-status--over {
-    background: rgba(194, 65, 12, 0.12);
-    color: var(--db-warn);
-}
-
-.db-day-detail-status--clear {
-    background: rgba(13, 122, 98, 0.08);
-    color: var(--db-muted);
-}
-
-.db-day-detail-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    margin-bottom: 0.55rem;
-}
-
-.db-day-detail-grid .db-meta-label {
-    display: block;
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--db-muted);
+.db-day-tooltip-delta {
+    font-size: 9px;
     font-weight: 600;
-    margin-bottom: 0.1rem;
+    font-family: "DM Sans", system-ui, sans-serif;
 }
 
-.db-day-detail-grid .db-meta-value {
-    font-family: var(--font-money);
-    font-weight: 600;
-    font-size: 1.35rem;
-    color: var(--db-ink);
+.db-day-tooltip-delta--under,
+.db-day-tooltip-delta--exact {
+    fill: #9ee4d2;
 }
 
-.db-day-detail-outcome {
-    margin: 0;
-    font-size: 0.9rem;
-    color: var(--db-muted);
-    line-height: 1.4;
+.db-day-tooltip-delta--clear {
+    fill: rgba(255, 255, 255, 0.62);
 }
 
-body.db-day-modal-open {
-    overflow: hidden;
-}
-
-@keyframes db-day-modal-fade {
-    from { opacity: 0; }
-    to { opacity: 1; }
-}
-
-@keyframes db-day-modal-up {
-    from {
-        opacity: 0;
-        transform: translateY(12px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-@media (min-width: 640px) {
-    .db-day-modal {
-        align-items: center;
-    }
-
-    .db-day-modal-sheet {
-        border-radius: 1.15rem;
-    }
+.db-day-tooltip-delta--over {
+    fill: #ffb38a;
 }
 
 .db-page .hidden {
