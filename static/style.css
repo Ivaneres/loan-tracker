@@ -3116,13 +3116,33 @@ body.db-page button.db-today-del:hover {
     margin: 0.15rem -0.85rem 0;
 }
 
+.db-day-chart-frame {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    padding: 0.35rem 0 0.15rem;
+}
+
+.db-day-yaxis {
+    flex: 0 0 2.5rem;
+    width: 2.5rem;
+    height: 11.75rem;
+    display: block;
+    overflow: visible;
+    margin-left: 0.35rem;
+    pointer-events: none;
+    background: linear-gradient(90deg, var(--db-bg0, var(--bg0, #f7f4ef)) 70%, transparent);
+}
+
 .db-day-chart-scroll {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x;
     overscroll-behavior-x: none;
-    padding: 0.35rem 0.85rem 0.15rem;
+    padding: 0 0.85rem 0 0;
     scrollbar-width: thin;
 }
 

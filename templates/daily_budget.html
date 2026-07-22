@@ -191,8 +191,11 @@
                 <p class="db-day-insight" id="goals-day-insight">Loading…</p>
                 <div class="db-day-stats" id="goals-day-stats" hidden></div>
                 <div class="db-day-linewrap" id="goals-day-linewrap" hidden>
-                    <div class="db-day-chart-scroll" id="goals-day-chart-scroll">
-                        <svg class="db-day-linechart" id="goals-day-chart" role="img" aria-label="Daily spend versus limit"></svg>
+                    <div class="db-day-chart-frame">
+                        <svg class="db-day-yaxis" id="goals-day-yaxis" aria-hidden="true"></svg>
+                        <div class="db-day-chart-scroll" id="goals-day-chart-scroll">
+                            <svg class="db-day-linechart" id="goals-day-chart" role="img" aria-label="Daily spend versus limit"></svg>
+                        </div>
                     </div>
                     <div class="db-day-legend" id="goals-day-legend">
                         <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--spend"></i> Spent</span>

@@ -493,6 +493,7 @@
   function renderDayLineChart(days) {
     const wrap = $('goals-day-linewrap');
     const chart = $('goals-day-chart');
+    const yAxis = $('goals-day-yaxis');
     if (!wrap || !chart) return;
 
     if (!days.length) {
@@ -502,6 +503,11 @@
       chart.style.width = '';
       chart.style.minWidth = '';
       chart.style.height = '';
+      if (yAxis) {
+        yAxis.innerHTML = '';
+        yAxis.removeAttribute('viewBox');
+        yAxis.style.height = '';
+      }
       hideDayTooltip();
       return;
     }
@@ -512,8 +518,9 @@
     wrap.hidden = false;
     bindDayChartScrollLimits();
 
-    // Axis/label padding only — no extra empty room past the outer day marks.
-    const padL = 38;
+    // Y labels live in a fixed sidebar; scrolling chart only needs a small left inset.
+    const axisW = 40;
+    const padL = 12;
     const padR = 20 + DAY_CHART_RIGHT_INSET;
     const padT = 16;
     const padB = 36;
@@ -538,13 +545,14 @@
       pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
 
     const tickVals = [0, peak / 2, peak].map((v) => Math.round(v * 100) / 100);
-    const tickLabels = tickVals
+    const formatTick = (v) =>
+      v >= 100
+        ? '£' + Math.round(v)
+        : '£' + v.toLocaleString('en-GB', { maximumFractionDigits: v % 1 ? 2 : 0 });
+
+    const gridLines = tickVals
       .map((v) => {
         const y = yAt(v);
-        const label =
-          v >= 100
-            ? '£' + Math.round(v)
-            : '£' + v.toLocaleString('en-GB', { maximumFractionDigits: v % 1 ? 2 : 0 });
         return (
           '<line class="db-day-grid" x1="' +
           padL +
@@ -554,17 +562,30 @@
           y.toFixed(1) +
           '" y2="' +
           y.toFixed(1) +
-          '"></line>' +
-          '<text class="db-day-axis" x="' +
-          (padL - 8) +
-          '" y="' +
-          (y + 3).toFixed(1) +
-          '" text-anchor="end">' +
-          label +
-          '</text>'
+          '"></line>'
         );
       })
       .join('');
+
+    if (yAxis) {
+      yAxis.setAttribute('viewBox', '0 0 ' + axisW + ' ' + height);
+      yAxis.setAttribute('preserveAspectRatio', 'xMaxYMid meet');
+      yAxis.style.height = height + 'px';
+      yAxis.innerHTML = tickVals
+        .map((v) => {
+          const y = yAt(v);
+          return (
+            '<text class="db-day-axis" x="' +
+            (axisW - 4) +
+            '" y="' +
+            (y + 3).toFixed(1) +
+            '" text-anchor="end">' +
+            formatTick(v) +
+            '</text>'
+          );
+        })
+        .join('');
+    }
 
     const xLabels = days
       .map((d, i) => {
@@ -589,7 +610,7 @@
     chart.style.minWidth = width + 'px';
     chart.style.height = height + 'px';
     chart.innerHTML =
-      tickLabels +
+      gridLines +
       '<path class="db-day-limit-line" d="' +
       line(limitPts) +
       '" fill="none"></path>' +
