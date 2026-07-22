@@ -188,7 +188,19 @@
                 <p id="goals-empty" class="db-empty">No goals yet — add one to track progress against underspend.</p>
 
                 <h3 class="db-subsection-title">This month, day by day</h3>
-                <div class="db-day-chart" id="goals-day-chart"></div>
+                <p class="db-day-insight" id="goals-day-insight">Loading…</p>
+                <div class="db-day-stats" id="goals-day-stats" hidden></div>
+                <div class="db-day-linewrap" id="goals-day-linewrap" hidden>
+                    <div class="db-day-chart-scroll" id="goals-day-chart-scroll">
+                        <svg class="db-day-linechart" id="goals-day-chart" role="img" aria-label="Daily spend versus limit"></svg>
+                    </div>
+                    <div class="db-day-legend" id="goals-day-legend">
+                        <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--spend"></i> Spent</span>
+                        <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--limit"></i> Limit</span>
+                        <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--over"></i> Over</span>
+                    </div>
+                    <p class="db-day-hint">Tap a dot for amounts</p>
+                </div>
             </div>
         </section>
     </div>

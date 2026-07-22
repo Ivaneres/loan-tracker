@@ -269,6 +269,379 @@
     setPlanSavedLabel(plan.updated_at);
   }
 
+  let selectedDayKey = null;
+  let lastDayStatus = null;
+  let dayTooltipOpen = false;
+
+  function formatDayLabel(iso) {
+    if (!iso) return '';
+    const d = new Date(iso + 'T12:00:00');
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  }
+
+  function dayStatusName(day) {
+    const lim = Number(day.limit) || 0;
+    const spent = Number(day.spent) || 0;
+    return (
+      day.status ||
+      (spent <= 0 ? 'clear' : spent > lim + 0.005 ? 'over' : spent >= lim - 0.005 ? 'exact' : 'under')
+    );
+  }
+
+  function dayDeltaLabel(day) {
+    const lim = Number(day.limit) || 0;
+    const spent = Number(day.spent) || 0;
+    const under = Number(day.underspend) || Math.max(0, lim - spent);
+    const over = Number(day.overspend) || Math.max(0, spent - lim);
+    const status = dayStatusName(day);
+    if (status === 'clear') return 'Saved ' + money(lim);
+    if (status === 'over') return 'Over ' + money(over);
+    if (status === 'exact') return 'Exact';
+    return 'Saved ' + money(under);
+  }
+
+  function buildDayInsightSummary(insights, days) {
+    const n = Number(insights && insights.days_elapsed) || (days && days.length) || 0;
+    if (!n) return 'No days yet this month — log spends on Today to see the pattern.';
+    const under = Number(insights.days_under) || 0;
+    const over = Number(insights.days_over) || 0;
+    const streak = Number(insights.under_streak) || 0;
+    const parts = [
+      'Under on ' + under + ' of ' + n + ' day' + (n === 1 ? '' : 's'),
+    ];
+    if (streak >= 2) {
+      parts.push(streak + '-day streak');
+    }
+    const best = insights.best_day;
+    if (best && Number(best.underspend) > 0) {
+      parts.push('best day saved ' + money(best.underspend));
+    }
+    if (over > 0) {
+      parts.push(over + ' over (' + money(insights.overspend_total) + ')');
+    } else if (under === n) {
+      parts.push('every day on track');
+    }
+    return parts.join(' · ');
+  }
+
+  function hideDayTooltip() {
+    const tip = document.querySelector('#goals-day-tooltip');
+    if (tip) tip.setAttribute('visibility', 'hidden');
+    dayTooltipOpen = false;
+    selectedDayKey = null;
+    highlightSelectedDot();
+  }
+
+  function showDayTooltip(day, dot, chartWidth, chartHeight, padT, padR) {
+    const tip = document.querySelector('#goals-day-tooltip');
+    if (!tip || !dot || !day) return;
+
+    const hit = dot.querySelector('.db-day-dot-hit');
+    if (!hit) return;
+    const cx = Number(hit.getAttribute('cx'));
+    const cy = Number(hit.getAttribute('cy'));
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return;
+
+    const status = dayStatusName(day);
+    const boxW = 118;
+    const boxH = 50;
+    let x = cx + 12;
+    let y = cy - boxH - 10;
+    if (x + boxW > chartWidth - padR) x = cx - boxW - 12;
+    if (x < 4) x = 4;
+    if (y < padT) y = cy + 14;
+    if (y + boxH > chartHeight - 6) y = Math.max(padT, cy - boxH - 10);
+
+    tip.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ')');
+    tip.querySelector('.db-day-tooltip-box').setAttribute('width', String(boxW));
+    tip.querySelector('.db-day-tooltip-box').setAttribute('height', String(boxH));
+    tip.querySelector('.db-day-tooltip-title').textContent = formatDayLabel(day.date);
+    tip.querySelector('.db-day-tooltip-amounts').textContent =
+      money(day.spent) + ' / ' + money(day.limit);
+    const delta = tip.querySelector('.db-day-tooltip-delta');
+    delta.textContent = dayDeltaLabel(day);
+    delta.setAttribute('class', 'db-day-tooltip-delta db-day-tooltip-delta--' + status);
+    tip.setAttribute('visibility', 'visible');
+    dayTooltipOpen = true;
+  }
+
+  function toggleDayTooltip(day, dot, chartWidth, chartHeight, padT, padR) {
+    if (dayTooltipOpen && selectedDayKey === day.date) {
+      hideDayTooltip();
+      return;
+    }
+    selectedDayKey = day.date;
+    highlightSelectedDot();
+    showDayTooltip(day, dot, chartWidth, chartHeight, padT, padR);
+    scrollDayChartToDate(day.date);
+  }
+
+  function highlightSelectedDot() {
+    const chart = $('goals-day-chart');
+    if (!chart) return;
+    chart.querySelectorAll('.db-day-dot').forEach((dot) => {
+      const on = dot.dataset.date === selectedDayKey;
+      dot.classList.toggle('db-day-dot--selected', on);
+      dot.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  const DAY_CHART_SLOT = 44;
+  const DAY_CHART_HIT_RADIUS = 22;
+  const DAY_CHART_MARK_RADIUS = 6.5;
+
+  function scrollDayChartToDate(dateKey) {
+    const scroll = $('goals-day-chart-scroll');
+    const chart = $('goals-day-chart');
+    if (!scroll || !chart || !dateKey) return;
+    const dot = chart.querySelector('.db-day-dot[data-date="' + dateKey + '"]');
+    if (!dot) return;
+    const hit = dot.querySelector('.db-day-dot-hit');
+    if (!hit) return;
+    const cx = Number(hit.getAttribute('cx'));
+    if (!Number.isFinite(cx)) return;
+    const target = cx - scroll.clientWidth / 2;
+    scroll.scrollLeft = Math.max(0, Math.min(target, scroll.scrollWidth - scroll.clientWidth));
+  }
+
+  function renderDayLineChart(days) {
+    const wrap = $('goals-day-linewrap');
+    const chart = $('goals-day-chart');
+    if (!wrap || !chart) return;
+
+    if (!days.length) {
+      wrap.classList.add('hidden');
+      wrap.hidden = true;
+      chart.innerHTML = '';
+      chart.style.width = '';
+      chart.style.minWidth = '';
+      hideDayTooltip();
+      return;
+    }
+
+    const reopenDate = dayTooltipOpen ? selectedDayKey : null;
+
+    wrap.classList.remove('hidden');
+    wrap.hidden = false;
+
+    const padL = 38;
+    const padR = 20;
+    const padT = 16;
+    const padB = 36;
+    const plotW = days.length <= 1 ? DAY_CHART_SLOT : (days.length - 1) * DAY_CHART_SLOT;
+    const width = padL + padR + plotW;
+    const height = 188;
+    const plotH = height - padT - padB;
+    const peak = Math.max(
+      1,
+      ...days.map((d) => Math.max(Number(d.limit) || 0, Number(d.spent) || 0))
+    );
+    const xAt = (i) => padL + (days.length === 1 ? plotW / 2 : i * DAY_CHART_SLOT);
+    const yAt = (v) => padT + plotH - (Math.max(0, Number(v) || 0) / peak) * plotH;
+
+    const spendPts = days.map((d, i) => ({
+      x: xAt(i),
+      y: yAt(d.spent),
+      day: d,
+    }));
+    const limitPts = days.map((d, i) => ({ x: xAt(i), y: yAt(d.limit) }));
+    const line = (pts) =>
+      pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+
+    const tickVals = [0, peak / 2, peak].map((v) => Math.round(v * 100) / 100);
+    const tickLabels = tickVals
+      .map((v) => {
+        const y = yAt(v);
+        const label =
+          v >= 100
+            ? '£' + Math.round(v)
+            : '£' + v.toLocaleString('en-GB', { maximumFractionDigits: v % 1 ? 2 : 0 });
+        return (
+          '<line class="db-day-grid" x1="' +
+          padL +
+          '" x2="' +
+          (width - padR) +
+          '" y1="' +
+          y.toFixed(1) +
+          '" y2="' +
+          y.toFixed(1) +
+          '"></line>' +
+          '<text class="db-day-axis" x="' +
+          (padL - 8) +
+          '" y="' +
+          (y + 3).toFixed(1) +
+          '" text-anchor="end">' +
+          label +
+          '</text>'
+        );
+      })
+      .join('');
+
+    const xLabels = days
+      .map((d, i) => {
+        const isToday = !!d.is_today;
+        return (
+          '<text class="db-day-axis db-day-axis--x' +
+          (isToday ? ' db-day-axis--today' : '') +
+          '" x="' +
+          xAt(i).toFixed(1) +
+          '" y="' +
+          (height - 10) +
+          '" text-anchor="middle">' +
+          String(d.date).slice(-2) +
+          '</text>'
+        );
+      })
+      .join('');
+
+    chart.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    chart.setAttribute('preserveAspectRatio', 'xMinYMid meet');
+    chart.style.width = width + 'px';
+    chart.style.minWidth = width + 'px';
+    chart.innerHTML =
+      tickLabels +
+      '<path class="db-day-limit-line" d="' +
+      line(limitPts) +
+      '" fill="none"></path>' +
+      '<path class="db-day-spend-line" d="' +
+      line(spendPts) +
+      '" fill="none"></path>' +
+      spendPts
+        .map((p) => {
+          const status = dayStatusName(p.day);
+          const selected = p.day.date === selectedDayKey;
+          return (
+            '<g class="db-day-dot' +
+            (status === 'over' ? ' db-day-dot--over' : '') +
+            (p.day.is_today ? ' db-day-dot--today' : '') +
+            (selected ? ' db-day-dot--selected' : '') +
+            '" data-date="' +
+            p.day.date +
+            '" tabindex="0" role="button" aria-pressed="' +
+            (selected ? 'true' : 'false') +
+            '" aria-label="' +
+            formatDayLabel(p.day.date) +
+            ': spent ' +
+            money(p.day.spent) +
+            ' of ' +
+            money(p.day.limit) +
+            '">' +
+            '<circle class="db-day-dot-hit" cx="' +
+            p.x.toFixed(1) +
+            '" cy="' +
+            p.y.toFixed(1) +
+            '" r="' +
+            DAY_CHART_HIT_RADIUS +
+            '"></circle>' +
+            '<circle class="db-day-dot-mark" cx="' +
+            p.x.toFixed(1) +
+            '" cy="' +
+            p.y.toFixed(1) +
+            '" r="' +
+            DAY_CHART_MARK_RADIUS +
+            '"></circle>' +
+            '</g>'
+          );
+        })
+        .join('') +
+      xLabels +
+      '<g id="goals-day-tooltip" class="db-day-tooltip" visibility="hidden" pointer-events="none">' +
+      '<rect class="db-day-tooltip-box" x="0" y="0" width="118" height="50" rx="8" ry="8"></rect>' +
+      '<text class="db-day-tooltip-title" x="10" y="15"></text>' +
+      '<text class="db-day-tooltip-amounts" x="10" y="31"></text>' +
+      '<text class="db-day-tooltip-delta" x="10" y="44"></text>' +
+      '</g>';
+
+    chart.querySelectorAll('.db-day-dot').forEach((dot) => {
+      const day = days.find((d) => d.date === dot.dataset.date);
+      if (!day) return;
+      const open = (ev) => {
+        ev.stopPropagation();
+        toggleDayTooltip(day, dot, width, height, padT, padR);
+      };
+      dot.addEventListener('click', open);
+      dot.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          open(ev);
+        }
+      });
+    });
+
+    const focusDate = reopenDate || selectedDayKey || (days.find((d) => d.is_today) || days[days.length - 1]).date;
+    requestAnimationFrame(() => {
+      scrollDayChartToDate(focusDate);
+      if (reopenDate) {
+        selectedDayKey = reopenDate;
+        const dot = chart.querySelector('.db-day-dot[data-date="' + reopenDate + '"]');
+        const day = days.find((d) => d.date === reopenDate);
+        if (dot && day) {
+          highlightSelectedDot();
+          showDayTooltip(day, dot, width, height, padT, padR);
+        }
+      }
+    });
+  }
+
+  function renderDayByDay(status) {
+    lastDayStatus = status;
+    const days = status.days || [];
+    const insights = status.day_insights || {};
+    const insightEl = $('goals-day-insight');
+    const statsEl = $('goals-day-stats');
+
+    if (insightEl) {
+      insightEl.textContent = buildDayInsightSummary(insights, days);
+    }
+
+    if (statsEl) {
+      if (!days.length) {
+        statsEl.classList.add('hidden');
+        statsEl.hidden = true;
+        statsEl.innerHTML = '';
+      } else {
+        statsEl.classList.remove('hidden');
+        statsEl.hidden = false;
+        const cells = [
+          { label: 'Under', value: String(Number(insights.days_under) || 0) },
+          { label: 'Over', value: String(Number(insights.days_over) || 0) },
+          { label: 'Clear', value: String(Number(insights.days_clear) || 0) },
+          { label: 'Avg spend', value: money(insights.avg_spent) },
+          { label: 'Streak', value: String(Number(insights.under_streak) || 0) },
+        ];
+        statsEl.innerHTML = cells
+          .map(
+            (c) =>
+              '<div class="db-day-stat"><span class="db-day-stat-label">' +
+              c.label +
+              '</span><span class="db-day-stat-value"></span></div>'
+          )
+          .join('');
+        Array.from(statsEl.querySelectorAll('.db-day-stat-value')).forEach((el, i) => {
+          el.textContent = cells[i].value;
+        });
+      }
+    }
+
+    if (!days.length) {
+      selectedDayKey = null;
+      renderDayLineChart([]);
+      hideDayTooltip();
+      return;
+    }
+
+    if (!days.some((d) => d.date === selectedDayKey)) {
+      const today = days.find((d) => d.is_today);
+      selectedDayKey = today ? today.date : days[days.length - 1].date;
+    }
+
+    renderDayLineChart(days);
+  }
+
   function renderGoals(status) {
     $('goals-saved').textContent = money(status.underspend_saved);
     const goals = status.goals || [];
@@ -294,33 +667,7 @@
       list.appendChild(li);
     });
 
-    const chart = $('goals-day-chart');
-    chart.innerHTML = '';
-    (status.days || []).forEach((day) => {
-      const lim = Number(day.limit) || 0;
-      const spent = Number(day.spent) || 0;
-      const max = Math.max(lim, spent, 1);
-      const col = document.createElement('div');
-      col.className = 'db-day-col';
-      col.title = day.date + ': spent ' + money(spent) + ' / ' + money(lim);
-      const spendH = Math.round((spent / max) * 100);
-      const limH = Math.round((lim / max) * 100);
-      col.innerHTML =
-        '<div class="db-day-bars">' +
-        '<div class="db-day-lim" style="height:' +
-        limH +
-        '%"></div>' +
-        '<div class="db-day-spend' +
-        (spent > lim ? ' db-day-spend--over' : '') +
-        '" style="height:' +
-        spendH +
-        '%"></div>' +
-        '</div>' +
-        '<span>' +
-        String(day.date).slice(-2) +
-        '</span>';
-      chart.appendChild(col);
-    });
+    renderDayByDay(status);
   }
 
   function applyStatus(status) {
@@ -366,6 +713,13 @@
   function bind() {
     document.querySelectorAll('.db-panel-tab').forEach((btn) => {
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
+    });
+
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest('.db-day-dot')) hideDayTooltip();
+    });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') hideDayTooltip();
     });
 
     const titleInput = $('db-title');
