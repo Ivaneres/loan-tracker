@@ -2389,45 +2389,41 @@ body.db-page {
     align-items: center;
     justify-content: center;
     border: 0;
-    border-radius: 999px;
-    background: rgba(15, 28, 26, 0.06);
+    border-radius: 0.5rem;
+    background: transparent;
     color: var(--db-muted);
     font-family: inherit;
-    font-size: 1.25rem;
+    font-size: 1.35rem;
     font-weight: 500;
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
-    transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease;
+    transition: color 0.15s ease, opacity 0.15s ease;
 }
 
 body.db-page button.db-title-clear {
     padding: 0;
-    background: rgba(15, 28, 26, 0.06);
+    background: transparent;
     color: var(--db-muted);
 }
 
 .db-title-clear:hover,
 .db-title-clear:focus-visible {
-    background: rgba(15, 118, 110, 0.12);
+    background: transparent;
     color: var(--db-ink);
 }
 
 .db-title-clear:active {
-    background: rgba(15, 28, 26, 0.14);
+    background: transparent;
     color: var(--db-ink);
-    transform: scale(0.96);
+    opacity: 0.65;
 }
 
 body.db-page button.db-title-clear:hover,
-body.db-page button.db-title-clear:focus-visible {
-    background: rgba(15, 118, 110, 0.12);
-    color: var(--db-ink);
-}
-
+body.db-page button.db-title-clear:focus-visible,
 body.db-page button.db-title-clear:active {
-    background: rgba(15, 28, 26, 0.14);
+    background: transparent;
     color: var(--db-ink);
 }
 
