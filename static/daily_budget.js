@@ -270,8 +270,8 @@
   }
 
   let selectedDayKey = null;
-  let dayViewMode = 'chart';
   let lastDayStatus = null;
+  let dayModalOpener = null;
 
   function formatDayLabel(iso) {
     if (!iso) return '';
@@ -291,28 +291,6 @@
       day.status ||
       (spent <= 0 ? 'clear' : spent > lim + 0.005 ? 'over' : spent >= lim - 0.005 ? 'exact' : 'under')
     );
-  }
-
-  function dayDeltaLabel(day) {
-    const lim = Number(day.limit) || 0;
-    const spent = Number(day.spent) || 0;
-    const under = Number(day.underspend) || Math.max(0, lim - spent);
-    const over = Number(day.overspend) || Math.max(0, spent - lim);
-    const status = dayStatusName(day);
-    if (status === 'clear') return 'saved ' + money(lim);
-    if (status === 'over') return 'over ' + money(over);
-    if (status === 'exact') return 'exact';
-    return 'saved ' + money(under);
-  }
-
-  function setDayViewMode(mode) {
-    dayViewMode = mode === 'numbers' ? 'numbers' : 'chart';
-    document.querySelectorAll('.db-day-view-btn').forEach((btn) => {
-      const on = btn.dataset.dayView === dayViewMode;
-      btn.classList.toggle('db-day-view-btn--active', on);
-      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
-    if (lastDayStatus) renderDayByDay(lastDayStatus);
   }
 
   function buildDayInsightSummary(insights, days) {
@@ -339,19 +317,29 @@
     return parts.join(' · ');
   }
 
-  function renderDayDetail(day) {
-    const detail = $('goals-day-detail');
-    if (!detail) return;
-    if (!day) {
-      detail.hidden = true;
-      detail.innerHTML = '';
-      return;
+  function closeDayModal() {
+    const modal = $('goals-day-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.hidden = true;
+    document.body.classList.remove('db-day-modal-open');
+    if (dayModalOpener && typeof dayModalOpener.focus === 'function') {
+      dayModalOpener.focus();
     }
+    dayModalOpener = null;
+  }
+
+  function openDayModal(day, opener) {
+    const modal = $('goals-day-modal');
+    const title = $('goals-day-modal-title');
+    const body = $('goals-day-modal-body');
+    if (!modal || !title || !body || !day) return;
+
     const lim = Number(day.limit) || 0;
     const spent = Number(day.spent) || 0;
-    const under = Number(day.underspend) || 0;
+    const under = Number(day.underspend) || Math.max(0, lim - spent);
     const over = Number(day.overspend) || Math.max(0, spent - lim);
-    const status = day.status || (spent <= 0 ? 'clear' : spent > lim ? 'over' : 'under');
+    const status = dayStatusName(day);
     let outcome;
     if (status === 'clear') {
       outcome = 'Clear day — saved the full ' + money(lim) + ' allowance';
@@ -362,25 +350,186 @@
     } else {
       outcome = 'Saved ' + money(under) + ' toward underspend';
     }
-    detail.hidden = false;
-    detail.innerHTML =
-      '<div class="db-day-detail-top">' +
-      '<strong></strong>' +
+
+    selectedDayKey = day.date;
+    dayModalOpener = opener || null;
+    title.textContent = formatDayLabel(day.date);
+    body.innerHTML =
       '<span class="db-day-detail-status db-day-detail-status--' +
       status +
       '"></span>' +
-      '</div>' +
       '<div class="db-day-detail-grid">' +
-      '<div><span class="db-meta-label">Spent</span><span class="db-meta-value"></span></div>' +
-      '<div><span class="db-meta-label">Limit</span><span class="db-meta-value"></span></div>' +
+      '<div><span class="db-meta-label">Spent</span><span class="db-meta-value" data-k="spent"></span></div>' +
+      '<div><span class="db-meta-label">Limit</span><span class="db-meta-value" data-k="limit"></span></div>' +
       '</div>' +
       '<p class="db-day-detail-outcome"></p>';
-    detail.querySelector('strong').textContent = formatDayLabel(day.date);
-    detail.querySelector('.db-day-detail-status').textContent =
+    body.querySelector('.db-day-detail-status').textContent =
       status === 'clear' ? 'Clear' : status === 'over' ? 'Over' : status === 'exact' ? 'Exact' : 'Under';
-    detail.querySelectorAll('.db-meta-value')[0].textContent = money(spent);
-    detail.querySelectorAll('.db-meta-value')[1].textContent = money(lim);
-    detail.querySelector('.db-day-detail-outcome').textContent = outcome;
+    body.querySelector('[data-k="spent"]').textContent = money(spent);
+    body.querySelector('[data-k="limit"]').textContent = money(lim);
+    body.querySelector('.db-day-detail-outcome').textContent = outcome;
+
+    modal.classList.remove('hidden');
+    modal.hidden = false;
+    document.body.classList.add('db-day-modal-open');
+    const closeBtn = modal.querySelector('.db-day-modal-close');
+    if (closeBtn) closeBtn.focus();
+    if (lastDayStatus) highlightSelectedDot(lastDayStatus);
+  }
+
+  function highlightSelectedDot(status) {
+    const chart = $('goals-day-chart');
+    if (!chart) return;
+    chart.querySelectorAll('.db-day-dot').forEach((dot) => {
+      const on = dot.dataset.date === selectedDayKey;
+      dot.classList.toggle('db-day-dot--selected', on);
+      dot.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  function renderDayLineChart(days) {
+    const wrap = $('goals-day-linewrap');
+    const chart = $('goals-day-chart');
+    if (!wrap || !chart) return;
+
+    if (!days.length) {
+      wrap.classList.add('hidden');
+      wrap.hidden = true;
+      chart.innerHTML = '';
+      return;
+    }
+
+    wrap.classList.remove('hidden');
+    wrap.hidden = false;
+
+    const width = 360;
+    const height = 168;
+    const padL = 34;
+    const padR = 12;
+    const padT = 14;
+    const padB = 28;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+    const peak = Math.max(
+      1,
+      ...days.map((d) => Math.max(Number(d.limit) || 0, Number(d.spent) || 0))
+    );
+    const xAt = (i) => padL + (days.length === 1 ? plotW / 2 : (i / (days.length - 1)) * plotW);
+    const yAt = (v) => padT + plotH - (Math.max(0, Number(v) || 0) / peak) * plotH;
+
+    const spendPts = days.map((d, i) => ({
+      x: xAt(i),
+      y: yAt(d.spent),
+      day: d,
+    }));
+    const limitPts = days.map((d, i) => ({ x: xAt(i), y: yAt(d.limit) }));
+    const line = (pts) =>
+      pts.map((p, i) => (i === 0 ? 'M' : 'L') + p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' ');
+
+    const tickVals = [0, peak / 2, peak].map((v) => Math.round(v * 100) / 100);
+    const tickLabels = tickVals
+      .map((v) => {
+        const y = yAt(v);
+        const label =
+          v >= 100
+            ? '£' + Math.round(v)
+            : '£' + v.toLocaleString('en-GB', { maximumFractionDigits: v % 1 ? 2 : 0 });
+        return (
+          '<line class="db-day-grid" x1="' +
+          padL +
+          '" x2="' +
+          (width - padR) +
+          '" y1="' +
+          y.toFixed(1) +
+          '" y2="' +
+          y.toFixed(1) +
+          '"></line>' +
+          '<text class="db-day-axis" x="' +
+          (padL - 6) +
+          '" y="' +
+          (y + 3).toFixed(1) +
+          '" text-anchor="end">' +
+          label +
+          '</text>'
+        );
+      })
+      .join('');
+
+    const xLabels = days
+      .map((d, i) => {
+        const show =
+          days.length <= 10 || i === 0 || i === days.length - 1 || i % Math.ceil(days.length / 6) === 0;
+        if (!show) return '';
+        return (
+          '<text class="db-day-axis db-day-axis--x" x="' +
+          xAt(i).toFixed(1) +
+          '" y="' +
+          (height - 8) +
+          '" text-anchor="middle">' +
+          String(d.date).slice(-2) +
+          '</text>'
+        );
+      })
+      .join('');
+
+    chart.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    chart.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    chart.innerHTML =
+      tickLabels +
+      '<path class="db-day-limit-line" d="' +
+      line(limitPts) +
+      '" fill="none"></path>' +
+      '<path class="db-day-spend-line" d="' +
+      line(spendPts) +
+      '" fill="none"></path>' +
+      spendPts
+        .map((p) => {
+          const status = dayStatusName(p.day);
+          const selected = p.day.date === selectedDayKey;
+          return (
+            '<g class="db-day-dot' +
+            (status === 'over' ? ' db-day-dot--over' : '') +
+            (p.day.is_today ? ' db-day-dot--today' : '') +
+            (selected ? ' db-day-dot--selected' : '') +
+            '" data-date="' +
+            p.day.date +
+            '" tabindex="0" role="button" aria-pressed="' +
+            (selected ? 'true' : 'false') +
+            '" aria-label="' +
+            formatDayLabel(p.day.date) +
+            ': spent ' +
+            money(p.day.spent) +
+            ' of ' +
+            money(p.day.limit) +
+            '">' +
+            '<circle class="db-day-dot-hit" cx="' +
+            p.x.toFixed(1) +
+            '" cy="' +
+            p.y.toFixed(1) +
+            '" r="12"></circle>' +
+            '<circle class="db-day-dot-mark" cx="' +
+            p.x.toFixed(1) +
+            '" cy="' +
+            p.y.toFixed(1) +
+            '" r="4.5"></circle>' +
+            '</g>'
+          );
+        })
+        .join('') +
+      xLabels;
+
+    chart.querySelectorAll('.db-day-dot').forEach((dot) => {
+      const day = days.find((d) => d.date === dot.dataset.date);
+      if (!day) return;
+      const open = () => openDayModal(day, dot);
+      dot.addEventListener('click', open);
+      dot.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          open();
+        }
+      });
+    });
   }
 
   function renderDayByDay(status) {
@@ -389,10 +538,6 @@
     const insights = status.day_insights || {};
     const insightEl = $('goals-day-insight');
     const statsEl = $('goals-day-stats');
-    const legendEl = $('goals-day-legend');
-    const chart = $('goals-day-chart');
-    const numbers = $('goals-day-numbers');
-    const showNumbers = dayViewMode === 'numbers';
 
     if (insightEl) {
       insightEl.textContent = buildDayInsightSummary(insights, days);
@@ -400,22 +545,18 @@
 
     if (statsEl) {
       if (!days.length) {
+        statsEl.classList.add('hidden');
         statsEl.hidden = true;
         statsEl.innerHTML = '';
       } else {
+        statsEl.classList.remove('hidden');
         statsEl.hidden = false;
         const cells = [
           { label: 'Under', value: String(Number(insights.days_under) || 0) },
           { label: 'Over', value: String(Number(insights.days_over) || 0) },
           { label: 'Clear', value: String(Number(insights.days_clear) || 0) },
-          {
-            label: 'Avg spend',
-            value: money(insights.avg_spent),
-          },
-          {
-            label: 'Streak',
-            value: String(Number(insights.under_streak) || 0),
-          },
+          { label: 'Avg spend', value: money(insights.avg_spent) },
+          { label: 'Streak', value: String(Number(insights.under_streak) || 0) },
         ];
         statsEl.innerHTML = cells
           .map(
@@ -431,128 +572,19 @@
       }
     }
 
-    if (legendEl) {
-      legendEl.classList.toggle('hidden', !days.length || showNumbers);
-      legendEl.hidden = !days.length || showNumbers;
-    }
-    if (chart) {
-      const hideChart = showNumbers || !days.length;
-      chart.classList.toggle('hidden', hideChart);
-      chart.hidden = hideChart;
-      chart.innerHTML = '';
-    }
-    if (numbers) {
-      const hideNumbers = !showNumbers || !days.length;
-      numbers.classList.toggle('hidden', hideNumbers);
-      numbers.hidden = hideNumbers;
-      numbers.innerHTML = '';
-    }
-
     if (!days.length) {
       selectedDayKey = null;
-      renderDayDetail(null);
+      renderDayLineChart([]);
+      closeDayModal();
       return;
     }
 
-    const peak = days.reduce((m, day) => Math.max(m, Number(day.limit) || 0, Number(day.spent) || 0), 1);
-    let focus = days.find((d) => d.date === selectedDayKey);
-    if (!focus) {
-      focus = days.find((d) => d.is_today) || days[days.length - 1];
-      selectedDayKey = focus ? focus.date : null;
+    if (!days.some((d) => d.date === selectedDayKey)) {
+      const today = days.find((d) => d.is_today);
+      selectedDayKey = today ? today.date : days[days.length - 1].date;
     }
 
-    const selectDay = (day) => {
-      selectedDayKey = day.date;
-      renderDayByDay(status);
-    };
-
-    if (!showNumbers && chart) {
-      days.forEach((day) => {
-        const lim = Number(day.limit) || 0;
-        const spent = Number(day.spent) || 0;
-        const statusName = dayStatusName(day);
-        const spendH = Math.round((spent / peak) * 100);
-        const limH = Math.round((lim / peak) * 100);
-        const col = document.createElement('button');
-        col.type = 'button';
-        col.className =
-          'db-day-col' +
-          (day.is_today ? ' db-day-col--today' : '') +
-          (day.date === selectedDayKey ? ' db-day-col--selected' : '') +
-          (Number(day.weekday) >= 5 ? ' db-day-col--weekend' : '');
-        col.setAttribute('role', 'listitem');
-        col.setAttribute(
-          'aria-label',
-          formatDayLabel(day.date) +
-            ': spent ' +
-            money(spent) +
-            ' of ' +
-            money(lim) +
-            ', ' +
-            statusName
-        );
-        col.dataset.date = day.date;
-        col.innerHTML =
-          '<div class="db-day-bars">' +
-          '<div class="db-day-lim" style="height:' +
-          limH +
-          '%"></div>' +
-          '<div class="db-day-spend db-day-spend--' +
-          statusName +
-          (spent > lim ? ' db-day-spend--over' : '') +
-          '" style="height:' +
-          Math.max(spendH, spent > 0 ? 4 : 0) +
-          '%"></div>' +
-          '</div>' +
-          '<span>' +
-          String(day.date).slice(-2) +
-          '</span>';
-        col.addEventListener('click', () => selectDay(day));
-        chart.appendChild(col);
-      });
-    }
-
-    if (showNumbers && numbers) {
-      days.forEach((day) => {
-        const lim = Number(day.limit) || 0;
-        const spent = Number(day.spent) || 0;
-        const statusName = dayStatusName(day);
-        const li = document.createElement('li');
-        li.className =
-          'db-day-number-row' +
-          (day.date === selectedDayKey ? ' db-day-number-row--selected' : '') +
-          (day.is_today ? ' db-day-number-row--today' : '');
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'db-day-number-btn';
-        btn.setAttribute(
-          'aria-label',
-          formatDayLabel(day.date) +
-            ': spent ' +
-            money(spent) +
-            ' of ' +
-            money(lim) +
-            ', ' +
-            statusName
-        );
-        btn.innerHTML =
-          '<span class="db-day-number-date"></span>' +
-          '<span class="db-day-number-spent"></span>' +
-          '<span class="db-day-number-limit"></span>' +
-          '<span class="db-day-number-delta db-day-number-delta--' +
-          statusName +
-          '"></span>';
-        btn.querySelector('.db-day-number-date').textContent = formatDayLabel(day.date);
-        btn.querySelector('.db-day-number-spent').textContent = money(spent);
-        btn.querySelector('.db-day-number-limit').textContent = 'of ' + money(lim);
-        btn.querySelector('.db-day-number-delta').textContent = dayDeltaLabel(day);
-        btn.addEventListener('click', () => selectDay(day));
-        li.appendChild(btn);
-        numbers.appendChild(li);
-      });
-    }
-
-    renderDayDetail(focus);
+    renderDayLineChart(days);
   }
 
   function renderGoals(status) {
@@ -628,9 +660,15 @@
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
     });
 
-    document.querySelectorAll('.db-day-view-btn').forEach((btn) => {
-      btn.addEventListener('click', () => setDayViewMode(btn.dataset.dayView));
-    });
+    const dayModal = $('goals-day-modal');
+    if (dayModal) {
+      dayModal.querySelectorAll('[data-close-day-modal]').forEach((el) => {
+        el.addEventListener('click', closeDayModal);
+      });
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape' && !dayModal.hidden) closeDayModal();
+      });
+    }
 
     const titleInput = $('db-title');
     const titleClear = $('db-title-clear');

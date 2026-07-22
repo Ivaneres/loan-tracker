@@ -187,25 +187,31 @@
                 <ul id="goals-list" class="db-goals-list"></ul>
                 <p id="goals-empty" class="db-empty">No goals yet — add one to track progress against underspend.</p>
 
-                <div class="db-day-heading">
-                    <h3 class="db-subsection-title db-subsection-title--flush">This month, day by day</h3>
-                    <div class="db-day-view-toggle" role="group" aria-label="Day view">
-                        <button type="button" class="db-day-view-btn db-day-view-btn--active" data-day-view="chart" aria-pressed="true">Chart</button>
-                        <button type="button" class="db-day-view-btn" data-day-view="numbers" aria-pressed="false">Numbers</button>
-                    </div>
-                </div>
+                <h3 class="db-subsection-title">This month, day by day</h3>
                 <p class="db-day-insight" id="goals-day-insight">Loading…</p>
                 <div class="db-day-stats" id="goals-day-stats" hidden></div>
-                <div class="db-day-chart" id="goals-day-chart" role="list" aria-label="Daily spend versus limit"></div>
-                <div class="db-day-legend" id="goals-day-legend" hidden>
-                    <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--under"></i> Under</span>
-                    <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--clear"></i> Clear</span>
-                    <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--over"></i> Over</span>
+                <div class="db-day-linewrap" id="goals-day-linewrap" hidden>
+                    <svg class="db-day-linechart" id="goals-day-chart" role="img" aria-label="Daily spend versus limit"></svg>
+                    <div class="db-day-legend" id="goals-day-legend">
+                        <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--spend"></i> Spent</span>
+                        <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--limit"></i> Limit</span>
+                        <span class="db-day-legend-item"><i class="db-day-swatch db-day-swatch--over"></i> Over</span>
+                    </div>
+                    <p class="db-day-hint">Tap a day to see exact amounts</p>
                 </div>
-                <ul class="db-day-numbers" id="goals-day-numbers" hidden></ul>
-                <div class="db-day-detail" id="goals-day-detail" hidden></div>
             </div>
         </section>
+    </div>
+
+    <div id="goals-day-modal" class="db-day-modal hidden" hidden>
+        <div class="db-day-modal-backdrop" data-close-day-modal></div>
+        <div class="db-day-modal-sheet" role="dialog" aria-modal="true" aria-labelledby="goals-day-modal-title">
+            <div class="db-day-modal-top">
+                <h4 id="goals-day-modal-title" class="db-day-modal-title"></h4>
+                <button type="button" class="db-day-modal-close" data-close-day-modal aria-label="Close">×</button>
+            </div>
+            <div id="goals-day-modal-body" class="db-day-modal-body"></div>
+        </div>
     </div>
 
     <script>
