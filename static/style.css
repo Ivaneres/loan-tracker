@@ -3121,6 +3121,7 @@ body.db-page button.db-today-del:hover {
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x;
+    overscroll-behavior-x: none;
     padding: 0.35rem 0.85rem 0.15rem;
     scrollbar-width: thin;
 }

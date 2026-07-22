@@ -394,11 +394,62 @@
   const DAY_CHART_SLOT = 44;
   const DAY_CHART_HIT_RADIUS = 22;
   const DAY_CHART_MARK_RADIUS = 6.5;
-  const DAY_CHART_EDGE_PAD = 195;
+  let dayChartScrollBound = false;
 
-  function clampDayChartScroll(target, scroll) {
-    const maxScroll = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
-    return Math.max(0, Math.min(target, maxScroll));
+  function dayChartMarkContentX(mark, scroll) {
+    const scrollRect = scroll.getBoundingClientRect();
+    const markRect = mark.getBoundingClientRect();
+    if (!scrollRect.width || !markRect.width) return null;
+    return {
+      left: markRect.left - scrollRect.left + scroll.scrollLeft,
+      center: markRect.left + markRect.width / 2 - scrollRect.left + scroll.scrollLeft,
+      right: markRect.right - scrollRect.left + scroll.scrollLeft,
+    };
+  }
+
+  function dayChartScrollRange(scroll, chart) {
+    const nativeMax = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+    const marks = chart ? chart.querySelectorAll('.db-day-dot-mark') : [];
+    if (!marks.length || !scroll.clientWidth) {
+      return { min: 0, max: nativeMax };
+    }
+    const last = dayChartMarkContentX(marks[marks.length - 1], scroll);
+    if (!last) return { min: 0, max: nativeMax };
+
+    // Left: content start (keeps £ axis labels visible). Right: last day mark at the
+    // viewport edge — do not scroll into empty space past it.
+    const min = 0;
+    const max = Math.max(min, Math.min(last.right - scroll.clientWidth, nativeMax));
+    return { min, max };
+  }
+
+  function clampDayChartScroll(target, scroll, chart) {
+    const range = dayChartScrollRange(scroll, chart || $('goals-day-chart'));
+    return Math.max(range.min, Math.min(target, range.max));
+  }
+
+  function bindDayChartScrollLimits() {
+    const scroll = $('goals-day-chart-scroll');
+    if (!scroll || dayChartScrollBound) return;
+    dayChartScrollBound = true;
+    let framing = false;
+    const enforce = () => {
+      const chart = $('goals-day-chart');
+      const next = clampDayChartScroll(scroll.scrollLeft, scroll, chart);
+      if (Math.abs(next - scroll.scrollLeft) > 0.5) scroll.scrollLeft = next;
+    };
+    scroll.addEventListener(
+      'scroll',
+      () => {
+        if (framing) return;
+        framing = true;
+        requestAnimationFrame(() => {
+          framing = false;
+          enforce();
+        });
+      },
+      { passive: true }
+    );
   }
 
   function scrollDayChartToDate(dateKey, attempt) {
@@ -419,9 +470,10 @@
     }
 
     // Use rendered positions so SVG viewBox scaling stays correct.
-    const dotCenter = dotRect.left + dotRect.width / 2 - scrollRect.left + scroll.scrollLeft;
-    const ideal = dotCenter - scroll.clientWidth / 2;
-    scroll.scrollLeft = clampDayChartScroll(ideal, scroll);
+    const pos = dayChartMarkContentX(mark, scroll);
+    if (!pos) return;
+    const ideal = pos.center - scroll.clientWidth / 2;
+    scroll.scrollLeft = clampDayChartScroll(ideal, scroll, chart);
   }
 
   function scrollDayChartToToday(days) {
@@ -444,6 +496,7 @@
       chart.innerHTML = '';
       chart.style.width = '';
       chart.style.minWidth = '';
+      chart.style.height = '';
       hideDayTooltip();
       return;
     }
@@ -452,9 +505,11 @@
 
     wrap.classList.remove('hidden');
     wrap.hidden = false;
+    bindDayChartScrollLimits();
 
-    const padL = 38 + DAY_CHART_EDGE_PAD;
-    const padR = 20 + DAY_CHART_EDGE_PAD;
+    // Axis/label padding only — no extra empty room past the outer day marks.
+    const padL = 38;
+    const padR = 20;
     const padT = 16;
     const padB = 36;
     const plotW = days.length <= 1 ? DAY_CHART_SLOT : (days.length - 1) * DAY_CHART_SLOT;
