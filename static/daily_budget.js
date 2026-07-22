@@ -394,7 +394,12 @@
   const DAY_CHART_SLOT = 44;
   const DAY_CHART_HIT_RADIUS = 22;
   const DAY_CHART_MARK_RADIUS = 6.5;
-  const DAY_CHART_END_PAD = 195;
+  const DAY_CHART_EDGE_PAD = 195;
+
+  function clampDayChartScroll(target, scroll) {
+    const maxScroll = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+    return Math.max(0, Math.min(target, maxScroll));
+  }
 
   function scrollDayChartToDate(dateKey) {
     const scroll = $('goals-day-chart-scroll');
@@ -402,13 +407,14 @@
     if (!scroll || !chart || !dateKey) return;
     const dot = chart.querySelector('.db-day-dot[data-date="' + dateKey + '"]');
     if (!dot) return;
-    const mark = dot.querySelector('.db-day-dot-mark') || dot;
-    const scrollRect = scroll.getBoundingClientRect();
-    const dotRect = mark.getBoundingClientRect();
-    if (!scrollRect.width) return;
-    const dotCenter = dotRect.left + dotRect.width / 2 - scrollRect.left + scroll.scrollLeft;
-    const target = dotCenter - scroll.clientWidth / 2;
-    scroll.scrollLeft = Math.max(0, Math.min(target, scroll.scrollWidth - scroll.clientWidth));
+    const hit = dot.querySelector('.db-day-dot-hit');
+    if (!hit) return;
+    const cx = Number(hit.getAttribute('cx'));
+    if (!Number.isFinite(cx) || !scroll.clientWidth) return;
+
+    const dotCenter = chart.offsetLeft + cx;
+    const ideal = dotCenter - scroll.clientWidth / 2;
+    scroll.scrollLeft = clampDayChartScroll(ideal, scroll);
   }
 
   function scrollDayChartToToday(days) {
@@ -440,8 +446,8 @@
     wrap.classList.remove('hidden');
     wrap.hidden = false;
 
-    const padL = 38;
-    const padR = 20 + DAY_CHART_END_PAD;
+    const padL = 38 + DAY_CHART_EDGE_PAD;
+    const padR = 20 + DAY_CHART_EDGE_PAD;
     const padT = 16;
     const padB = 36;
     const plotW = days.length <= 1 ? DAY_CHART_SLOT : (days.length - 1) * DAY_CHART_SLOT;
