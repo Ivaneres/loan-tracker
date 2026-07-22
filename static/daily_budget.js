@@ -394,6 +394,8 @@
   const DAY_CHART_SLOT = 44;
   const DAY_CHART_HIT_RADIUS = 22;
   const DAY_CHART_MARK_RADIUS = 6.5;
+  // Keep a little air past the last day mark so it isn't clipped at the viewport edge.
+  const DAY_CHART_RIGHT_INSET = 14;
   let dayChartScrollBound = false;
 
   function dayChartMarkContentX(mark, scroll) {
@@ -416,10 +418,13 @@
     const last = dayChartMarkContentX(marks[marks.length - 1], scroll);
     if (!last) return { min: 0, max: nativeMax };
 
-    // Left: content start (keeps £ axis labels visible). Right: last day mark at the
-    // viewport edge — do not scroll into empty space past it.
+    // Left: content start (keeps £ axis labels visible). Right: last day mark inset
+    // from the viewport edge — no empty pad beyond that.
     const min = 0;
-    const max = Math.max(min, Math.min(last.right - scroll.clientWidth, nativeMax));
+    const max = Math.max(
+      min,
+      Math.min(last.right - scroll.clientWidth + DAY_CHART_RIGHT_INSET, nativeMax)
+    );
     return { min, max };
   }
 
@@ -509,7 +514,7 @@
 
     // Axis/label padding only — no extra empty room past the outer day marks.
     const padL = 38;
-    const padR = 20;
+    const padR = 20 + DAY_CHART_RIGHT_INSET;
     const padT = 16;
     const padB = 36;
     const plotW = days.length <= 1 ? DAY_CHART_SLOT : (days.length - 1) * DAY_CHART_SLOT;
