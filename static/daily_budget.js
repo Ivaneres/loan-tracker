@@ -375,6 +375,7 @@
     const closeBtn = modal.querySelector('.db-day-modal-close');
     if (closeBtn) closeBtn.focus();
     if (lastDayStatus) highlightSelectedDot(lastDayStatus);
+    scrollDayChartToDate(day.date);
   }
 
   function highlightSelectedDot(status) {
@@ -387,6 +388,24 @@
     });
   }
 
+  const DAY_CHART_SLOT = 44;
+  const DAY_CHART_HIT_RADIUS = 22;
+  const DAY_CHART_MARK_RADIUS = 6.5;
+
+  function scrollDayChartToDate(dateKey) {
+    const scroll = $('goals-day-chart-scroll');
+    const chart = $('goals-day-chart');
+    if (!scroll || !chart || !dateKey) return;
+    const dot = chart.querySelector('.db-day-dot[data-date="' + dateKey + '"]');
+    if (!dot) return;
+    const hit = dot.querySelector('.db-day-dot-hit');
+    if (!hit) return;
+    const cx = Number(hit.getAttribute('cx'));
+    if (!Number.isFinite(cx)) return;
+    const target = cx - scroll.clientWidth / 2;
+    scroll.scrollLeft = Math.max(0, Math.min(target, scroll.scrollWidth - scroll.clientWidth));
+  }
+
   function renderDayLineChart(days) {
     const wrap = $('goals-day-linewrap');
     const chart = $('goals-day-chart');
@@ -396,25 +415,27 @@
       wrap.classList.add('hidden');
       wrap.hidden = true;
       chart.innerHTML = '';
+      chart.style.width = '';
+      chart.style.minWidth = '';
       return;
     }
 
     wrap.classList.remove('hidden');
     wrap.hidden = false;
 
-    const width = 360;
-    const height = 168;
-    const padL = 34;
-    const padR = 12;
-    const padT = 14;
-    const padB = 28;
-    const plotW = width - padL - padR;
+    const padL = 38;
+    const padR = 20;
+    const padT = 16;
+    const padB = 36;
+    const plotW = days.length <= 1 ? DAY_CHART_SLOT : (days.length - 1) * DAY_CHART_SLOT;
+    const width = padL + padR + plotW;
+    const height = 188;
     const plotH = height - padT - padB;
     const peak = Math.max(
       1,
       ...days.map((d) => Math.max(Number(d.limit) || 0, Number(d.spent) || 0))
     );
-    const xAt = (i) => padL + (days.length === 1 ? plotW / 2 : (i / (days.length - 1)) * plotW);
+    const xAt = (i) => padL + (days.length === 1 ? plotW / 2 : i * DAY_CHART_SLOT);
     const yAt = (v) => padT + plotH - (Math.max(0, Number(v) || 0) / peak) * plotH;
 
     const spendPts = days.map((d, i) => ({
@@ -445,7 +466,7 @@
           y.toFixed(1) +
           '"></line>' +
           '<text class="db-day-axis" x="' +
-          (padL - 6) +
+          (padL - 8) +
           '" y="' +
           (y + 3).toFixed(1) +
           '" text-anchor="end">' +
@@ -457,14 +478,14 @@
 
     const xLabels = days
       .map((d, i) => {
-        const show =
-          days.length <= 10 || i === 0 || i === days.length - 1 || i % Math.ceil(days.length / 6) === 0;
-        if (!show) return '';
+        const isToday = !!d.is_today;
         return (
-          '<text class="db-day-axis db-day-axis--x" x="' +
+          '<text class="db-day-axis db-day-axis--x' +
+          (isToday ? ' db-day-axis--today' : '') +
+          '" x="' +
           xAt(i).toFixed(1) +
           '" y="' +
-          (height - 8) +
+          (height - 10) +
           '" text-anchor="middle">' +
           String(d.date).slice(-2) +
           '</text>'
@@ -473,7 +494,9 @@
       .join('');
 
     chart.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
-    chart.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    chart.setAttribute('preserveAspectRatio', 'xMinYMid meet');
+    chart.style.width = width + 'px';
+    chart.style.minWidth = width + 'px';
     chart.innerHTML =
       tickLabels +
       '<path class="db-day-limit-line" d="' +
@@ -506,12 +529,16 @@
             p.x.toFixed(1) +
             '" cy="' +
             p.y.toFixed(1) +
-            '" r="12"></circle>' +
+            '" r="' +
+            DAY_CHART_HIT_RADIUS +
+            '"></circle>' +
             '<circle class="db-day-dot-mark" cx="' +
             p.x.toFixed(1) +
             '" cy="' +
             p.y.toFixed(1) +
-            '" r="4.5"></circle>' +
+            '" r="' +
+            DAY_CHART_MARK_RADIUS +
+            '"></circle>' +
             '</g>'
           );
         })
@@ -530,6 +557,9 @@
         }
       });
     });
+
+    const focusDate = selectedDayKey || (days.find((d) => d.is_today) || days[days.length - 1]).date;
+    requestAnimationFrame(() => scrollDayChartToDate(focusDate));
   }
 
   function renderDayByDay(status) {
