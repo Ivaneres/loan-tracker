@@ -3122,7 +3122,6 @@ body.db-page button.db-today-del:hover {
     -webkit-overflow-scrolling: touch;
     touch-action: pan-x;
     padding: 0.35rem 0.85rem 0.15rem;
-    scroll-snap-type: x proximity;
     scrollbar-width: thin;
 }
 
@@ -3172,7 +3171,6 @@ body.db-page button.db-today-del:hover {
 .db-day-dot {
     cursor: pointer;
     outline: none;
-    scroll-snap-align: center;
 }
 
 .db-day-dot-hit {

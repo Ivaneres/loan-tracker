@@ -401,18 +401,25 @@
     return Math.max(0, Math.min(target, maxScroll));
   }
 
-  function scrollDayChartToDate(dateKey) {
+  function scrollDayChartToDate(dateKey, attempt) {
     const scroll = $('goals-day-chart-scroll');
     const chart = $('goals-day-chart');
     if (!scroll || !chart || !dateKey) return;
     const dot = chart.querySelector('.db-day-dot[data-date="' + dateKey + '"]');
     if (!dot) return;
-    const hit = dot.querySelector('.db-day-dot-hit');
-    if (!hit) return;
-    const cx = Number(hit.getAttribute('cx'));
-    if (!Number.isFinite(cx) || !scroll.clientWidth) return;
+    const mark = dot.querySelector('.db-day-dot-mark') || dot;
+    const scrollRect = scroll.getBoundingClientRect();
+    const dotRect = mark.getBoundingClientRect();
+    // Panel may still be hidden / not laid out — retry a few frames.
+    if (!scrollRect.width || !dotRect.width) {
+      if ((attempt || 0) < 8) {
+        requestAnimationFrame(() => scrollDayChartToDate(dateKey, (attempt || 0) + 1));
+      }
+      return;
+    }
 
-    const dotCenter = chart.offsetLeft + cx;
+    // Use rendered positions so SVG viewBox scaling stays correct.
+    const dotCenter = dotRect.left + dotRect.width / 2 - scrollRect.left + scroll.scrollLeft;
     const ideal = dotCenter - scroll.clientWidth / 2;
     scroll.scrollLeft = clampDayChartScroll(ideal, scroll);
   }
@@ -520,6 +527,7 @@
     chart.setAttribute('preserveAspectRatio', 'xMinYMid meet');
     chart.style.width = width + 'px';
     chart.style.minWidth = width + 'px';
+    chart.style.height = height + 'px';
     chart.innerHTML =
       tickLabels +
       '<path class="db-day-limit-line" d="' +
