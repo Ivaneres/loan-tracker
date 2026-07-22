@@ -270,6 +270,8 @@
   }
 
   let selectedDayKey = null;
+  let dayViewMode = 'chart';
+  let lastDayStatus = null;
 
   function formatDayLabel(iso) {
     if (!iso) return '';
@@ -280,6 +282,37 @@
       day: 'numeric',
       month: 'short',
     });
+  }
+
+  function dayStatusName(day) {
+    const lim = Number(day.limit) || 0;
+    const spent = Number(day.spent) || 0;
+    return (
+      day.status ||
+      (spent <= 0 ? 'clear' : spent > lim + 0.005 ? 'over' : spent >= lim - 0.005 ? 'exact' : 'under')
+    );
+  }
+
+  function dayDeltaLabel(day) {
+    const lim = Number(day.limit) || 0;
+    const spent = Number(day.spent) || 0;
+    const under = Number(day.underspend) || Math.max(0, lim - spent);
+    const over = Number(day.overspend) || Math.max(0, spent - lim);
+    const status = dayStatusName(day);
+    if (status === 'clear') return 'saved ' + money(lim);
+    if (status === 'over') return 'over ' + money(over);
+    if (status === 'exact') return 'exact';
+    return 'saved ' + money(under);
+  }
+
+  function setDayViewMode(mode) {
+    dayViewMode = mode === 'numbers' ? 'numbers' : 'chart';
+    document.querySelectorAll('.db-day-view-btn').forEach((btn) => {
+      const on = btn.dataset.dayView === dayViewMode;
+      btn.classList.toggle('db-day-view-btn--active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    if (lastDayStatus) renderDayByDay(lastDayStatus);
   }
 
   function buildDayInsightSummary(insights, days) {
@@ -351,12 +384,15 @@
   }
 
   function renderDayByDay(status) {
+    lastDayStatus = status;
     const days = status.days || [];
     const insights = status.day_insights || {};
     const insightEl = $('goals-day-insight');
     const statsEl = $('goals-day-stats');
     const legendEl = $('goals-day-legend');
     const chart = $('goals-day-chart');
+    const numbers = $('goals-day-numbers');
+    const showNumbers = dayViewMode === 'numbers';
 
     if (insightEl) {
       insightEl.textContent = buildDayInsightSummary(insights, days);
@@ -396,11 +432,21 @@
     }
 
     if (legendEl) {
-      legendEl.hidden = !days.length;
+      legendEl.classList.toggle('hidden', !days.length || showNumbers);
+      legendEl.hidden = !days.length || showNumbers;
     }
-
-    if (!chart) return;
-    chart.innerHTML = '';
+    if (chart) {
+      const hideChart = showNumbers || !days.length;
+      chart.classList.toggle('hidden', hideChart);
+      chart.hidden = hideChart;
+      chart.innerHTML = '';
+    }
+    if (numbers) {
+      const hideNumbers = !showNumbers || !days.length;
+      numbers.classList.toggle('hidden', hideNumbers);
+      numbers.hidden = hideNumbers;
+      numbers.innerHTML = '';
+    }
 
     if (!days.length) {
       selectedDayKey = null;
@@ -415,53 +461,96 @@
       selectedDayKey = focus ? focus.date : null;
     }
 
-    days.forEach((day) => {
-      const lim = Number(day.limit) || 0;
-      const spent = Number(day.spent) || 0;
-      const statusName =
-        day.status || (spent <= 0 ? 'clear' : spent > lim + 0.005 ? 'over' : spent >= lim - 0.005 ? 'exact' : 'under');
-      const spendH = Math.round((spent / peak) * 100);
-      const limH = Math.round((lim / peak) * 100);
-      const col = document.createElement('button');
-      col.type = 'button';
-      col.className =
-        'db-day-col' +
-        (day.is_today ? ' db-day-col--today' : '') +
-        (day.date === selectedDayKey ? ' db-day-col--selected' : '') +
-        (Number(day.weekday) >= 5 ? ' db-day-col--weekend' : '');
-      col.setAttribute('role', 'listitem');
-      col.setAttribute(
-        'aria-label',
-        formatDayLabel(day.date) +
-          ': spent ' +
-          money(spent) +
-          ' of ' +
-          money(lim) +
-          ', ' +
-          statusName
-      );
-      col.dataset.date = day.date;
-      col.innerHTML =
-        '<div class="db-day-bars">' +
-        '<div class="db-day-lim" style="height:' +
-        limH +
-        '%"></div>' +
-        '<div class="db-day-spend db-day-spend--' +
-        statusName +
-        (spent > lim ? ' db-day-spend--over' : '') +
-        '" style="height:' +
-        Math.max(spendH, spent > 0 ? 4 : 0) +
-        '%"></div>' +
-        '</div>' +
-        '<span>' +
-        String(day.date).slice(-2) +
-        '</span>';
-      col.addEventListener('click', () => {
-        selectedDayKey = day.date;
-        renderDayByDay(status);
+    const selectDay = (day) => {
+      selectedDayKey = day.date;
+      renderDayByDay(status);
+    };
+
+    if (!showNumbers && chart) {
+      days.forEach((day) => {
+        const lim = Number(day.limit) || 0;
+        const spent = Number(day.spent) || 0;
+        const statusName = dayStatusName(day);
+        const spendH = Math.round((spent / peak) * 100);
+        const limH = Math.round((lim / peak) * 100);
+        const col = document.createElement('button');
+        col.type = 'button';
+        col.className =
+          'db-day-col' +
+          (day.is_today ? ' db-day-col--today' : '') +
+          (day.date === selectedDayKey ? ' db-day-col--selected' : '') +
+          (Number(day.weekday) >= 5 ? ' db-day-col--weekend' : '');
+        col.setAttribute('role', 'listitem');
+        col.setAttribute(
+          'aria-label',
+          formatDayLabel(day.date) +
+            ': spent ' +
+            money(spent) +
+            ' of ' +
+            money(lim) +
+            ', ' +
+            statusName
+        );
+        col.dataset.date = day.date;
+        col.innerHTML =
+          '<div class="db-day-bars">' +
+          '<div class="db-day-lim" style="height:' +
+          limH +
+          '%"></div>' +
+          '<div class="db-day-spend db-day-spend--' +
+          statusName +
+          (spent > lim ? ' db-day-spend--over' : '') +
+          '" style="height:' +
+          Math.max(spendH, spent > 0 ? 4 : 0) +
+          '%"></div>' +
+          '</div>' +
+          '<span>' +
+          String(day.date).slice(-2) +
+          '</span>';
+        col.addEventListener('click', () => selectDay(day));
+        chart.appendChild(col);
       });
-      chart.appendChild(col);
-    });
+    }
+
+    if (showNumbers && numbers) {
+      days.forEach((day) => {
+        const lim = Number(day.limit) || 0;
+        const spent = Number(day.spent) || 0;
+        const statusName = dayStatusName(day);
+        const li = document.createElement('li');
+        li.className =
+          'db-day-number-row' +
+          (day.date === selectedDayKey ? ' db-day-number-row--selected' : '') +
+          (day.is_today ? ' db-day-number-row--today' : '');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'db-day-number-btn';
+        btn.setAttribute(
+          'aria-label',
+          formatDayLabel(day.date) +
+            ': spent ' +
+            money(spent) +
+            ' of ' +
+            money(lim) +
+            ', ' +
+            statusName
+        );
+        btn.innerHTML =
+          '<span class="db-day-number-date"></span>' +
+          '<span class="db-day-number-spent"></span>' +
+          '<span class="db-day-number-limit"></span>' +
+          '<span class="db-day-number-delta db-day-number-delta--' +
+          statusName +
+          '"></span>';
+        btn.querySelector('.db-day-number-date').textContent = formatDayLabel(day.date);
+        btn.querySelector('.db-day-number-spent').textContent = money(spent);
+        btn.querySelector('.db-day-number-limit').textContent = 'of ' + money(lim);
+        btn.querySelector('.db-day-number-delta').textContent = dayDeltaLabel(day);
+        btn.addEventListener('click', () => selectDay(day));
+        li.appendChild(btn);
+        numbers.appendChild(li);
+      });
+    }
 
     renderDayDetail(focus);
   }
@@ -537,6 +626,10 @@
   function bind() {
     document.querySelectorAll('.db-panel-tab').forEach((btn) => {
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
+    });
+
+    document.querySelectorAll('.db-day-view-btn').forEach((btn) => {
+      btn.addEventListener('click', () => setDayViewMode(btn.dataset.dayView));
     });
 
     const titleInput = $('db-title');

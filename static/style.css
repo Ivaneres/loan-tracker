@@ -3066,6 +3066,47 @@ body.db-page button.db-today-del:hover {
     transition: width 0.35s ease;
 }
 
+.db-day-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 1.35rem 0 0.55rem;
+    flex-wrap: wrap;
+}
+
+.db-day-heading .db-subsection-title {
+    margin: 0;
+}
+
+.db-day-view-toggle {
+    display: inline-flex;
+    padding: 0.18rem;
+    border-radius: 999px;
+    background: rgba(15, 28, 26, 0.06);
+    border: 1px solid var(--db-line);
+    gap: 0.15rem;
+}
+
+.db-day-view-btn {
+    border: 0;
+    background: transparent;
+    color: var(--db-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    cursor: pointer;
+    line-height: 1.2;
+}
+
+.db-day-view-btn--active {
+    background: var(--db-surface-solid);
+    color: var(--db-ink);
+    box-shadow: 0 1px 2px rgba(15, 28, 26, 0.08);
+}
+
 .db-day-insight {
     margin: -0.15rem 0 0.75rem;
     font-size: 0.92rem;
@@ -3215,6 +3256,98 @@ body.db-page button.db-today-del:hover {
     margin-top: 0.55rem;
     font-size: 0.75rem;
     color: var(--db-muted);
+}
+
+.db-day-numbers {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin: 0.35rem 0 0;
+    max-height: 18rem;
+    overflow-y: auto;
+    padding-right: 0.15rem;
+}
+
+.db-day-number-row {
+    margin: 0;
+}
+
+.db-day-number-btn {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(5.5rem, 1.1fr) auto auto minmax(5.5rem, 1fr);
+    align-items: center;
+    gap: 0.45rem 0.65rem;
+    text-align: left;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.55);
+    border-radius: 0.8rem;
+    padding: 0.55rem 0.7rem;
+    cursor: pointer;
+    color: var(--db-ink);
+    transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.db-day-number-row--selected .db-day-number-btn,
+.db-day-number-btn:hover,
+.db-day-number-btn:focus-visible {
+    background: rgba(13, 122, 98, 0.1);
+    border-color: rgba(13, 122, 98, 0.18);
+    outline: none;
+}
+
+.db-day-number-row--today .db-day-number-date {
+    font-weight: 700;
+    color: var(--db-accent-deep);
+}
+
+.db-day-number-date {
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+.db-day-number-spent {
+    font-family: var(--font-money);
+    font-weight: 600;
+    font-size: 0.92rem;
+    justify-self: end;
+}
+
+.db-day-number-limit {
+    font-size: 0.78rem;
+    color: var(--db-muted);
+    justify-self: start;
+}
+
+.db-day-number-delta {
+    font-size: 0.78rem;
+    font-weight: 600;
+    justify-self: end;
+    color: var(--db-accent-deep);
+}
+
+.db-day-number-delta--over {
+    color: var(--db-warn);
+}
+
+.db-day-number-delta--clear,
+.db-day-number-delta--exact {
+    color: var(--db-muted);
+}
+
+@media (max-width: 379px) {
+    .db-day-number-btn {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "date delta"
+            "spent limit";
+    }
+
+    .db-day-number-date { grid-area: date; }
+    .db-day-number-spent { grid-area: spent; justify-self: start; }
+    .db-day-number-limit { grid-area: limit; justify-self: end; }
+    .db-day-number-delta { grid-area: delta; }
 }
 
 .db-day-legend-item {
