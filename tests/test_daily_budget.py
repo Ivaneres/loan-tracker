@@ -57,7 +57,9 @@ class TestDailyBudgetModes(unittest.TestCase):
             'daily_mode': 'fixed',
         }
         spend = {'2024-01-01': 5.0, '2024-01-02': 100.0}
-        limits = app_mod._daily_budget_day_limits(figures, '2024-01', spend, date(2024, 1, 5))
+        limits = app_mod._daily_budget_day_limits(
+            figures, spend, date(2024, 1, 1), date(2024, 1, 31),
+        )
         self.assertEqual(limits['2024-01-01'], 10.0)
         self.assertEqual(limits['2024-01-15'], 10.0)
 
@@ -68,7 +70,9 @@ class TestDailyBudgetModes(unittest.TestCase):
         }
         # Day 1: spend all 300 on first day → later days ~0
         spend = {'2024-01-01': 300.0}
-        limits = app_mod._daily_budget_day_limits(figures, '2024-01', spend, date(2024, 1, 3))
+        limits = app_mod._daily_budget_day_limits(
+            figures, spend, date(2024, 1, 1), date(2024, 1, 31),
+        )
         self.assertAlmostEqual(limits['2024-01-01'], round(300.0 / 31, 2))
         self.assertEqual(limits['2024-01-02'], 0.0)
 
@@ -78,15 +82,17 @@ class TestDailyBudgetModes(unittest.TestCase):
             'daily_mode': 'carry_surplus',
         }
         spend = {'2024-01-01': 0.0}
-        limits = app_mod._daily_budget_day_limits(figures, '2024-01', spend, date(2024, 1, 2))
+        limits = app_mod._daily_budget_day_limits(
+            figures, spend, date(2024, 1, 1), date(2024, 1, 31),
+        )
         self.assertEqual(limits['2024-01-01'], 10.0)
         self.assertEqual(limits['2024-01-02'], 20.0)
 
-    def test_envelope_mid_month_start_does_not_inflate_limit(self):
+    def test_envelope_mid_period_start_does_not_inflate_limit(self):
         """Without pacing_start, empty early days leave full pool ÷ days left.
 
-        With mid-month pacing_start, assume average prior spend so join-day
-        limit ≈ base daily (disc / days_in_month).
+        With mid-period pacing_start, assume average prior spend so join-day
+        limit ≈ base daily (disc / days_in_period).
         """
         figures = {
             'discretionary_monthly': 310.0,
@@ -94,42 +100,77 @@ class TestDailyBudgetModes(unittest.TestCase):
         }
         spend = {}
         inflated = app_mod._daily_budget_day_limits(
-            figures, '2024-01', spend, date(2024, 1, 15),
+            figures, spend, date(2024, 1, 1), date(2024, 1, 31),
         )
         self.assertEqual(inflated['2024-01-15'], round(310.0 / 17, 2))
 
         paced = app_mod._daily_budget_day_limits(
-            figures, '2024-01', spend, date(2024, 1, 15),
+            figures, spend, date(2024, 1, 1), date(2024, 1, 31),
             pacing_start=date(2024, 1, 15),
         )
         self.assertEqual(paced['2024-01-14'], 0.0)
         self.assertEqual(paced['2024-01-15'], 10.0)
 
-    def test_carry_surplus_mid_month_start_skips_phantom_roll(self):
+    def test_carry_surplus_mid_period_start_skips_phantom_roll(self):
         figures = {
             'discretionary_monthly': 310.0,
             'daily_mode': 'carry_surplus',
         }
         spend = {}
         limits = app_mod._daily_budget_day_limits(
-            figures, '2024-01', spend, date(2024, 1, 15),
+            figures, spend, date(2024, 1, 1), date(2024, 1, 31),
             pacing_start=date(2024, 1, 15),
         )
         self.assertEqual(limits['2024-01-14'], 0.0)
         self.assertEqual(limits['2024-01-15'], 10.0)
         self.assertEqual(limits['2024-01-16'], 20.0)  # unused day 15 rolls once
 
+    def test_pay_period_spans_month_boundary(self):
+        # Payday 25: 25 Jan – 24 Feb = 31 days → £10/day on £310
+        figures = {
+            'discretionary_monthly': 310.0,
+            'daily_mode': 'fixed',
+        }
+        limits = app_mod._daily_budget_day_limits(
+            figures, {}, date(2024, 1, 25), date(2024, 2, 24),
+        )
+        self.assertEqual(limits['2024-01-25'], 10.0)
+        self.assertEqual(limits['2024-02-01'], 10.0)
+        self.assertEqual(limits['2024-02-24'], 10.0)
+        self.assertNotIn('2024-01-24', limits)
+
+
+class TestDailyBudgetPayPeriod(unittest.TestCase):
+    def test_pay_day_1_is_calendar_month(self):
+        start, end = app_mod._daily_budget_pay_period(date(2024, 1, 15), 1)
+        self.assertEqual(start, date(2024, 1, 1))
+        self.assertEqual(end, date(2024, 1, 31))
+
+    def test_pay_day_25_current_and_previous_cycle(self):
+        start, end = app_mod._daily_budget_pay_period(date(2024, 1, 30), 25)
+        self.assertEqual(start, date(2024, 1, 25))
+        self.assertEqual(end, date(2024, 2, 24))
+
+        start, end = app_mod._daily_budget_pay_period(date(2024, 1, 10), 25)
+        self.assertEqual(start, date(2023, 12, 25))
+        self.assertEqual(end, date(2024, 1, 24))
+
+    def test_pay_day_31_clamps_in_february(self):
+        start, end = app_mod._daily_budget_pay_period(date(2024, 2, 29), 31)
+        self.assertEqual(start, date(2024, 2, 29))  # leap year clamp
+        self.assertEqual(end, date(2024, 3, 30))
+
 
 class TestDailyBudgetTrackingFrom(unittest.TestCase):
-    def test_pacing_start_clamps_within_month(self):
+    def test_pacing_start_clamps_within_period(self):
         plan = {'tracking_from': '2024-01-15'}
         self.assertEqual(
-            app_mod._daily_budget_pacing_start(plan, '2024-01'),
+            app_mod._daily_budget_pacing_start(plan, date(2024, 1, 1), date(2024, 1, 31)),
             date(2024, 1, 15),
         )
-        # Later months reset to the 1st
+        # Tracking from a previous period → start of this period
         self.assertEqual(
-            app_mod._daily_budget_pacing_start(plan, '2024-02'),
+            app_mod._daily_budget_pacing_start(plan, date(2024, 2, 1), date(2024, 2, 29)),
             date(2024, 2, 1),
         )
 
@@ -141,6 +182,7 @@ class TestDailyBudgetTrackingFrom(unittest.TestCase):
                     'bills_monthly': 0,
                     'savings_percent': 0,
                     'daily_mode': 'fixed',
+                    'pay_day': 1,
                     'tracking_from': '2024-01-15',
                     'bill_items': [],
                 },
@@ -153,6 +195,8 @@ class TestDailyBudgetTrackingFrom(unittest.TestCase):
         }
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 15))
         self.assertEqual(status['pacing_start'], '2024-01-15')
+        self.assertEqual(status['period_start'], '2024-01-01')
+        self.assertEqual(status['period_end'], '2024-01-31')
         self.assertEqual(status['daily_limit'], 10.0)
         self.assertEqual(status['remaining_today'], 7.0)
         # Only day 15 counts — not 14 phantom clear days × £10
@@ -164,6 +208,34 @@ class TestDailyBudgetTrackingFrom(unittest.TestCase):
             status['discretionary_remaining_month'],
             round(310.0 * 17 / 31, 2) - 3.0,
         )
+
+    def test_status_with_pay_day_includes_cross_month_spend(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'pay_day': 25,
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-26', amount=5, category='dining', month='2024-01'),
+                _tx(id='2', date='2024-02-01', amount=7, category='dining', month='2024-02'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 1))
+        self.assertEqual(status['pay_day'], 25)
+        self.assertEqual(status['period_start'], '2024-01-25')
+        self.assertEqual(status['period_end'], '2024-02-24')
+        self.assertEqual(status['days_in_period'], 31)
+        self.assertEqual(status['daily_limit'], 10.0)
+        self.assertEqual(status['spent_mtd'], 12.0)
+        self.assertEqual(status['spent_today'], 7.0)
 
 
 class TestDailyBudgetStatus(unittest.TestCase):
@@ -411,15 +483,28 @@ class TestDailyPlanTrackingFromApi(unittest.TestCase):
         self._login()
         resp = self.client.put('/api/spending/daily/plan', json={
             'tracking_from': '2024-01-10',
+            'pay_day': 25,
         })
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.get_json()['plan']['tracking_from'], '2024-01-10')
+        body = resp.get_json()
+        self.assertEqual(body['plan']['tracking_from'], '2024-01-10')
+        self.assertEqual(body['plan']['pay_day'], 25)
 
         resp2 = self.client.put('/api/spending/daily/plan', json={
             'tracking_from': None,
         })
         self.assertEqual(resp2.status_code, 200)
         self.assertIsNone(resp2.get_json()['plan']['tracking_from'])
+        self.assertEqual(resp2.get_json()['plan']['pay_day'], 25)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_rejects_invalid_pay_day(self, load_mock, save_mock):
+        self.spending['daily_budget']['plan']['updated_at'] = '2024-01-01T00:00:00Z'
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.put('/api/spending/daily/plan', json={'pay_day': 40})
+        self.assertEqual(resp.status_code, 400)
 
 
 class TestHybridBillsEstimate(unittest.TestCase):

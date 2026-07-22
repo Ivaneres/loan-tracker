@@ -2649,7 +2649,8 @@ body.db-page button.db-cat--selected {
     font-weight: 400;
 }
 
-.db-field-grid > .db-field:has(#plan-tracking-from) {
+.db-field-grid > .db-field:has(#plan-tracking-from),
+.db-field-grid > .db-field:has(#plan-pay-day) {
     grid-column: 1 / -1;
 }
 

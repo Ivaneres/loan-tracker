@@ -457,7 +457,10 @@ def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
         'bills_monthly': 0.0,
         'savings_percent': 20.0,
         'daily_mode': 'envelope',
-        # ISO date when the user began daily tracking. Mid-month starts pro-rate the
+        # Day of month salary usually arrives (1–31). Daily pacing uses the pay
+        # period from that day through the day before the next payday.
+        'pay_day': 1,
+        # ISO date when the user began daily tracking. Mid-period starts pro-rate the
         # remaining pool so empty pre-join days are not treated as £0 underspend.
         'tracking_from': None,
         'source_month': None,
@@ -470,6 +473,15 @@ def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
             changed = True
     if plan.get('daily_mode') not in DAILY_BUDGET_MODES:
         plan['daily_mode'] = 'envelope'
+        changed = True
+    try:
+        pay_day = int(plan.get('pay_day'))
+    except (TypeError, ValueError):
+        pay_day = 1
+    if pay_day < 1 or pay_day > 31:
+        pay_day = 1
+    if plan.get('pay_day') != pay_day:
+        plan['pay_day'] = pay_day
         changed = True
     if not isinstance(plan.get('bill_items'), list):
         plan['bill_items'] = []
@@ -2645,16 +2657,20 @@ def _daily_budget_plan_figures(plan: dict) -> dict:
     }
 
 
-def _daily_budget_spend_by_date(spending: dict, month_key: str) -> dict[str, float]:
+def _daily_budget_spend_by_date(
+    spending: dict,
+    start: date,
+    end: date,
+) -> dict[str, float]:
     by_day: dict[str, float] = defaultdict(float)
     for t in spending.get('transactions') or []:
         if not _daily_budget_is_discretionary_tx(t):
             continue
-        d = str(t.get('date') or '')[:10]
-        if len(d) != 10 or d[:7] != month_key:
+        d = _parse_iso_date(str(t.get('date') or '')[:10])
+        if d is None or d < start or d > end:
             continue
         try:
-            by_day[d] += float(t.get('amount') or 0)
+            by_day[d.isoformat()] += float(t.get('amount') or 0)
         except (TypeError, ValueError):
             continue
     return {k: round(v, 2) for k, v in by_day.items()}
@@ -2666,73 +2682,109 @@ def _daily_budget_parse_tracking_from(raw) -> date | None:
     return _parse_iso_date(str(raw))
 
 
-def _daily_budget_pacing_start(plan: dict, month_key: str) -> date | None:
-    """First day that counts for daily pacing in this month.
+def _daily_budget_parse_pay_day(raw) -> int:
+    """Payday as day-of-month 1–31. Invalid / missing → 1 (calendar month)."""
+    try:
+        day = int(raw)
+    except (TypeError, ValueError):
+        return 1
+    if day < 1 or day > 31:
+        return 1
+    return day
 
-    When ``tracking_from`` falls mid-month, earlier calendar days are excluded so
-    missing data is not treated as £0 spend. In later months the window resets to
-    the 1st.
+
+def _daily_budget_clamp_dom(year: int, month: int, day: int) -> date:
+    last = monthrange(year, month)[1]
+    return date(year, month, min(max(1, day), last))
+
+
+def _daily_budget_pay_period(as_of: date, pay_day: int) -> tuple[date, date]:
+    """Inclusive pay period containing ``as_of`` for a recurring monthly payday.
+
+    Period runs from payday through the day before the next payday. Days that
+    don't exist in a short month (e.g. 31 in February) clamp to the month's last
+    day.
     """
-    first = _first_day_of_month(month_key)
-    last = _last_day_of_month(month_key)
-    if first is None or last is None:
-        return None
+    pay_day = _daily_budget_parse_pay_day(pay_day)
+    start_this = _daily_budget_clamp_dom(as_of.year, as_of.month, pay_day)
+    if as_of >= start_this:
+        period_start = start_this
+        next_month = as_of + relativedelta(months=1)
+        next_start = _daily_budget_clamp_dom(next_month.year, next_month.month, pay_day)
+        period_end = next_start - timedelta(days=1)
+    else:
+        prev_month = as_of + relativedelta(months=-1)
+        period_start = _daily_budget_clamp_dom(prev_month.year, prev_month.month, pay_day)
+        period_end = start_this - timedelta(days=1)
+    return period_start, period_end
+
+
+def _daily_budget_pacing_start(
+    plan: dict,
+    period_start: date,
+    period_end: date,
+) -> date:
+    """First day that counts for daily pacing in this pay period.
+
+    ``tracking_from`` excludes earlier days in the period so missing data is not
+    treated as £0 spend. If tracking began before this period, pace from
+    ``period_start``.
+    """
     tf = _daily_budget_parse_tracking_from(plan.get('tracking_from') if isinstance(plan, dict) else None)
     if tf is None:
-        return first
-    if tf < first:
-        return first
-    if tf > last:
-        return last
+        return period_start
+    if tf < period_start:
+        return period_start
+    if tf > period_end:
+        return period_end
     return tf
 
 
 def _daily_budget_day_limits(
     figures: dict,
-    month_key: str,
     spend_by_date: dict[str, float],
-    as_of: date,
+    period_start: date,
+    period_end: date,
     pacing_start: date | None = None,
 ) -> dict[str, float]:
-    """Effective daily spending allowance for each calendar day in the month.
+    """Effective daily spending allowance for each day in the pay period.
 
-    When ``pacing_start`` is after the 1st, the remaining discretionary pool is
-    pro-rated by days left in the month (average-pace assumption for unknown
-    pre-tracking spend). Pre-start days get a 0 limit and are ignored by status.
+    When ``pacing_start`` is after ``period_start``, the remaining discretionary
+    pool is pro-rated by days left in the period (average-pace assumption for
+    unknown pre-tracking spend). Pre-start days get a 0 limit and are ignored
+    by status.
     """
-    first = _first_day_of_month(month_key)
-    last = _last_day_of_month(month_key)
-    if first is None or last is None:
+    if period_end < period_start:
         return {}
-    days_in_month = last.day
+    days_in_period = (period_end - period_start).days + 1
     discretionary = float(figures.get('discretionary_monthly') or 0)
-    base = round(discretionary / days_in_month, 2) if days_in_month else 0.0
+    base = round(discretionary / days_in_period, 2) if days_in_period else 0.0
     mode = figures.get('daily_mode') or 'envelope'
-    start = pacing_start or first
-    if start < first:
-        start = first
-    if start > last:
-        start = last
-    days_in_window = (last - start).days + 1
+    start = pacing_start or period_start
+    if start < period_start:
+        start = period_start
+    if start > period_end:
+        start = period_end
+    days_in_window = (period_end - start).days + 1
     # Assume average pace before tracking started so the join-day envelope is
     # ~base, not (full pool ÷ days left).
     window_pool = (
-        round(discretionary * days_in_window / days_in_month, 2) if days_in_month else 0.0
+        round(discretionary * days_in_window / days_in_period, 2) if days_in_period else 0.0
     )
     assumed_prior = round(max(0.0, discretionary - window_pool), 2)
     limits: dict[str, float] = {}
 
     if mode == 'fixed':
-        d = first
-        while d <= last:
+        d = period_start
+        while d <= period_end:
             limits[d.isoformat()] = base if d >= start else 0.0
             d += timedelta(days=1)
         return limits
 
     if mode == 'carry_surplus':
         leftover = 0.0
-        d = first
-        while d <= last:
+        d = period_start
+        while d <= period_end:
             if d < start:
                 limits[d.isoformat()] = 0.0
                 d += timedelta(days=1)
@@ -2746,13 +2798,13 @@ def _daily_budget_day_limits(
 
     # envelope: for each day, remaining pool after prior spend ÷ remaining days (incl. that day)
     spent_prior = assumed_prior
-    d = first
-    while d <= last:
+    d = period_start
+    while d <= period_end:
         if d < start:
             limits[d.isoformat()] = 0.0
             d += timedelta(days=1)
             continue
-        days_left = (last - d).days + 1
+        days_left = (period_end - d).days + 1
         remaining_pool = max(0.0, round(discretionary - spent_prior, 2))
         day_limit = round(remaining_pool / days_left, 2) if days_left else 0.0
         limits[d.isoformat()] = day_limit
@@ -2852,14 +2904,13 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     plan = bucket.get('plan') or {}
     figures = _daily_budget_plan_figures(plan)
     today = as_of or date.today()
-    month_key = today.strftime('%Y-%m')
-    first = _first_day_of_month(month_key)
-    last = _last_day_of_month(month_key)
-    days_in_month = last.day if last else 30
-    pacing_start = _daily_budget_pacing_start(plan, month_key) or first
-    spend_by_date = _daily_budget_spend_by_date(spending, month_key)
+    pay_day = _daily_budget_parse_pay_day(plan.get('pay_day'))
+    period_start, period_end = _daily_budget_pay_period(today, pay_day)
+    days_in_period = (period_end - period_start).days + 1
+    pacing_start = _daily_budget_pacing_start(plan, period_start, period_end)
+    spend_by_date = _daily_budget_spend_by_date(spending, period_start, period_end)
     limits = _daily_budget_day_limits(
-        figures, month_key, spend_by_date, today, pacing_start=pacing_start,
+        figures, spend_by_date, period_start, period_end, pacing_start=pacing_start,
     )
     today_key = today.isoformat()
     spent_today = float(spend_by_date.get(today_key, 0) or 0)
@@ -2868,45 +2919,39 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     discretionary = float(figures['discretionary_monthly'])
 
     # Only count spend inside the pacing window (pre-tracking days are unknown /
-    # intentionally excluded when tracking_from is mid-month).
+    # intentionally excluded when tracking_from is mid-period).
     spent_mtd = 0.0
-    if pacing_start and last:
-        d = pacing_start
-        while d <= last:
-            spent_mtd += float(spend_by_date.get(d.isoformat(), 0) or 0)
-            d += timedelta(days=1)
+    d = pacing_start
+    while d <= period_end:
+        spent_mtd += float(spend_by_date.get(d.isoformat(), 0) or 0)
+        d += timedelta(days=1)
     spent_mtd = round(spent_mtd, 2)
 
-    days_in_window = (last - pacing_start).days + 1 if (last and pacing_start) else days_in_month
-    window_pool = (
-        round(discretionary * days_in_window / days_in_month, 2)
-        if days_in_month and pacing_start and pacing_start != first
-        else discretionary
-    )
-    # When pacing from the 1st, window_pool == full discretionary.
-    if pacing_start == first:
+    days_in_window = (period_end - pacing_start).days + 1
+    if pacing_start == period_start or not days_in_period:
         window_pool = discretionary
+    else:
+        window_pool = round(discretionary * days_in_window / days_in_period, 2)
 
     underspend_total = 0.0
     day_rows = []
-    if pacing_start and last:
-        d = pacing_start
-        while d <= min(today, last):
-            key = d.isoformat()
-            lim = float(limits.get(key, 0) or 0)
-            spent = float(spend_by_date.get(key, 0) or 0)
-            under = round(max(0.0, lim - spent), 2)
-            underspend_total += under
-            day_rows.append({
-                'date': key,
-                'limit': lim,
-                'spent': spent,
-                'remaining': round(lim - spent, 2),
-                'underspend': under,
-                'weekday': d.weekday(),
-                'is_today': key == today_key,
-            })
-            d += timedelta(days=1)
+    d = pacing_start
+    while d <= min(today, period_end):
+        key = d.isoformat()
+        lim = float(limits.get(key, 0) or 0)
+        spent = float(spend_by_date.get(key, 0) or 0)
+        under = round(max(0.0, lim - spent), 2)
+        underspend_total += under
+        day_rows.append({
+            'date': key,
+            'limit': lim,
+            'spent': spent,
+            'remaining': round(lim - spent, 2),
+            'underspend': under,
+            'weekday': d.weekday(),
+            'is_today': key == today_key,
+        })
+        d += timedelta(days=1)
     underspend_total = round(underspend_total, 2)
     day_insights = _daily_budget_day_insights(day_rows)
 
@@ -2924,9 +2969,14 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     tracking_from = _daily_budget_parse_tracking_from(plan.get('tracking_from'))
     return {
         'as_of': today_key,
-        'month': month_key,
-        'days_in_month': days_in_month,
-        'pacing_start': pacing_start.isoformat() if pacing_start else None,
+        'month': today.strftime('%Y-%m'),
+        'pay_day': pay_day,
+        'period_start': period_start.isoformat(),
+        'period_end': period_end.isoformat(),
+        'days_in_period': days_in_period,
+        # Alias kept for older UI that divides discretionary by days_in_month.
+        'days_in_month': days_in_period,
+        'pacing_start': pacing_start.isoformat(),
         'tracking_from': tracking_from.isoformat() if tracking_from else None,
         'plan': figures,
         'source_month': plan.get('source_month'),
@@ -3259,6 +3309,7 @@ def _serialize_daily_budget_plan(plan: dict) -> dict:
     tf = _daily_budget_parse_tracking_from(plan.get('tracking_from'))
     return {
         **figures,
+        'pay_day': _daily_budget_parse_pay_day(plan.get('pay_day')),
         'tracking_from': tf.isoformat() if tf else None,
         'source_month': plan.get('source_month'),
         'bill_items': plan.get('bill_items') or [],
@@ -6886,6 +6937,14 @@ def spending_daily_plan():
             plan['source_month'] = None
         else:
             plan['source_month'] = _normalize_spending_month_key(str(sm))
+    if 'pay_day' in payload:
+        try:
+            pay_day = int(payload.get('pay_day'))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'Invalid pay_day (use 1–31)'}), 400
+        if pay_day < 1 or pay_day > 31:
+            return jsonify({'error': 'pay_day must be between 1 and 31'}), 400
+        plan['pay_day'] = pay_day
     if 'tracking_from' in payload:
         raw_tf = payload.get('tracking_from')
         if raw_tf in (None, ''):
@@ -6896,7 +6955,7 @@ def spending_daily_plan():
                 return jsonify({'error': 'Invalid tracking_from (use YYYY-MM-DD)'}), 400
             plan['tracking_from'] = tf.isoformat()
     elif first_save and not plan.get('tracking_from'):
-        # Mid-month onboarding: pace from today so empty earlier days aren't £0.
+        # Mid-period onboarding: pace from today so empty earlier days aren't £0.
         plan['tracking_from'] = date.today().isoformat()
     plan['updated_at'] = datetime.utcnow().isoformat() + 'Z'
     save_data(data)

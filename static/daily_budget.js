@@ -179,13 +179,13 @@
     const pct = Number(plan.savings_percent) || 0;
     const savings = Math.round(income * (pct / 100) * 100) / 100;
     const disc = Math.max(0, Math.round((income - bills - savings) * 100) / 100);
-    const days = (state && state.days_in_month) || 30;
+    const days = (state && (state.days_in_period || state.days_in_month)) || 30;
     const base = days ? Math.round((disc / days) * 100) / 100 : 0;
     $('plan-math').innerHTML =
       '<div class="db-plan-math-row"><span>Reserved savings</span><strong>' +
       money(savings) +
       '</strong></div>' +
-      '<div class="db-plan-math-row"><span>Discretionary this month</span><strong>' +
+      '<div class="db-plan-math-row"><span>Discretionary this period</span><strong>' +
       money(disc) +
       '</strong></div>' +
       '<div class="db-plan-math-row"><span>About per day (base)</span><strong>' +
@@ -252,6 +252,10 @@
   function fillPlanForm(plan) {
     $('plan-income').value = plan.income_monthly != null ? plan.income_monthly : '';
     $('plan-savings-pct').value = plan.savings_percent != null ? plan.savings_percent : 20;
+    const payDayEl = $('plan-pay-day');
+    if (payDayEl) {
+      payDayEl.value = plan.pay_day != null ? plan.pay_day : 1;
+    }
     const trackingEl = $('plan-tracking-from');
     if (trackingEl) {
       trackingEl.value = plan.tracking_from || '';
@@ -312,7 +316,7 @@
 
   function buildDayInsightSummary(insights, days) {
     const n = Number(insights && insights.days_elapsed) || (days && days.length) || 0;
-    if (!n) return 'No days yet this month — log spends on Today to see the pattern.';
+    if (!n) return 'No days yet this period — log spends on Today to see the pattern.';
     const under = Number(insights.days_under) || 0;
     const over = Number(insights.days_over) || 0;
     const streak = Number(insights.under_streak) || 0;
@@ -925,6 +929,7 @@
         daily_mode: modeEl ? modeEl.value : 'envelope',
         bill_items: billItems,
         source_month: $('plan-source-month').value || null,
+        pay_day: Number($('plan-pay-day') && $('plan-pay-day').value) || 1,
         tracking_from: ($('plan-tracking-from') && $('plan-tracking-from').value) || null,
       };
       const prevLabel = saveBtn.textContent;
