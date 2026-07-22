@@ -186,6 +186,56 @@ class TestManualImportDedup(unittest.TestCase):
         self.assertEqual(manual['source_statement_id'], 'stmt-1')
 
 
+class TestDailyEntryCreate(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self.spending = {
+            'transactions': [],
+            'statements': [],
+            'monthly_insights': {},
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 3100,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+        }
+        self.data = {'users': {'ivan': {'spending': self.spending}}, 'loans': {}}
+
+    def _login(self):
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'ivan'
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_allows_duplicate_title_on_same_day(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        payload = {
+            'amount': 4.5,
+            'title': 'Coffee',
+            'category': 'dining',
+            'date': '2024-01-10',
+        }
+        with mock.patch.object(app_mod, '_recompute_monthly_insights'):
+            first = self.client.post('/api/spending/daily/entry', json=payload)
+            second = self.client.post('/api/spending/daily/entry', json=payload)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(self.spending['transactions']), 2)
+        self.assertEqual(self.spending['transactions'][0]['description'], 'Coffee')
+        self.assertEqual(self.spending['transactions'][1]['description'], 'Coffee')
+        self.assertNotEqual(
+            self.spending['transactions'][0]['fingerprint'],
+            self.spending['transactions'][1]['fingerprint'],
+        )
+        save_mock.assert_called()
+
+
 class TestHybridBillsEstimate(unittest.TestCase):
     def test_category_rollup_without_llm(self):
         spending = {

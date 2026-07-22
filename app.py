@@ -6612,14 +6612,13 @@ def spending_daily_entry_create():
 
     d_str = d.strftime('%Y-%m-%d')
     month_key = d.strftime('%Y-%m')
-    fp = _spending_fingerprint(month_key, d_str, amount, 'outgoing', title)
-    existing = {str(t.get('fingerprint')) for t in (spending.get('transactions') or []) if t.get('fingerprint')}
-    if fp in existing:
-        return jsonify({'error': 'An identical spend is already logged', 'fingerprint': fp}), 409
+    tx_id = str(uuid.uuid4())
+    base_fp = _spending_fingerprint(month_key, d_str, amount, 'outgoing', title)
+    fp = f'{base_fp}|manual|{tx_id}'
 
     now_iso = datetime.utcnow().isoformat() + 'Z'
     tx = {
-        'id': str(uuid.uuid4()),
+        'id': tx_id,
         'date': d_str,
         'month': month_key,
         'report_month': month_key,
