@@ -2376,23 +2376,45 @@ body.db-page {
 
 .db-title-clear {
     position: absolute;
-    top: 50%;
-    right: 0.2rem;
+    top: 0;
+    bottom: 0;
+    right: 0.35rem;
     width: 2.75rem;
     height: 2.75rem;
-    transform: translateY(-50%);
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    margin: auto 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     border: 0;
     border-radius: 0.7rem;
     background: transparent;
     color: var(--db-muted);
-    font-size: 1.6rem;
+    font-family: inherit;
+    font-size: 1.35rem;
+    font-weight: 500;
     line-height: 1;
     cursor: pointer;
     touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+body.db-page button.db-title-clear {
+    padding: 0;
+    background: transparent;
+    color: var(--db-muted);
 }
 
 .db-title-clear:hover,
 .db-title-clear:focus-visible {
+    background: rgba(15, 118, 110, 0.1);
+    color: var(--db-ink);
+}
+
+body.db-page button.db-title-clear:hover,
+body.db-page button.db-title-clear:focus-visible {
     background: rgba(15, 118, 110, 0.1);
     color: var(--db-ink);
 }
@@ -2482,7 +2504,8 @@ body.db-page {
 
 .db-panel-tab,
 .db-cat,
-.db-today-del {
+.db-today-del,
+.db-title-clear {
     font-family: inherit;
 }
 
@@ -3494,6 +3517,19 @@ body.login-page {
 
     .db-hero-value {
         font-size: clamp(2rem, 10vw, 2.6rem);
+    }
+
+    .db-title-clear {
+        width: 3rem;
+        height: 3rem;
+        min-width: 3rem;
+        min-height: 3rem;
+        right: 0.25rem;
+        font-size: 1.45rem;
+    }
+
+    .db-title-input-wrap input {
+        padding-right: 3.5rem;
     }
 
     /* Monthly KPIs: 2-up on phone */
