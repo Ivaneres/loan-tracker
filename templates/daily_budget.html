@@ -90,6 +90,11 @@
                         <span>Savings goal (% of income)</span>
                         <input id="plan-savings-pct" type="number" min="0" max="100" step="0.5" inputmode="decimal">
                     </label>
+                    <label class="db-field">
+                        <span>Tracking from</span>
+                        <input id="plan-tracking-from" type="date">
+                        <small class="db-field-hint">Days before this are ignored — avoids treating a mid-month start as £0 spent.</small>
+                    </label>
                 </div>
 
                 <div class="db-plan-math" id="plan-math" aria-live="polite"></div>

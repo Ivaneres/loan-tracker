@@ -252,6 +252,10 @@
   function fillPlanForm(plan) {
     $('plan-income').value = plan.income_monthly != null ? plan.income_monthly : '';
     $('plan-savings-pct').value = plan.savings_percent != null ? plan.savings_percent : 20;
+    const trackingEl = $('plan-tracking-from');
+    if (trackingEl) {
+      trackingEl.value = plan.tracking_from || '';
+    }
     const mode = plan.daily_mode || 'envelope';
     document.querySelectorAll('input[name="daily_mode"]').forEach((r) => {
       r.checked = r.value === mode;
@@ -921,6 +925,7 @@
         daily_mode: modeEl ? modeEl.value : 'envelope',
         bill_items: billItems,
         source_month: $('plan-source-month').value || null,
+        tracking_from: ($('plan-tracking-from') && $('plan-tracking-from').value) || null,
       };
       const prevLabel = saveBtn.textContent;
       saveBtn.disabled = true;

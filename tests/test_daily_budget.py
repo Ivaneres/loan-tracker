@@ -82,6 +82,89 @@ class TestDailyBudgetModes(unittest.TestCase):
         self.assertEqual(limits['2024-01-01'], 10.0)
         self.assertEqual(limits['2024-01-02'], 20.0)
 
+    def test_envelope_mid_month_start_does_not_inflate_limit(self):
+        """Without pacing_start, empty early days leave full pool ÷ days left.
+
+        With mid-month pacing_start, assume average prior spend so join-day
+        limit ≈ base daily (disc / days_in_month).
+        """
+        figures = {
+            'discretionary_monthly': 310.0,
+            'daily_mode': 'envelope',
+        }
+        spend = {}
+        inflated = app_mod._daily_budget_day_limits(
+            figures, '2024-01', spend, date(2024, 1, 15),
+        )
+        self.assertEqual(inflated['2024-01-15'], round(310.0 / 17, 2))
+
+        paced = app_mod._daily_budget_day_limits(
+            figures, '2024-01', spend, date(2024, 1, 15),
+            pacing_start=date(2024, 1, 15),
+        )
+        self.assertEqual(paced['2024-01-14'], 0.0)
+        self.assertEqual(paced['2024-01-15'], 10.0)
+
+    def test_carry_surplus_mid_month_start_skips_phantom_roll(self):
+        figures = {
+            'discretionary_monthly': 310.0,
+            'daily_mode': 'carry_surplus',
+        }
+        spend = {}
+        limits = app_mod._daily_budget_day_limits(
+            figures, '2024-01', spend, date(2024, 1, 15),
+            pacing_start=date(2024, 1, 15),
+        )
+        self.assertEqual(limits['2024-01-14'], 0.0)
+        self.assertEqual(limits['2024-01-15'], 10.0)
+        self.assertEqual(limits['2024-01-16'], 20.0)  # unused day 15 rolls once
+
+
+class TestDailyBudgetTrackingFrom(unittest.TestCase):
+    def test_pacing_start_clamps_within_month(self):
+        plan = {'tracking_from': '2024-01-15'}
+        self.assertEqual(
+            app_mod._daily_budget_pacing_start(plan, '2024-01'),
+            date(2024, 1, 15),
+        )
+        # Later months reset to the 1st
+        self.assertEqual(
+            app_mod._daily_budget_pacing_start(plan, '2024-02'),
+            date(2024, 2, 1),
+        )
+
+    def test_status_excludes_pre_tracking_days_from_underspend(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'tracking_from': '2024-01-15',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-15', amount=3, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 15))
+        self.assertEqual(status['pacing_start'], '2024-01-15')
+        self.assertEqual(status['daily_limit'], 10.0)
+        self.assertEqual(status['remaining_today'], 7.0)
+        # Only day 15 counts — not 14 phantom clear days × £10
+        self.assertEqual(status['underspend_saved'], 7.0)
+        self.assertEqual(status['day_insights']['days_elapsed'], 1)
+        self.assertEqual(len(status['days']), 1)
+        # Pro-rated remaining pool: 17/31 * 310 − 3
+        self.assertEqual(
+            status['discretionary_remaining_month'],
+            round(310.0 * 17 / 31, 2) - 3.0,
+        )
+
 
 class TestDailyBudgetStatus(unittest.TestCase):
     def test_bill_categories_ignored_in_daily_spend(self):
@@ -273,6 +356,70 @@ class TestDailyEntryCreate(unittest.TestCase):
             self.spending['transactions'][1]['fingerprint'],
         )
         save_mock.assert_called()
+
+
+class TestDailyPlanTrackingFromApi(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self.spending = {
+            'transactions': [],
+            'statements': [],
+            'monthly_insights': {},
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 0,
+                    'bills_monthly': 0,
+                    'savings_percent': 20,
+                    'daily_mode': 'envelope',
+                    'tracking_from': None,
+                    'bill_items': [],
+                    'updated_at': None,
+                },
+                'goals': [],
+            },
+        }
+        self.data = {'users': {'ivan': {'spending': self.spending}}, 'loans': {}}
+
+    def _login(self):
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'ivan'
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_first_save_defaults_tracking_from_to_today(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.put('/api/spending/daily/plan', json={
+            'income_monthly': 3100,
+            'savings_percent': 0,
+            'daily_mode': 'envelope',
+            'bill_items': [],
+        })
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body['plan']['tracking_from'], date.today().isoformat())
+        self.assertEqual(
+            self.spending['daily_budget']['plan']['tracking_from'],
+            date.today().isoformat(),
+        )
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_explicit_tracking_from_and_clear(self, load_mock, save_mock):
+        self.spending['daily_budget']['plan']['updated_at'] = '2024-01-01T00:00:00Z'
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.put('/api/spending/daily/plan', json={
+            'tracking_from': '2024-01-10',
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()['plan']['tracking_from'], '2024-01-10')
+
+        resp2 = self.client.put('/api/spending/daily/plan', json={
+            'tracking_from': None,
+        })
+        self.assertEqual(resp2.status_code, 200)
+        self.assertIsNone(resp2.get_json()['plan']['tracking_from'])
 
 
 class TestHybridBillsEstimate(unittest.TestCase):
