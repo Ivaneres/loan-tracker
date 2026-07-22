@@ -116,6 +116,7 @@
       panel.classList.toggle('hidden', !on);
       panel.hidden = !on;
     });
+    if (name === 'goals') scrollDayChartToToday();
   }
 
   function renderToday(status) {
@@ -393,6 +394,7 @@
   const DAY_CHART_SLOT = 44;
   const DAY_CHART_HIT_RADIUS = 22;
   const DAY_CHART_MARK_RADIUS = 6.5;
+  const DAY_CHART_END_PAD = 195;
 
   function scrollDayChartToDate(dateKey) {
     const scroll = $('goals-day-chart-scroll');
@@ -400,12 +402,22 @@
     if (!scroll || !chart || !dateKey) return;
     const dot = chart.querySelector('.db-day-dot[data-date="' + dateKey + '"]');
     if (!dot) return;
-    const hit = dot.querySelector('.db-day-dot-hit');
-    if (!hit) return;
-    const cx = Number(hit.getAttribute('cx'));
-    if (!Number.isFinite(cx)) return;
-    const target = cx - scroll.clientWidth / 2;
+    const mark = dot.querySelector('.db-day-dot-mark') || dot;
+    const scrollRect = scroll.getBoundingClientRect();
+    const dotRect = mark.getBoundingClientRect();
+    if (!scrollRect.width) return;
+    const dotCenter = dotRect.left + dotRect.width / 2 - scrollRect.left + scroll.scrollLeft;
+    const target = dotCenter - scroll.clientWidth / 2;
     scroll.scrollLeft = Math.max(0, Math.min(target, scroll.scrollWidth - scroll.clientWidth));
+  }
+
+  function scrollDayChartToToday(days) {
+    const today = (days || (lastDayStatus && lastDayStatus.days) || []).find((d) => d.is_today);
+    const dateKey = today ? today.date : null;
+    if (!dateKey) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => scrollDayChartToDate(dateKey));
+    });
   }
 
   function renderDayLineChart(days) {
@@ -429,7 +441,7 @@
     wrap.hidden = false;
 
     const padL = 38;
-    const padR = 20;
+    const padR = 20 + DAY_CHART_END_PAD;
     const padT = 16;
     const padB = 36;
     const plotW = days.length <= 1 ? DAY_CHART_SLOT : (days.length - 1) * DAY_CHART_SLOT;
@@ -572,18 +584,21 @@
       });
     });
 
-    const focusDate = reopenDate || selectedDayKey || (days.find((d) => d.is_today) || days[days.length - 1]).date;
+    const todayDate = (days.find((d) => d.is_today) || days[days.length - 1]).date;
+    const scrollDate = reopenDate || todayDate;
     requestAnimationFrame(() => {
-      scrollDayChartToDate(focusDate);
-      if (reopenDate) {
-        selectedDayKey = reopenDate;
-        const dot = chart.querySelector('.db-day-dot[data-date="' + reopenDate + '"]');
-        const day = days.find((d) => d.date === reopenDate);
-        if (dot && day) {
-          highlightSelectedDot();
-          showDayTooltip(day, dot, width, height, padT, padR);
+      requestAnimationFrame(() => {
+        scrollDayChartToDate(scrollDate);
+        if (reopenDate) {
+          selectedDayKey = reopenDate;
+          const dot = chart.querySelector('.db-day-dot[data-date="' + reopenDate + '"]');
+          const day = days.find((d) => d.date === reopenDate);
+          if (dot && day) {
+            highlightSelectedDot();
+            showDayTooltip(day, dot, width, height, padT, padR);
+          }
         }
-      }
+      });
     });
   }
 
