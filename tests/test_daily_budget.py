@@ -262,6 +262,87 @@ class TestDailyBudgetStatus(unittest.TestCase):
         self.assertEqual(status['daily_limit'], 100.0)
         self.assertEqual(status['remaining_today'], 50.0)
 
+    def test_limit_math_envelope_divides_remaining_pool(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'envelope',
+                    'pay_day': 1,
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-01', amount=20, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
+        math = status['limit_math']
+        self.assertEqual(math['mode'], 'envelope')
+        self.assertEqual(math['discretionary_monthly'], 310.0)
+        self.assertEqual(math['days_in_period'], 31)
+        self.assertEqual(math['days_left'], 30)  # 2 Jan → 31 Jan
+        self.assertEqual(math['spent_before_today'], 20.0)
+        self.assertEqual(math['assumed_prior_spend'], 0.0)
+        self.assertEqual(math['pool_at_start_of_today'], 290.0)
+        self.assertEqual(math['daily_limit'], round(290.0 / 30, 2))
+        self.assertEqual(status['daily_limit'], math['daily_limit'])
+
+    def test_limit_math_carry_surplus_includes_yesterday_leftover(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'carry_surplus',
+                    'pay_day': 1,
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-01', amount=0, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
+        math = status['limit_math']
+        self.assertEqual(math['mode'], 'carry_surplus')
+        self.assertEqual(math['base_daily'], 10.0)
+        self.assertEqual(math['carry_from_yesterday'], 10.0)
+        self.assertEqual(math['daily_limit'], 20.0)
+        self.assertEqual(status['daily_limit'], 20.0)
+
+    def test_limit_math_fixed_is_base_daily(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'pay_day': 1,
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-01', amount=50, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 15))
+        math = status['limit_math']
+        self.assertEqual(math['mode'], 'fixed')
+        self.assertEqual(math['base_daily'], 10.0)
+        self.assertEqual(math['daily_limit'], 10.0)
+        self.assertEqual(math['days_left'], 17)
+
     def test_underspend_saved_sums_daily_leftover(self):
         spending = {
             'daily_budget': {

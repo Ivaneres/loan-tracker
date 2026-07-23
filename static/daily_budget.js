@@ -173,6 +173,115 @@
     });
   }
 
+  function modeLabel(mode) {
+    if (mode === 'fixed') return 'Fixed';
+    if (mode === 'carry_surplus') return 'Carry surplus';
+    return 'Envelope';
+  }
+
+  function daysPhrase(n) {
+    const count = Number(n) || 0;
+    return count === 1 ? '1 day' : count + ' days';
+  }
+
+  function renderLimitMath(status) {
+    const box = $('limit-math');
+    if (!box) return;
+    const math = status.limit_math || {};
+    const mode = math.mode || (status.plan && status.plan.daily_mode) || 'envelope';
+    const disc =
+      Number(
+        math.discretionary_monthly != null
+          ? math.discretionary_monthly
+          : status.plan && status.plan.discretionary_monthly
+      ) || 0;
+    const daysInPeriod =
+      Number(math.days_in_period != null ? math.days_in_period : status.days_in_period) || 0;
+    const daysLeft = Number(math.days_left != null ? math.days_left : 0) || 0;
+    const base = Number(math.base_daily != null ? math.base_daily : 0) || 0;
+    const assumed = Number(math.assumed_prior_spend != null ? math.assumed_prior_spend : 0) || 0;
+    const spentBefore = Number(math.spent_before_today != null ? math.spent_before_today : 0) || 0;
+    const pool = Number(math.pool_at_start_of_today != null ? math.pool_at_start_of_today : 0) || 0;
+    const carry = Number(math.carry_from_yesterday != null ? math.carry_from_yesterday : 0) || 0;
+    const limit = Number(math.daily_limit != null ? math.daily_limit : status.daily_limit) || 0;
+    const midStart = !!math.mid_period_start;
+
+    let rows = '';
+    rows +=
+      '<div class="db-plan-math-row db-plan-math-row--income">' +
+      '<span>Discretionary this period</span><strong>' +
+      money(disc) +
+      '</strong></div>';
+
+    if (mode === 'fixed') {
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--sub">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days in period (' +
+        daysPhrase(daysInPeriod) +
+        ')</span><strong>' +
+        daysInPeriod +
+        '</strong></div>';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--result">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Daily limit (fixed)</span><strong>' +
+        money(limit) +
+        '</strong></div>';
+      rows +=
+        '<p class="db-limit-math-note">Same amount every day — spending doesn’t change the limit.</p>';
+    } else if (mode === 'carry_surplus') {
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--sub">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days in period → base daily</span><strong>' +
+        money(base) +
+        '</strong></div>';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--sub">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">+</span> Unused from yesterday</span><strong>' +
+        money(carry) +
+        '</strong></div>';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--result">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Today’s daily limit</span><strong>' +
+        money(limit) +
+        '</strong></div>';
+      rows +=
+        '<p class="db-limit-math-note">Leftover rolls forward; overspend does not create a negative carry.</p>';
+    } else {
+      if (midStart && assumed > 0) {
+        rows +=
+          '<div class="db-plan-math-row db-plan-math-row--sub">' +
+          '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Assumed spend before tracking</span><strong>' +
+          money(assumed) +
+          '</strong></div>';
+      }
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--sub">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Spent earlier this cycle</span><strong>' +
+        money(spentBefore) +
+        '</strong></div>';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--sub">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Left for remaining days</span><strong>' +
+        money(pool) +
+        '</strong></div>';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--sub">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days left (incl. today)</span><strong>' +
+        daysPhrase(daysLeft) +
+        '</strong></div>';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--result">' +
+        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Today’s daily limit</span><strong>' +
+        money(limit) +
+        '</strong></div>';
+      rows +=
+        '<p class="db-limit-math-note">Envelope mode: what’s left ÷ days left. Overspend tightens later days.</p>';
+    }
+
+    box.innerHTML =
+      '<p class="db-plan-math-title">Mode · ' + modeLabel(mode) + '</p>' + rows;
+  }
+
   function renderPlanMath(plan) {
     const income = Number(plan.income_monthly) || 0;
     const bills = Number(plan.bills_monthly) || 0;
@@ -809,6 +918,7 @@
   function applyStatus(status) {
     state = status;
     renderToday(status);
+    renderLimitMath(status);
     renderGoals(status);
     if (status.plan) {
       // Don't clobber bill edits if user is mid-edit on plan — only seed when first load
