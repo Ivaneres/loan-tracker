@@ -181,14 +181,32 @@
     const disc = Math.max(0, Math.round((income - bills - savings) * 100) / 100);
     const days = (state && (state.days_in_period || state.days_in_month)) || 30;
     const base = days ? Math.round((disc / days) * 100) / 100 : 0;
+    const pctLabel = Number.isFinite(pct) ? String(pct).replace(/\.0$/, '') + '%' : '0%';
+    const daysLabel = days === 1 ? '1 day' : days + ' days';
     $('plan-math').innerHTML =
-      '<div class="db-plan-math-row"><span>Reserved savings</span><strong>' +
+      '<p class="db-plan-math-title">Monthly breakdown</p>' +
+      '<div class="db-plan-math-row db-plan-math-row--income">' +
+      '<span>Total monthly income</span><strong>' +
+      money(income) +
+      '</strong></div>' +
+      '<div class="db-plan-math-row db-plan-math-row--sub">' +
+      '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Bills (outgoing)</span><strong>' +
+      money(bills) +
+      '</strong></div>' +
+      '<div class="db-plan-math-row db-plan-math-row--sub">' +
+      '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Reserved savings (' +
+      pctLabel +
+      ')</span><strong>' +
       money(savings) +
       '</strong></div>' +
-      '<div class="db-plan-math-row"><span>Discretionary this period</span><strong>' +
+      '<div class="db-plan-math-row db-plan-math-row--result">' +
+      '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Available discretionary</span><strong>' +
       money(disc) +
       '</strong></div>' +
-      '<div class="db-plan-math-row"><span>About per day (base)</span><strong>' +
+      '<div class="db-plan-math-row db-plan-math-row--note">' +
+      '<span>About per day (base · ' +
+      daysLabel +
+      ')</span><strong>' +
       money(base) +
       '</strong></div>';
   }
