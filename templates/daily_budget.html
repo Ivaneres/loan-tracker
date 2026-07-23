@@ -79,7 +79,7 @@
         <section id="panel-plan" class="db-panel hidden" role="tabpanel" hidden>
             <div class="db-card">
                 <h2 class="db-section-title">Budget plan</h2>
-                <p class="db-lead">Income, bills, and how much of your pay you want to lock away as savings. What’s left becomes your daily spend limit.</p>
+                <p class="db-lead">Start from your monthly income. We subtract bills and reserved savings — what’s left is discretionary for daily spending.</p>
 
                 <div class="db-field-grid">
                     <label class="db-field">
@@ -196,6 +196,10 @@
 
                 <ul id="goals-list" class="db-goals-list"></ul>
                 <p id="goals-empty" class="db-empty">No goals yet — add one to track progress against underspend.</p>
+
+                <h3 class="db-subsection-title">Spending vs projection</h3>
+                <p class="db-lead db-lead--tight">How spend so far this pay period changes the daily allowance left for the rest of the cycle.</p>
+                <div class="db-plan-math" id="pace-math" aria-live="polite"></div>
 
                 <h3 class="db-subsection-title">This month, day by day</h3>
                 <p class="db-day-insight" id="goals-day-insight">Loading…</p>

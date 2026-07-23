@@ -2298,6 +2298,17 @@ body.db-page {
     color: #a7f3d0;
 }
 
+.db-lead--tight {
+    margin-bottom: 0.65rem;
+}
+
+.db-limit-math-note {
+    margin: 0.55rem 0 0;
+    font-size: 0.82rem;
+    line-height: 1.35;
+    color: var(--db-muted);
+}
+
 .db-entry {
     background: var(--db-surface);
     backdrop-filter: blur(10px);
@@ -2750,7 +2761,7 @@ body.db-page button.db-today-del:hover {
 
 .db-plan-math {
     margin: 0.85rem 0 1rem;
-    padding: 0.85rem;
+    padding: 0.85rem 0.95rem;
     border-radius: 1rem;
     background: rgba(13, 122, 98, 0.08);
     border: 1px solid rgba(13, 122, 98, 0.15);
@@ -2761,6 +2772,15 @@ body.db-page button.db-today-del:hover {
     background: rgba(13, 122, 98, 0.16);
     border-color: rgba(13, 122, 98, 0.35);
     box-shadow: 0 0 0 3px rgba(13, 122, 98, 0.12);
+}
+
+.db-plan-math-title {
+    margin: 0 0 0.55rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent-deep);
 }
 
 .db-plan-feedback {
@@ -2800,13 +2820,73 @@ body.db-page button.db-today-del:hover {
 .db-plan-math-row {
     display: flex;
     justify-content: space-between;
+    align-items: baseline;
     gap: 1rem;
     font-size: 0.92rem;
-    padding: 0.2rem 0;
+    padding: 0.28rem 0;
 }
 
 .db-plan-math-row span {
     color: var(--db-muted);
+}
+
+.db-plan-math-row strong {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.db-plan-math-op {
+    display: inline-block;
+    min-width: 0.85em;
+    margin-right: 0.2rem;
+    font-weight: 700;
+    color: var(--accent-deep);
+}
+
+.db-plan-math-row--income {
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.15rem;
+    border-bottom: 1px dashed rgba(13, 122, 98, 0.22);
+}
+
+.db-plan-math-row--income span {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.db-plan-math-row--income strong {
+    font-size: 1.05rem;
+    color: var(--accent-deep);
+}
+
+.db-plan-math-row--sub {
+    padding-left: 0.1rem;
+}
+
+.db-plan-math-row--result {
+    margin-top: 0.35rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid rgba(13, 122, 98, 0.28);
+}
+
+.db-plan-math-row--result span {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.db-plan-math-row--result strong {
+    font-size: 1.08rem;
+    color: var(--accent-deep);
+}
+
+.db-plan-math-row--note {
+    padding-top: 0.15rem;
+    font-size: 0.86rem;
+}
+
+.db-plan-math-row--note strong {
+    font-weight: 600;
+    color: var(--ink);
 }
 
 .db-mode-fieldset {
