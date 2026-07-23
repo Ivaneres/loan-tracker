@@ -2298,11 +2298,6 @@ body.db-page {
     color: #a7f3d0;
 }
 
-.db-limit-math-card {
-    margin-bottom: 1.25rem;
-    animation: db-rise 0.5s ease 0.05s both;
-}
-
 .db-lead--tight {
     margin-bottom: 0.65rem;
 }

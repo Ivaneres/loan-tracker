@@ -58,23 +58,24 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
-    def test_today_tab_shows_limit_math_section(self, load_mock, save_mock):
+    def test_goals_tab_shows_pace_projection_section(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()
         resp = self.client.get('/spending/daily')
         self.assertEqual(resp.status_code, 200)
         html = resp.get_data(as_text=True)
-        self.assertIn('id="limit-math"', html)
-        self.assertIn('Today’s limit math', html)
-        self.assertIn('leftover discretionary into today’s daily limit', html)
+        self.assertIn('id="pace-math"', html)
+        self.assertIn('Spending vs projection', html)
+        self.assertIn('How spend so far this pay period changes the daily allowance', html)
+        self.assertNotIn('id="limit-math"', html)
 
         js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
         for needle in (
-            'renderLimitMath',
-            'Spent earlier this cycle',
-            'Days left (incl. today)',
-            'Today’s daily limit',
-            'Unused from yesterday',
+            'renderPaceMath',
+            'Starting pool this cycle',
+            'Spent so far (',
+            'Projected daily going forward',
+            'Original base daily',
         ):
             self.assertIn(needle, js)
 

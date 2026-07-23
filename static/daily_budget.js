@@ -184,99 +184,125 @@
     return count === 1 ? '1 day' : count + ' days';
   }
 
-  function renderLimitMath(status) {
-    const box = $('limit-math');
+  function signedMoney(n) {
+    const v = Number(n) || 0;
+    if (v > 0) return '+' + money(v);
+    return money(v);
+  }
+
+  function renderPaceMath(status) {
+    const box = $('pace-math');
     if (!box) return;
-    const math = status.limit_math || {};
+    const math = status.pace_projection || {};
     const mode = math.mode || (status.plan && status.plan.daily_mode) || 'envelope';
-    const disc =
+    const pool =
       Number(
-        math.discretionary_monthly != null
-          ? math.discretionary_monthly
-          : status.plan && status.plan.discretionary_monthly
+        math.window_pool != null
+          ? math.window_pool
+          : math.discretionary_monthly != null
+            ? math.discretionary_monthly
+            : status.plan && status.plan.discretionary_monthly
       ) || 0;
-    const daysInPeriod =
-      Number(math.days_in_period != null ? math.days_in_period : status.days_in_period) || 0;
-    const daysLeft = Number(math.days_left != null ? math.days_left : 0) || 0;
+    const spentSoFar = Number(math.spent_so_far != null ? math.spent_so_far : status.spent_mtd) || 0;
+    const remaining =
+      Number(
+        math.remaining_after_today != null
+          ? math.remaining_after_today
+          : status.discretionary_remaining_month
+      ) || 0;
+    const daysElapsed = Number(math.days_elapsed != null ? math.days_elapsed : 0) || 0;
+    const daysAfter = Number(math.days_after_today != null ? math.days_after_today : 0) || 0;
     const base = Number(math.base_daily != null ? math.base_daily : 0) || 0;
-    const assumed = Number(math.assumed_prior_spend != null ? math.assumed_prior_spend : 0) || 0;
-    const spentBefore = Number(math.spent_before_today != null ? math.spent_before_today : 0) || 0;
-    const pool = Number(math.pool_at_start_of_today != null ? math.pool_at_start_of_today : 0) || 0;
-    const carry = Number(math.carry_from_yesterday != null ? math.carry_from_yesterday : 0) || 0;
-    const limit = Number(math.daily_limit != null ? math.daily_limit : status.daily_limit) || 0;
+    const projected = Number(math.projected_daily != null ? math.projected_daily : 0) || 0;
+    const vsBase = Number(math.projected_vs_base != null ? math.projected_vs_base : projected - base) || 0;
+    const paceTarget = Number(math.pace_target_spend != null ? math.pace_target_spend : 0) || 0;
+    const paceDelta = Number(math.pace_delta != null ? math.pace_delta : paceTarget - spentSoFar) || 0;
     const midStart = !!math.mid_period_start;
 
     let rows = '';
     rows +=
       '<div class="db-plan-math-row db-plan-math-row--income">' +
-      '<span>Discretionary this period</span><strong>' +
-      money(disc) +
+      '<span>Starting pool this cycle</span><strong>' +
+      money(pool) +
+      '</strong></div>';
+    rows +=
+      '<div class="db-plan-math-row db-plan-math-row--sub">' +
+      '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Spent so far (' +
+      daysPhrase(daysElapsed) +
+      ')</span><strong>' +
+      money(spentSoFar) +
+      '</strong></div>';
+    rows +=
+      '<div class="db-plan-math-row db-plan-math-row--sub">' +
+      '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Remaining after today</span><strong>' +
+      money(remaining) +
       '</strong></div>';
 
-    if (mode === 'fixed') {
+    if (daysAfter > 0) {
       rows +=
         '<div class="db-plan-math-row db-plan-math-row--sub">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days in period (' +
-        daysPhrase(daysInPeriod) +
-        ')</span><strong>' +
-        daysInPeriod +
+        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days left after today</span><strong>' +
+        daysPhrase(daysAfter) +
         '</strong></div>';
       rows +=
         '<div class="db-plan-math-row db-plan-math-row--result">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Daily limit (fixed)</span><strong>' +
-        money(limit) +
+        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Projected daily going forward</span><strong>' +
+        money(projected) +
         '</strong></div>';
-      rows +=
-        '<p class="db-limit-math-note">Same amount every day — spending doesn’t change the limit.</p>';
-    } else if (mode === 'carry_surplus') {
-      rows +=
-        '<div class="db-plan-math-row db-plan-math-row--sub">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days in period → base daily</span><strong>' +
-        money(base) +
-        '</strong></div>';
-      rows +=
-        '<div class="db-plan-math-row db-plan-math-row--sub">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">+</span> Unused from yesterday</span><strong>' +
-        money(carry) +
-        '</strong></div>';
-      rows +=
-        '<div class="db-plan-math-row db-plan-math-row--result">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Today’s daily limit</span><strong>' +
-        money(limit) +
-        '</strong></div>';
-      rows +=
-        '<p class="db-limit-math-note">Leftover rolls forward; overspend does not create a negative carry.</p>';
     } else {
-      if (midStart && assumed > 0) {
-        rows +=
-          '<div class="db-plan-math-row db-plan-math-row--sub">' +
-          '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Assumed spend before tracking</span><strong>' +
-          money(assumed) +
-          '</strong></div>';
-      }
-      rows +=
-        '<div class="db-plan-math-row db-plan-math-row--sub">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">−</span> Spent earlier this cycle</span><strong>' +
-        money(spentBefore) +
-        '</strong></div>';
-      rows +=
-        '<div class="db-plan-math-row db-plan-math-row--sub">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Left for remaining days</span><strong>' +
-        money(pool) +
-        '</strong></div>';
-      rows +=
-        '<div class="db-plan-math-row db-plan-math-row--sub">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">÷</span> Days left (incl. today)</span><strong>' +
-        daysPhrase(daysLeft) +
-        '</strong></div>';
       rows +=
         '<div class="db-plan-math-row db-plan-math-row--result">' +
-        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Today’s daily limit</span><strong>' +
-        money(limit) +
+        '<span><span class="db-plan-math-op" aria-hidden="true">=</span> Left for today (last day)</span><strong>' +
+        money(projected) +
         '</strong></div>';
-      rows +=
-        '<p class="db-limit-math-note">Envelope mode: what’s left ÷ days left. Overspend tightens later days.</p>';
     }
+
+    rows +=
+      '<div class="db-plan-math-row db-plan-math-row--note">' +
+      '<span>Original base daily</span><strong>' +
+      money(base) +
+      '</strong></div>';
+
+    if (mode !== 'fixed') {
+      const changeLabel =
+        vsBase > 0.005 ? 'Looser than base' : vsBase < -0.005 ? 'Tighter than base' : 'In line with base';
+      rows +=
+        '<div class="db-plan-math-row db-plan-math-row--note">' +
+        '<span>' +
+        changeLabel +
+        '</span><strong>' +
+        signedMoney(vsBase) +
+        ' / day</strong></div>';
+    }
+
+    let paceNote;
+    if (paceDelta > 0.005) {
+      paceNote = 'Under pace by ' + money(paceDelta) + ' so far (on-pace was ' + money(paceTarget) + ').';
+    } else if (paceDelta < -0.005) {
+      paceNote = 'Over pace by ' + money(Math.abs(paceDelta)) + ' so far (on-pace was ' + money(paceTarget) + ').';
+    } else {
+      paceNote = 'On pace so far (target ' + money(paceTarget) + ' across ' + daysPhrase(daysElapsed) + ').';
+    }
+
+    if (mode === 'fixed') {
+      paceNote =
+        'Fixed mode keeps ' +
+        money(base) +
+        ' / day regardless of spend. ' +
+        paceNote;
+    } else if (mode === 'carry_surplus') {
+      paceNote =
+        'Carry mode rolls unused days forward; the projection above is the average left if you spend evenly. ' +
+        paceNote;
+    } else {
+      paceNote = 'Envelope mode re-splits what’s left across remaining days. ' + paceNote;
+    }
+
+    if (midStart) {
+      paceNote += ' Starting pool is pro-rated from your tracking start.';
+    }
+
+    rows += '<p class="db-limit-math-note">' + paceNote + '</p>';
 
     box.innerHTML =
       '<p class="db-plan-math-title">Mode · ' + modeLabel(mode) + '</p>' + rows;
@@ -913,12 +939,12 @@
     });
 
     renderDayByDay(status);
+    renderPaceMath(status);
   }
 
   function applyStatus(status) {
     state = status;
     renderToday(status);
-    renderLimitMath(status);
     renderGoals(status);
     if (status.plan) {
       // Don't clobber bill edits if user is mid-edit on plan — only seed when first load

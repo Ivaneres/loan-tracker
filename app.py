@@ -2813,7 +2813,7 @@ def _daily_budget_day_limits(
     return limits
 
 
-def _daily_budget_limit_math(
+def _daily_budget_pace_projection(
     figures: dict,
     spend_by_date: dict[str, float],
     period_start: date,
@@ -2822,7 +2822,7 @@ def _daily_budget_limit_math(
     today: date,
     daily_limit: float,
 ) -> dict:
-    """Explain how today's daily limit was derived for the rest of the period."""
+    """How MTD discretionary spend reshapes the rest-of-period daily projection."""
     days_in_period = (period_end - period_start).days + 1
     discretionary = float(figures.get('discretionary_monthly') or 0)
     base = round(discretionary / days_in_period, 2) if days_in_period else 0.0
@@ -2849,21 +2849,42 @@ def _daily_budget_limit_math(
         d += timedelta(days=1)
     spent_before_today = round(spent_before_today, 2)
 
+    spent_today = float(spend_by_date.get(today.isoformat(), 0) or 0) if start <= today <= period_end else 0.0
+    spent_so_far = round(spent_before_today + spent_today, 2)
+
     if today < period_start or today > period_end:
         days_left = 0
+        days_after_today = 0
+        days_elapsed = 0
     else:
         days_left = (period_end - today).days + 1
+        days_after_today = max(0, days_left - 1)
+        # Elapsed days in the pacing window through today (inclusive).
+        elapsed_start = start if start <= today else today
+        days_elapsed = (today - elapsed_start).days + 1 if elapsed_start <= today else 0
 
     pool_at_start_of_today = round(
         max(0.0, discretionary - assumed_prior - spent_before_today),
         2,
     )
+    remaining_after_today = round(max(0.0, window_pool - spent_so_far), 2)
+
+    if mode == 'fixed':
+        projected_daily = base
+    elif days_after_today > 0:
+        projected_daily = round(remaining_after_today / days_after_today, 2)
+    else:
+        # Last day of the period: projection is whatever remains today.
+        projected_daily = round(max(0.0, float(daily_limit or 0) - spent_today), 2)
+
+    pace_target_spend = round(base * days_elapsed, 2) if days_elapsed else 0.0
+    pace_delta = round(pace_target_spend - spent_so_far, 2)
+    projected_vs_base = round(projected_daily - base, 2)
 
     carry_from_yesterday = 0.0
     if mode == 'carry_surplus' and today > start:
         yesterday = today - timedelta(days=1)
         if yesterday >= start:
-            # Recompute yesterday's allowance the same way as day_limits.
             leftover = 0.0
             d = start
             while d <= yesterday:
@@ -2876,12 +2897,21 @@ def _daily_budget_limit_math(
     return {
         'mode': mode,
         'discretionary_monthly': round(discretionary, 2),
-        'days_in_period': days_in_period,
-        'days_left': days_left,
-        'base_daily': base,
+        'window_pool': window_pool,
         'assumed_prior_spend': assumed_prior,
         'spent_before_today': spent_before_today,
+        'spent_so_far': spent_so_far,
         'pool_at_start_of_today': pool_at_start_of_today,
+        'remaining_after_today': remaining_after_today,
+        'days_in_period': days_in_period,
+        'days_elapsed': days_elapsed,
+        'days_left': days_left,
+        'days_after_today': days_after_today,
+        'base_daily': base,
+        'pace_target_spend': pace_target_spend,
+        'pace_delta': pace_delta,
+        'projected_daily': projected_daily,
+        'projected_vs_base': projected_vs_base,
         'carry_from_yesterday': round(carry_from_yesterday, 2),
         'daily_limit': round(float(daily_limit or 0), 2),
         'mid_period_start': start > period_start,
@@ -2992,7 +3022,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     daily_limit = float(limits.get(today_key, 0) or 0)
     remaining_today = round(daily_limit - spent_today, 2)
     discretionary = float(figures['discretionary_monthly'])
-    limit_math = _daily_budget_limit_math(
+    pace_projection = _daily_budget_pace_projection(
         figures,
         spend_by_date,
         period_start,
@@ -3070,7 +3100,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'remaining_today': remaining_today,
         'spent_mtd': spent_mtd,
         'discretionary_remaining_month': round(max(0.0, window_pool - spent_mtd), 2),
-        'limit_math': limit_math,
+        'pace_projection': pace_projection,
         'underspend_saved': underspend_total,
         'days': day_rows,
         'day_insights': day_insights,

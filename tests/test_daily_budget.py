@@ -262,7 +262,7 @@ class TestDailyBudgetStatus(unittest.TestCase):
         self.assertEqual(status['daily_limit'], 100.0)
         self.assertEqual(status['remaining_today'], 50.0)
 
-    def test_limit_math_envelope_divides_remaining_pool(self):
+    def test_pace_projection_envelope_tightens_after_overspend(self):
         spending = {
             'daily_budget': {
                 'plan': {
@@ -276,49 +276,26 @@ class TestDailyBudgetStatus(unittest.TestCase):
                 'goals': [],
             },
             'transactions': [
-                _tx(id='1', date='2024-01-01', amount=20, category='dining'),
+                _tx(id='1', date='2024-01-01', amount=40, category='dining'),
+                _tx(id='2', date='2024-01-02', amount=20, category='dining'),
             ],
             'monthly_insights': {},
         }
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
-        math = status['limit_math']
-        self.assertEqual(math['mode'], 'envelope')
-        self.assertEqual(math['discretionary_monthly'], 310.0)
-        self.assertEqual(math['days_in_period'], 31)
-        self.assertEqual(math['days_left'], 30)  # 2 Jan → 31 Jan
-        self.assertEqual(math['spent_before_today'], 20.0)
-        self.assertEqual(math['assumed_prior_spend'], 0.0)
-        self.assertEqual(math['pool_at_start_of_today'], 290.0)
-        self.assertEqual(math['daily_limit'], round(290.0 / 30, 2))
-        self.assertEqual(status['daily_limit'], math['daily_limit'])
+        proj = status['pace_projection']
+        self.assertEqual(proj['mode'], 'envelope')
+        self.assertEqual(proj['window_pool'], 310.0)
+        self.assertEqual(proj['spent_so_far'], 60.0)
+        self.assertEqual(proj['remaining_after_today'], 250.0)
+        self.assertEqual(proj['days_elapsed'], 2)
+        self.assertEqual(proj['days_after_today'], 29)  # 3 Jan → 31 Jan
+        self.assertEqual(proj['base_daily'], 10.0)
+        self.assertEqual(proj['projected_daily'], round(250.0 / 29, 2))
+        self.assertEqual(proj['projected_vs_base'], round(proj['projected_daily'] - 10.0, 2))
+        self.assertEqual(proj['pace_target_spend'], 20.0)
+        self.assertEqual(proj['pace_delta'], -40.0)  # 20 on-pace − 60 spent
 
-    def test_limit_math_carry_surplus_includes_yesterday_leftover(self):
-        spending = {
-            'daily_budget': {
-                'plan': {
-                    'income_monthly': 310,
-                    'bills_monthly': 0,
-                    'savings_percent': 0,
-                    'daily_mode': 'carry_surplus',
-                    'pay_day': 1,
-                    'bill_items': [],
-                },
-                'goals': [],
-            },
-            'transactions': [
-                _tx(id='1', date='2024-01-01', amount=0, category='dining'),
-            ],
-            'monthly_insights': {},
-        }
-        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
-        math = status['limit_math']
-        self.assertEqual(math['mode'], 'carry_surplus')
-        self.assertEqual(math['base_daily'], 10.0)
-        self.assertEqual(math['carry_from_yesterday'], 10.0)
-        self.assertEqual(math['daily_limit'], 20.0)
-        self.assertEqual(status['daily_limit'], 20.0)
-
-    def test_limit_math_fixed_is_base_daily(self):
+    def test_pace_projection_fixed_keeps_base_daily(self):
         spending = {
             'daily_budget': {
                 'plan': {
@@ -337,11 +314,43 @@ class TestDailyBudgetStatus(unittest.TestCase):
             'monthly_insights': {},
         }
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 15))
-        math = status['limit_math']
-        self.assertEqual(math['mode'], 'fixed')
-        self.assertEqual(math['base_daily'], 10.0)
-        self.assertEqual(math['daily_limit'], 10.0)
-        self.assertEqual(math['days_left'], 17)
+        proj = status['pace_projection']
+        self.assertEqual(proj['mode'], 'fixed')
+        self.assertEqual(proj['base_daily'], 10.0)
+        self.assertEqual(proj['projected_daily'], 10.0)
+        self.assertEqual(proj['projected_vs_base'], 0.0)
+        self.assertEqual(proj['spent_so_far'], 50.0)
+        self.assertEqual(proj['remaining_after_today'], 260.0)
+        self.assertEqual(proj['days_elapsed'], 15)
+        self.assertEqual(proj['pace_target_spend'], 150.0)
+        self.assertEqual(proj['pace_delta'], 100.0)
+
+    def test_pace_projection_carry_reports_remaining_average(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'carry_surplus',
+                    'pay_day': 1,
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-01', amount=0, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
+        proj = status['pace_projection']
+        self.assertEqual(proj['mode'], 'carry_surplus')
+        self.assertEqual(proj['carry_from_yesterday'], 10.0)
+        self.assertEqual(proj['daily_limit'], 20.0)
+        self.assertEqual(proj['spent_so_far'], 0.0)
+        self.assertEqual(proj['remaining_after_today'], 310.0)
+        self.assertEqual(proj['projected_daily'], round(310.0 / 29, 2))
 
     def test_underspend_saved_sums_daily_leftover(self):
         spending = {
