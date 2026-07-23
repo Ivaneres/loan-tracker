@@ -315,6 +315,37 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=31)
 if _env_bool('TRUST_PROXY', True):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 
+# Avoid sticky browser caches of CSS/JS after deploys.
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+
+
+def _static_asset_version(filename: str) -> str:
+    """Cache-bust token from static file mtime (changes on each deploy edit)."""
+    try:
+        path = os.path.join(app.static_folder or 'static', filename)
+        return str(int(os.path.getmtime(path)))
+    except OSError:
+        return '0'
+
+
+@app.context_processor
+def inject_asset_helpers():
+    def asset_url(filename: str) -> str:
+        return url_for('static', filename=filename, v=_static_asset_version(filename))
+
+    return {'asset_url': asset_url}
+
+
+@app.after_request
+def _no_cache_static(response):
+    if request.path.startswith('/static/'):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
+
+
 def load_users():
     """
     Load users from FINANCE_TRACKER_USERS env var:
@@ -7205,4 +7236,9 @@ if __name__ == '__main__':
         if 'recurring_payments' in loan and loan['recurring_payments']:
             schedule_recurring_payments(loan_id)
     schedule_bill_reminders_job()
-    app.run(debug=False, use_reloader=False)  # disable reloader to prevent duplicate schedulers
+    host = os.getenv('HOST', '0.0.0.0').strip() or '0.0.0.0'
+    try:
+        port = int(os.getenv('PORT', '5000') or '5000')
+    except ValueError:
+        port = 5000
+    app.run(host=host, port=port, debug=False, use_reloader=False)
