@@ -6,7 +6,7 @@
     <title>Daily Budget</title>
     {% include 'partials/fonts.html' %}
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('style.css') }}">
 </head>
 <body class="app-page db-page">
     <div class="app-shell">
@@ -226,6 +226,6 @@
         window.DAILY_BUDGET_CATEGORIES = {{ spending_categories | tojson }};
         window.DAILY_BUDGET_MONTHS = {{ months | tojson }};
     </script>
-    <script src="{{ url_for('static', filename='daily_budget.js') }}"></script>
+    <script src="{{ asset_url('daily_budget.js') }}"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
     <title>Monthly Spending</title>
     {% include 'partials/fonts.html' %}
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('style.css') }}">
 </head>
 <body class="app-page spending-page min-h-screen">
     <div class="app-shell">
@@ -311,6 +311,6 @@
         window.SPENDING_CATEGORIES = {{ spending_categories | tojson }};
     </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
-    <script src="{{ url_for('static', filename='spending.js') }}"></script>
+    <script src="{{ asset_url('spending.js') }}"></script>
 </body>
 </html>
