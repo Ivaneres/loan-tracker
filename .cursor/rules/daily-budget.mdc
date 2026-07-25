@@ -71,7 +71,16 @@ Production user has been on `envelope` with a mid-month `tracking_from` and payd
 - Chip toggles: `.db-cat` / `.db-date-chip` / `.db-title-chip` (+ `--selected`); reuse rather than new widgets.
 - Title suggestions: `#db-title-suggestions` under What for?; filled from `common_titles_by_category` for the selected category.
 - Daily page styles: `.db-*` in `@static/style.css`; `body.db-page button…` overrides exist for selected states.
-- Screenshots for PRs have lived under `docs/screenshots/…` with raw.githubusercontent.com image URLs in the PR body.
+
+## PR demo screenshots (required for UI changes)
+
+Any Daily Budget PR that changes visible UX **must** include at least one demo screenshot in the PR body before handoff:
+
+1. Capture with a Playwright helper under `@tmp/screenshot_*.py` (see `@tmp/screenshot_overspend_debt.py`, `@tmp/screenshot_title_suggestions.py`).
+2. Save committed copies under `@docs/screenshots/<feature>/`.
+3. Also write to `/tmp/cursor/artifacts/screenshots/` so the PR tool can embed them.
+4. Embed in the PR body via HTML `<img>` tags (absolute artifact path and/or `raw.githubusercontent.com` URL for the branch).
+5. Prefer a tight crop of the changed control (entry form, chips, card) plus one full mobile frame when helpful.
 
 ## Tests
 
