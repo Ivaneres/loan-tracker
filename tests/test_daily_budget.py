@@ -1,7 +1,8 @@
 """Daily Budget plan math, modes, underspend, overspend debt, and manual-import dedup."""
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest import mock
+from zoneinfo import ZoneInfo
 
 import app as app_mod
 
@@ -669,7 +670,7 @@ class TestDailyEntryCreate(unittest.TestCase):
     def test_rejects_future_entry_date(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()
-        future = (app_mod.date.today() + app_mod.timedelta(days=2)).strftime('%Y-%m-%d')
+        future = (app_mod._daily_budget_today() + app_mod.timedelta(days=2)).strftime('%Y-%m-%d')
         resp = self.client.post(
             '/api/spending/daily/entry',
             json={'amount': 5, 'title': 'Soon', 'category': 'dining', 'date': future},
@@ -677,6 +678,50 @@ class TestDailyEntryCreate(unittest.TestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn('future', (resp.get_json() or {}).get('error', '').lower())
         self.assertEqual(self.spending['transactions'], [])
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_allows_entry_on_london_today_when_utc_still_yesterday(self, load_mock, save_mock):
+        """Regression: after midnight BST, browser today can be ahead of UTC host date."""
+        load_mock.return_value = self.data
+        self._login()
+        london_today = date(2026, 7, 26)
+        with mock.patch.object(app_mod, '_daily_budget_today', return_value=london_today), \
+             mock.patch.object(app_mod, '_recompute_monthly_insights'):
+            resp = self.client.post(
+                '/api/spending/daily/entry',
+                json={
+                    'amount': 7.5,
+                    'title': 'Late night shop',
+                    'category': 'groceries',
+                    'date': '2026-07-26',
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.get_json())
+        body = resp.get_json()
+        self.assertEqual(body['transaction']['date'], '2026-07-26')
+        self.assertEqual(body['status']['as_of'], '2026-07-26')
+
+
+class TestDailyBudgetTodayTimezone(unittest.TestCase):
+    def test_daily_budget_today_uses_europe_london_not_host_utc(self):
+        # 2026-07-25 23:38 UTC == 2026-07-26 00:38 BST
+        utc_instant = datetime(2026, 7, 25, 23, 38, 0, tzinfo=timezone.utc)
+
+        class _FixedDateTime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return utc_instant.replace(tzinfo=None)
+                return utc_instant.astimezone(tz)
+
+        with mock.patch.object(app_mod, 'datetime', _FixedDateTime):
+            self.assertEqual(app_mod._daily_budget_today(), date(2026, 7, 26))
+            self.assertEqual(utc_instant.astimezone(timezone.utc).date(), date(2026, 7, 25))
+            self.assertEqual(
+                utc_instant.astimezone(ZoneInfo('Europe/London')).date(),
+                date(2026, 7, 26),
+            )
 
 
 class TestDailyPlanTrackingFromApi(unittest.TestCase):
@@ -718,10 +763,11 @@ class TestDailyPlanTrackingFromApi(unittest.TestCase):
         })
         self.assertEqual(resp.status_code, 200)
         body = resp.get_json()
-        self.assertEqual(body['plan']['tracking_from'], date.today().isoformat())
+        today = app_mod._daily_budget_today().isoformat()
+        self.assertEqual(body['plan']['tracking_from'], today)
         self.assertEqual(
             self.spending['daily_budget']['plan']['tracking_from'],
-            date.today().isoformat(),
+            today,
         )
 
     @mock.patch.object(app_mod, 'save_data')

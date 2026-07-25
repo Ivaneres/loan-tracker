@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 from dateutil.relativedelta import relativedelta
 from dateutil import parser as dateutil_parser
 from calendar import monthrange
+from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -3054,9 +3055,14 @@ def _daily_budget_pace_projection(
     }
 
 
+# Daily budget is a UK calendar product (£ / en-GB UI). Use London civil dates so
+# "today" matches the browser after midnight BST/GMT even when the host is UTC.
+_DAILY_BUDGET_TZ = ZoneInfo('Europe/London')
+
+
 def _daily_budget_today() -> date:
-    """Clock seam for daily-budget period/debt logic (patchable in tests)."""
-    return date.today()
+    """Calendar 'today' for daily budget (Europe/London; patchable in tests)."""
+    return datetime.now(_DAILY_BUDGET_TZ).date()
 
 
 def _daily_budget_period_key(period_start: date, period_end: date) -> str:
@@ -3463,7 +3469,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     bucket, _ = _ensure_daily_budget(spending)
     plan = bucket.get('plan') or {}
     figures = _daily_budget_plan_figures(plan)
-    today = as_of or date.today()
+    today = as_of or _daily_budget_today()
     pay_day = _daily_budget_parse_pay_day(plan.get('pay_day'))
     period_start, period_end = _daily_budget_pay_period(today, pay_day)
     days_in_period = (period_end - period_start).days + 1
@@ -7507,7 +7513,7 @@ def spending_daily_status():
     data = load_data()
     spending, changed = _ensure_user_spending(data, session['username'])
     as_of_raw = (request.args.get('date') or '').strip()
-    as_of = _parse_iso_date(as_of_raw) if as_of_raw else date.today()
+    as_of = _parse_iso_date(as_of_raw) if as_of_raw else _daily_budget_today()
     if as_of is None:
         return jsonify({'error': 'Invalid date'}), 400
     debt_changed = _daily_budget_sync_overspend_state(spending, as_of)
@@ -7535,10 +7541,11 @@ def spending_daily_entry_create():
     if category not in SPENDING_CATEGORY_SET or category == 'unclassified':
         category = 'other'
     date_raw = str(payload.get('date') or '').strip()
-    d = _parse_iso_date(date_raw) if date_raw else date.today()
+    today = _daily_budget_today()
+    d = _parse_iso_date(date_raw) if date_raw else today
     if d is None:
         return jsonify({'error': 'Invalid date'}), 400
-    if d > date.today():
+    if d > today:
         return jsonify({'error': 'Cannot log spend for a future date'}), 400
 
     data = load_data()
@@ -7675,7 +7682,7 @@ def spending_daily_plan():
             plan['tracking_from'] = tf.isoformat()
     elif first_save and not plan.get('tracking_from'):
         # Mid-period onboarding: pace from today so empty earlier days aren't £0.
-        plan['tracking_from'] = date.today().isoformat()
+        plan['tracking_from'] = _daily_budget_today().isoformat()
     plan['updated_at'] = datetime.utcnow().isoformat() + 'Z'
     save_data(data)
     status = _daily_budget_status(spending)
