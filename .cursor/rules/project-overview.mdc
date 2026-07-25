@@ -1,0 +1,46 @@
+---
+description: Repo map, stack, auth, data, and how to run/test this finance tracker
+alwaysApply: true
+---
+
+# Project overview
+
+Flask monolith finance tracker (loans + spending + daily budget). No separate frontend framework.
+
+## Layout
+
+- `@app.py` — routes, domain logic, JSON persistence (large single module)
+- `templates/` — Jinja pages (`daily_budget.html`, `spending.html`, `loans.html`, …)
+- `static/` — vanilla JS/CSS (`daily_budget.js`, `spending.js`, `script.js`, `style.css`)
+- `tests/` — `unittest` modules (not pytest-first; run with `python -m unittest …`)
+- `data.json` — local persistence (gitignored); production has its own copy + `.env`
+- `.cursor/rules/` — agent context; keep learnings here for future agents
+
+## Stack / runtime
+
+- Python Flask app: `python app.py` or `./start.sh` (sources `.env` if present)
+- Auth users from `FINANCE_TRACKER_USERS` (`user:pass,user2:pass2`); if unset, local defaults `admin`/`admin123` and `user`/`user123`
+- Session login required for app routes; APIs return JSON
+- Static assets may be cache-busted via helpers in `app.py` — hard-refresh if UI looks stale after deploy
+
+## Data model (high level)
+
+- Top-level JSON: `{ "users": { "<username>": { "spending": … } }, "loans": … }`
+- Per-user spending lives under `users.<user>.spending` (`transactions`, `statements`, `monthly_insights`, `daily_budget`)
+- Manual daily spends are normal outgoing transactions with `source: "manual"` and a `date` (`YYYY-MM-DD`)
+
+## Tests
+
+```sh
+.venv/bin/python -m unittest tests.test_daily_budget tests.test_daily_budget_ui -v
+```
+
+Prefer extending existing unittest files; UI presence checks often assert substrings in rendered HTML + JS source.
+
+## Production
+
+Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`.
+
+## Keeping agent context fresh
+
+When you discover durable repo knowledge (invariants, APIs, UX contracts, prod quirks), update the relevant `.cursor/rules/*.mdc` (or add a focused new rule) in the same PR/commit. See root `AGENTS.md`.
