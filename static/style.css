@@ -2524,6 +2524,51 @@ body.db-page button.db-title-clear:active {
     display: none;
 }
 
+.db-title-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+
+.db-title-suggestions.hidden {
+    display: none;
+}
+
+.db-title-chip {
+    border: 1px solid var(--db-line);
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 0.75rem;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--db-muted);
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.db-title-chip:active {
+    transform: scale(0.98);
+}
+
+.db-title-chip--selected {
+    background: var(--db-ink);
+    border-color: var(--db-ink);
+    color: #f4faf7;
+}
+
+body.db-page button.db-title-chip {
+    padding: 0.45rem 0.7rem;
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--db-muted);
+}
+
+body.db-page button.db-title-chip--selected {
+    background: var(--db-ink);
+    border-color: var(--db-ink);
+    color: #f4faf7;
+}
+
 .db-field input,
 .db-select,
 .db-bill-add input {

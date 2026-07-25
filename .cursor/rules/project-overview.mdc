@@ -41,6 +41,10 @@ Prefer extending existing unittest files; UI presence checks often assert substr
 
 Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`.
 
+## PR demo screenshots
+
+For PRs that change user-visible UI, include at least one demo screenshot **inline in the PR body** (no click-through to another page). Commit under `docs/screenshots/<feature>/`, push, then embed with HTML `<img src="https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/...">`. Do not use Cursor artifact links. Daily Budget details: `@.cursor/rules/daily-budget.mdc`.
+
 ## Keeping agent context fresh
 
 When you discover durable repo knowledge (invariants, APIs, UX contracts, prod quirks), update the relevant `.cursor/rules/*.mdc` (or add a focused new rule) in the same PR/commit. See root `AGENTS.md`.
