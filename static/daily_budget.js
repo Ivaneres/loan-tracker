@@ -308,6 +308,34 @@
     }
   }
 
+  function renderTitleSuggestions() {
+    const wrap = $('db-title-suggestions');
+    const titleInput = $('db-title');
+    if (!wrap || !titleInput) return;
+    const cat = ($('db-category') && $('db-category').value) || 'dining';
+    const byCat = (state && state.common_titles_by_category) || {};
+    const titles = Array.isArray(byCat[cat]) ? byCat[cat].slice(0, 3) : [];
+    wrap.innerHTML = '';
+    if (!titles.length) {
+      wrap.classList.add('hidden');
+      return;
+    }
+    wrap.classList.remove('hidden');
+    const current = String(titleInput.value || '').trim();
+    titles.forEach((title) => {
+      const label = String(title || '').trim();
+      if (!label) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'db-title-chip';
+      btn.dataset.title = label;
+      btn.textContent = label;
+      if (current === label) btn.classList.add('db-title-chip--selected');
+      wrap.appendChild(btn);
+    });
+    if (!wrap.childElementCount) wrap.classList.add('hidden');
+  }
+
   function renderToday(status) {
     const remaining = status.remaining_today;
     const limit = status.daily_limit;
@@ -332,6 +360,7 @@
 
     renderOverspendPrompt(status);
     renderDebtNote(status);
+    renderTitleSuggestions();
 
     const list = $('db-today-list');
     const empty = $('db-today-empty');
@@ -1269,9 +1298,11 @@
 
     const titleInput = $('db-title');
     const titleClear = $('db-title-clear');
+    const titleSuggestions = $('db-title-suggestions');
     const setTitle = (value) => {
       titleInput.value = value;
       titleClear.classList.toggle('hidden', !value);
+      renderTitleSuggestions();
     };
     const categoryTitle = (category) => {
       const label = String(category || '').replace(/_/g, ' ');
@@ -1280,12 +1311,23 @@
     let lastAutoTitle = categoryTitle($('db-category').value);
     titleInput.addEventListener('input', () => {
       titleClear.classList.toggle('hidden', !titleInput.value);
+      renderTitleSuggestions();
     });
     titleClear.addEventListener('click', () => {
       setTitle('');
       lastAutoTitle = '';
       titleInput.focus();
     });
+    if (titleSuggestions) {
+      titleSuggestions.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.db-title-chip');
+        if (!btn) return;
+        const picked = String(btn.dataset.title || btn.textContent || '').trim();
+        if (!picked) return;
+        setTitle(picked);
+        titleInput.focus();
+      });
+    }
     setTitle(lastAutoTitle);
 
     const grid = $('db-cat-grid');
@@ -1300,6 +1342,8 @@
         const current = String(titleInput.value || '');
         if (!current.trim() || current === lastAutoTitle) {
           setTitle(nextAutoTitle);
+        } else {
+          renderTitleSuggestions();
         }
         lastAutoTitle = nextAutoTitle;
       });

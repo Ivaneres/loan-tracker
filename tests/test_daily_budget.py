@@ -494,6 +494,55 @@ class TestManualImportDedup(unittest.TestCase):
         self.assertEqual(manual['source_statement_id'], 'stmt-1')
 
 
+class TestDailyCommonTitles(unittest.TestCase):
+    def test_ranks_top_three_per_category_and_merges_case(self):
+        spending = {
+            'transactions': [
+                _tx(id='1', description='Coffee', category='dining', date='2024-01-01'),
+                _tx(id='2', description='coffee', category='dining', date='2024-01-02'),
+                _tx(id='3', description='Lunch', category='dining', date='2024-01-03'),
+                _tx(id='4', description='Lunch', category='dining', date='2024-01-04'),
+                _tx(id='5', description='Snack', category='dining', date='2024-01-05'),
+                _tx(id='6', description='Dinner', category='dining', date='2024-01-06'),
+                _tx(id='7', description='Dining', category='dining', date='2024-01-07'),
+                _tx(id='8', description='Bus', category='transport', date='2024-01-08'),
+                _tx(id='9', description='Uber', category='transport', date='2024-01-09'),
+                _tx(id='10', description='Train', category='transport', date='2024-01-10'),
+                _tx(id='11', description='Incoming', category='dining', direction='incoming'),
+            ],
+        }
+        by_cat = app_mod._daily_budget_common_titles(spending, limit=3)
+        # Equal counts break ties by most recent date (Lunch over Coffee).
+        self.assertEqual(by_cat['dining'], ['Lunch', 'Coffee', 'Dinner'])
+        self.assertEqual(by_cat['transport'], ['Train', 'Uber', 'Bus'])
+        self.assertEqual(by_cat['groceries'], [])
+
+    def test_status_includes_common_titles_by_category(self):
+        spending = {
+            'transactions': [
+                _tx(id='1', description='Coffee', category='dining', date='2024-01-09'),
+                _tx(id='2', description='Coffee', category='dining', date='2024-01-10'),
+                _tx(id='3', description='Lunch', category='dining', date='2024-01-10'),
+            ],
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 3100,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 10))
+        self.assertIn('common_titles_by_category', status)
+        self.assertEqual(
+            status['common_titles_by_category']['dining'],
+            ['Coffee', 'Lunch'],
+        )
+
+
 class TestDailyEntryCreate(unittest.TestCase):
     def setUp(self):
         self.client = app_mod.app.test_client()
