@@ -74,12 +74,14 @@ Production user has been on `envelope` with a mid-month `tracking_from` and payd
 
 ## PR demo screenshots (required for UI changes)
 
-Any Daily Budget PR that changes visible UX **must** include at least one demo screenshot in the PR body before handoff:
+Any Daily Budget PR that changes visible UX **must** include at least one demo screenshot **inline in the PR body** before handoff (visible without opening another page):
 
 1. Capture with a Playwright helper under `@tmp/screenshot_*.py` (see `@tmp/screenshot_overspend_debt.py`, `@tmp/screenshot_title_suggestions.py`).
-2. Save committed copies under `@docs/screenshots/<feature>/`.
-3. Also write to `/tmp/cursor/artifacts/screenshots/` so the PR tool can embed them.
-4. Embed in the PR body via HTML `<img>` tags (absolute artifact path and/or `raw.githubusercontent.com` URL for the branch).
+2. Commit copies under `@docs/screenshots/<feature>/` and push the branch first.
+3. Embed with HTML `<img>` tags using **`raw.githubusercontent.com`** URLs for this branch, e.g.  
+   `https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/<feature>/<file>.png`  
+   so GitHub renders the image inline.
+4. Do **not** use Cursor artifact `/tmp/cursor/artifacts/…` paths or markdown links to `cursor.com/agents/…/artifacts` — those become click-through links, not inline images.
 5. Prefer a tight crop of the changed control (entry form, chips, card) plus one full mobile frame when helpful.
 
 ## Tests

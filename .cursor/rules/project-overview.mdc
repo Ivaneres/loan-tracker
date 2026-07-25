@@ -43,7 +43,7 @@ Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-dep
 
 ## PR demo screenshots
 
-For PRs that change user-visible UI, include at least one demo screenshot in the PR body (committed under `docs/screenshots/<feature>/`, capture helpers in `tmp/screenshot_*.py`). Daily Budget details: `@.cursor/rules/daily-budget.mdc`.
+For PRs that change user-visible UI, include at least one demo screenshot **inline in the PR body** (no click-through to another page). Commit under `docs/screenshots/<feature>/`, push, then embed with HTML `<img src="https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/...">`. Do not use Cursor artifact links. Daily Budget details: `@.cursor/rules/daily-budget.mdc`.
 
 ## Keeping agent context fresh
 
