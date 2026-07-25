@@ -19,6 +19,41 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
+    def test_today_tab_renders_past_date_shortcuts(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/spending/daily')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        self.assertIn('id="db-date-chips"', html)
+        self.assertIn('id="db-entry-date"', html)
+        self.assertIn('id="db-entry-date-value"', html)
+        self.assertIn('id="db-view-date-chips"', html)
+        self.assertIn('id="db-view-date"', html)
+        self.assertIn('data-offset="0"', html)
+        self.assertIn('data-offset="-1"', html)
+        self.assertIn('data-offset="-2"', html)
+        self.assertIn('Yesterday', html)
+        self.assertIn('2 days ago', html)
+        self.assertIn('Or pick a date', html)
+        self.assertIn('id="db-today-list-title"', html)
+        self.assertIn('>Spends</h2>', html)
+        self.assertIn('<legend>Show</legend>', html)
+
+        js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        for needle in (
+            'selectEntryDate',
+            'selectViewDate',
+            'date: spendDate',
+            'Add for yesterday',
+            'db-view-date-chips',
+            'viewDate',
+        ):
+            self.assertIn(needle, js)
+        self.assertNotIn('Yesterday’s spends', js)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
     def test_plan_tab_renders_pay_day_and_tracking_from(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()

@@ -519,6 +519,40 @@ class TestDailyEntryCreate(unittest.TestCase):
         )
         save_mock.assert_called()
 
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_creates_entry_for_past_date_and_returns_that_day_status(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        payload = {
+            'amount': 12.0,
+            'title': 'Lunch',
+            'category': 'dining',
+            'date': '2024-01-08',
+        }
+        with mock.patch.object(app_mod, '_recompute_monthly_insights'):
+            resp = self.client.post('/api/spending/daily/entry', json=payload)
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertEqual(body['transaction']['date'], '2024-01-08')
+        self.assertEqual(body['status']['as_of'], '2024-01-08')
+        self.assertEqual(body['status']['spent_today'], 12.0)
+        self.assertEqual(self.spending['transactions'][0]['date'], '2024-01-08')
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_rejects_future_entry_date(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        future = (app_mod.date.today() + app_mod.timedelta(days=2)).strftime('%Y-%m-%d')
+        resp = self.client.post(
+            '/api/spending/daily/entry',
+            json={'amount': 5, 'title': 'Soon', 'category': 'dining', 'date': future},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn('future', (resp.get_json() or {}).get('error', '').lower())
+        self.assertEqual(self.spending['transactions'], [])
+
 
 class TestDailyPlanTrackingFromApi(unittest.TestCase):
     def setUp(self):
