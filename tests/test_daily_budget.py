@@ -509,6 +509,28 @@ class TestDailyCommonTitles(unittest.TestCase):
                 _tx(id='9', description='Uber', category='transport', date='2024-01-09'),
                 _tx(id='10', description='Train', category='transport', date='2024-01-10'),
                 _tx(id='11', description='Incoming', category='dining', direction='incoming'),
+                # Statement imports must not contribute suggestions.
+                _tx(
+                    id='12',
+                    description='TESCO STORES',
+                    category='groceries',
+                    date='2024-01-11',
+                    source='statement',
+                ),
+                _tx(
+                    id='13',
+                    description='PRET A MANGER',
+                    category='dining',
+                    date='2024-01-12',
+                    source='import',
+                ),
+                _tx(
+                    id='14',
+                    description='PRET A MANGER',
+                    category='dining',
+                    date='2024-01-13',
+                    source='statement',
+                ),
             ],
         }
         by_cat = app_mod._daily_budget_common_titles(spending, limit=3)
@@ -516,6 +538,36 @@ class TestDailyCommonTitles(unittest.TestCase):
         self.assertEqual(by_cat['dining'], ['Lunch', 'Coffee', 'Dinner'])
         self.assertEqual(by_cat['transport'], ['Train', 'Uber', 'Bus'])
         self.assertEqual(by_cat['groceries'], [])
+
+    def test_ignores_non_manual_sources(self):
+        spending = {
+            'transactions': [
+                _tx(id='1', description='Coffee', category='dining', date='2024-01-10'),
+                _tx(
+                    id='2',
+                    description='STARBUCKS',
+                    category='dining',
+                    date='2024-01-11',
+                    source='statement',
+                ),
+                _tx(
+                    id='3',
+                    description='STARBUCKS',
+                    category='dining',
+                    date='2024-01-12',
+                    source='statement',
+                ),
+                _tx(
+                    id='4',
+                    description='STARBUCKS',
+                    category='dining',
+                    date='2024-01-13',
+                    source='statement',
+                ),
+            ],
+        }
+        by_cat = app_mod._daily_budget_common_titles(spending, limit=3)
+        self.assertEqual(by_cat['dining'], ['Coffee'])
 
     def test_status_includes_common_titles_by_category(self):
         spending = {

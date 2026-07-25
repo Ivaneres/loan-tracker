@@ -33,7 +33,7 @@ Two independent date states in `daily_budget.js`:
 ## APIs
 
 - `GET /api/spending/daily/status?date=YYYY-MM-DD` — optional `as_of`; default today
-  - Includes `common_titles_by_category`: up to 3 most-used “What for?” titles per category (normalized merge; skips bare category labels)
+  - Includes `common_titles_by_category`: up to 3 most-used “What for?” titles per category from **manual** spends only (ignores statement imports; normalized merge; skips bare category labels)
 - `POST /api/spending/daily/entry` — body: `amount`, `title`, `category`, optional `date`
   - Omitting `date` → today
   - Future dates → **400** (`Cannot log spend for a future date`)
