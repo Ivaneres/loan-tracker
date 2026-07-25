@@ -6974,6 +6974,8 @@ def spending_daily_entry_create():
     d = _parse_iso_date(date_raw) if date_raw else date.today()
     if d is None:
         return jsonify({'error': 'Invalid date'}), 400
+    if d > date.today():
+        return jsonify({'error': 'Cannot log spend for a future date'}), 400
 
     data = load_data()
     spending, changed = _ensure_user_spending(data, session['username'])

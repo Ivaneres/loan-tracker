@@ -82,6 +82,98 @@
   }
   let state = null;
   let billItems = [];
+  let entryDate = '';
+
+  function localISODate(d) {
+    const dt = d instanceof Date ? d : new Date();
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function addDaysISO(iso, delta) {
+    const d = new Date(String(iso) + 'T12:00:00');
+    d.setDate(d.getDate() + delta);
+    return localISODate(d);
+  }
+
+  function dateOffsetLabel(iso) {
+    const today = localISODate();
+    if (iso === today) return 'today';
+    if (iso === addDaysISO(today, -1)) return 'yesterday';
+    if (iso === addDaysISO(today, -2)) return '2 days ago';
+    const d = new Date(iso + 'T12:00:00');
+    return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  function updateSpendListTitle() {
+    const title = $('db-today-list-title');
+    if (!title) return;
+    const today = localISODate();
+    if (entryDate === today) {
+      title.textContent = 'Today’s spends';
+    } else if (entryDate === addDaysISO(today, -1)) {
+      title.textContent = 'Yesterday’s spends';
+    } else {
+      const d = new Date(entryDate + 'T12:00:00');
+      title.textContent =
+        'Spends · ' +
+        d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    }
+  }
+
+  function updateAddButtonLabel() {
+    const btn = $('db-add-btn');
+    if (!btn) return;
+    const today = localISODate();
+    if (entryDate === today) {
+      btn.textContent = 'Add spend';
+    } else if (entryDate === addDaysISO(today, -1)) {
+      btn.textContent = 'Add for yesterday';
+    } else if (entryDate === addDaysISO(today, -2)) {
+      btn.textContent = 'Add for 2 days ago';
+    } else {
+      btn.textContent = 'Add for ' + dateOffsetLabel(entryDate);
+    }
+  }
+
+  function syncDateControls() {
+    const today = localISODate();
+    const chips = $('db-date-chips');
+    if (chips) {
+      chips.querySelectorAll('.db-date-chip').forEach((btn) => {
+        const offset = Number(btn.dataset.offset);
+        const chipDate = addDaysISO(today, offset);
+        btn.classList.toggle('db-date-chip--selected', entryDate === chipDate);
+      });
+    }
+    const input = $('db-entry-date');
+    if (input) {
+      input.max = today;
+      input.value = entryDate;
+    }
+    const hidden = $('db-entry-date-value');
+    if (hidden) hidden.value = entryDate;
+    updateSpendListTitle();
+    updateAddButtonLabel();
+  }
+
+  async function selectEntryDate(iso, opts) {
+    const options = opts || {};
+    const today = localISODate();
+    let next = String(iso || '').trim() || today;
+    if (next > today) next = today;
+    const changed = next !== entryDate;
+    entryDate = next;
+    syncDateControls();
+    if (options.refreshView === false || !changed) return;
+    try {
+      await refresh(entryDate);
+    } catch (e) {
+      flash(e.message, 'error');
+    }
+  }
 
   async function api(url, options) {
     const res = await fetch(url, {
@@ -951,9 +1043,15 @@
     }
   }
 
-  async function refresh() {
-    const data = await api('/api/spending/daily/status');
+  async function refresh(dateStr) {
+    const iso = String(dateStr || entryDate || localISODate()).trim();
+    const q = iso ? '?date=' + encodeURIComponent(iso) : '';
+    const data = await api('/api/spending/daily/status' + q);
     applyStatus(data);
+    if (data && data.as_of) {
+      entryDate = data.as_of;
+      syncDateControls();
+    }
     return data;
   }
 
@@ -964,8 +1062,8 @@
 
   async function deleteEntry(id) {
     try {
-      const data = await api('/api/spending/daily/entry/' + encodeURIComponent(id), { method: 'DELETE' });
-      applyStatus(data.status);
+      await api('/api/spending/daily/entry/' + encodeURIComponent(id), { method: 'DELETE' });
+      await refresh(entryDate);
       flash('Deleted', 'ok');
     } catch (e) {
       flash(e.message, 'error');
@@ -1032,6 +1130,22 @@
       });
     }
 
+    const dateChips = $('db-date-chips');
+    if (dateChips) {
+      dateChips.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.db-date-chip');
+        if (!btn) return;
+        const offset = Number(btn.dataset.offset);
+        selectEntryDate(addDaysISO(localISODate(), offset));
+      });
+    }
+    const dateInput = $('db-entry-date');
+    if (dateInput) {
+      dateInput.addEventListener('change', () => {
+        selectEntryDate(dateInput.value || localISODate());
+      });
+    }
+
     $('db-entry-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const raw = String($('db-amount').value || '').replace(/,/g, '').trim();
@@ -1045,6 +1159,7 @@
         flash('Add a short title', 'error');
         return;
       }
+      const spendDate = String(($('db-entry-date-value') && $('db-entry-date-value').value) || entryDate || localISODate());
       const btn = $('db-add-btn');
       btn.disabled = true;
       try {
@@ -1054,18 +1169,25 @@
             amount,
             title,
             category: $('db-category').value || 'other',
+            date: spendDate,
           }),
         });
+        if (data.status && data.status.as_of) {
+          entryDate = data.status.as_of;
+        }
         applyStatus(data.status);
+        syncDateControls();
         $('db-amount').value = '';
         lastAutoTitle = categoryTitle($('db-category').value);
         setTitle(lastAutoTitle);
         $('db-amount').focus();
-        flash('Logged', 'ok');
+        const when = dateOffsetLabel(spendDate);
+        flash(when === 'today' ? 'Logged' : 'Logged for ' + when, 'ok');
       } catch (e) {
         flash(e.message, 'error');
       } finally {
         btn.disabled = false;
+        updateAddButtonLabel();
       }
     });
 
@@ -1183,9 +1305,11 @@
   }
 
   document.addEventListener('DOMContentLoaded', async () => {
+    entryDate = localISODate();
+    syncDateControls();
     bind();
     try {
-      await refresh();
+      await refresh(entryDate);
       await loadPlan();
     } catch (e) {
       flash(e.message || 'Failed to load daily budget', 'error');
