@@ -128,6 +128,7 @@ SPENDING_CATEGORY_SET = set(SPENDING_ALLOWED_CATEGORIES)
 DAILY_BUDGET_BILL_CATEGORIES = frozenset({'housing', 'utilities', 'subscriptions', 'debt'})
 DAILY_BUDGET_IGNORE_CATEGORIES = frozenset({'savings'})
 DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
+DAILY_BUDGET_UNDERSPEND_PRIORITIES = frozenset({'debt_first', 'goals_first'})
 DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
 DAILY_ENTRY_CATEGORIES = [
     c for c in SPENDING_ALLOWED_CATEGORIES if c not in ('unclassified',)
@@ -496,6 +497,8 @@ def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
         'tracking_from': None,
         'source_month': None,
         'bill_items': [],
+        # When daily leftover is skimmed: repay overspend debt first, or fill goals first.
+        'underspend_priority': 'debt_first',
         'updated_at': None,
     }
     for key, default in plan_defaults.items():
@@ -504,6 +507,9 @@ def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
             changed = True
     if plan.get('daily_mode') not in DAILY_BUDGET_MODES:
         plan['daily_mode'] = 'envelope'
+        changed = True
+    if plan.get('underspend_priority') not in DAILY_BUDGET_UNDERSPEND_PRIORITIES:
+        plan['underspend_priority'] = 'debt_first'
         changed = True
     try:
         pay_day = int(plan.get('pay_day'))
@@ -520,6 +526,13 @@ def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
     goals = bucket.get('goals')
     if not isinstance(goals, list):
         bucket['goals'] = []
+        changed = True
+    if 'overspend_debt' not in bucket:
+        bucket['overspend_debt'] = None
+        changed = True
+    decisions = bucket.get('overspend_decisions')
+    if not isinstance(decisions, dict):
+        bucket['overspend_decisions'] = {}
         changed = True
     return bucket, changed
 
@@ -2678,6 +2691,9 @@ def _daily_budget_plan_figures(plan: dict) -> dict:
     mode = str(plan.get('daily_mode') or 'envelope')
     if mode not in DAILY_BUDGET_MODES:
         mode = 'envelope'
+    priority = str(plan.get('underspend_priority') or 'debt_first')
+    if priority not in DAILY_BUDGET_UNDERSPEND_PRIORITIES:
+        priority = 'debt_first'
     return {
         'income_monthly': round(income, 2),
         'bills_monthly': round(bills, 2),
@@ -2685,6 +2701,7 @@ def _daily_budget_plan_figures(plan: dict) -> dict:
         'savings_monthly': savings_monthly,
         'discretionary_monthly': discretionary,
         'daily_mode': mode,
+        'underspend_priority': priority,
     }
 
 
@@ -2771,12 +2788,63 @@ def _daily_budget_pacing_start(
     return tf
 
 
+def _daily_budget_goals_capacity(goals) -> float:
+    total = 0.0
+    if not isinstance(goals, list):
+        return 0.0
+    for g in goals:
+        if not isinstance(g, dict):
+            continue
+        try:
+            total += max(0.0, float(g.get('target_amount') or 0))
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
+def _daily_budget_allocate_day_leftover(
+    raw: float,
+    *,
+    debt_left: float,
+    goals_filled: float,
+    goals_capacity: float,
+    priority: str,
+) -> tuple[float, float, float]:
+    """Split one day's leftover into (repay, roll_forward, goals_filled_delta).
+
+    Debt repay is the only physical skim (reduces carry). ``roll_forward`` is also
+    the amount that counts toward underspend/goals after skimming.
+    """
+    raw = max(0.0, round(float(raw or 0), 2))
+    debt_left = max(0.0, round(float(debt_left or 0), 2))
+    goals_filled = max(0.0, round(float(goals_filled or 0), 2))
+    goals_capacity = max(0.0, round(float(goals_capacity or 0), 2))
+    if priority not in DAILY_BUDGET_UNDERSPEND_PRIORITIES:
+        priority = 'debt_first'
+
+    if priority == 'goals_first' and goals_capacity > 0:
+        room = max(0.0, round(goals_capacity - goals_filled, 2))
+        protected = min(raw, room)
+        repay = min(round(raw - protected, 2), debt_left)
+        filled_delta = protected
+    else:
+        repay = min(raw, debt_left)
+        filled_delta = round(raw - repay, 2)
+
+    roll = round(raw - repay, 2)
+    return round(repay, 2), roll, round(filled_delta, 2)
+
+
 def _daily_budget_day_limits(
     figures: dict,
     spend_by_date: dict[str, float],
     period_start: date,
     period_end: date,
     pacing_start: date | None = None,
+    *,
+    debt_balance: float = 0.0,
+    goals_capacity: float = 0.0,
+    underspend_priority: str | None = None,
 ) -> dict[str, float]:
     """Effective daily spending allowance for each day in the pay period.
 
@@ -2784,6 +2852,9 @@ def _daily_budget_day_limits(
     pool is pro-rated by days left in the period (average-pace assumption for
     unknown pre-tracking spend). Pre-start days get a 0 limit and are ignored
     by status.
+
+    For ``carry_surplus``, overspend-debt skims reduce what rolls to tomorrow
+    (debt first or after goals capacity, per ``underspend_priority``).
     """
     if period_end < period_start:
         return {}
@@ -2804,6 +2875,9 @@ def _daily_budget_day_limits(
     )
     assumed_prior = round(max(0.0, discretionary - window_pool), 2)
     limits: dict[str, float] = {}
+    priority = underspend_priority or figures.get('underspend_priority') or 'debt_first'
+    if priority not in DAILY_BUDGET_UNDERSPEND_PRIORITIES:
+        priority = 'debt_first'
 
     if mode == 'fixed':
         d = period_start
@@ -2814,6 +2888,8 @@ def _daily_budget_day_limits(
 
     if mode == 'carry_surplus':
         leftover = 0.0
+        debt_left = max(0.0, round(float(debt_balance or 0), 2))
+        goals_filled = 0.0
         d = period_start
         while d <= period_end:
             if d < start:
@@ -2823,7 +2899,17 @@ def _daily_budget_day_limits(
             allowance = round(base + leftover, 2)
             limits[d.isoformat()] = allowance
             spent = float(spend_by_date.get(d.isoformat(), 0) or 0)
-            leftover = max(0.0, round(allowance - spent, 2))
+            raw = max(0.0, round(allowance - spent, 2))
+            repay, roll, filled_delta = _daily_budget_allocate_day_leftover(
+                raw,
+                debt_left=debt_left,
+                goals_filled=goals_filled,
+                goals_capacity=goals_capacity,
+                priority=priority,
+            )
+            debt_left = round(max(0.0, debt_left - repay), 2)
+            goals_filled = round(goals_filled + filled_delta, 2)
+            leftover = roll
             d += timedelta(days=1)
         return limits
 
@@ -2852,6 +2938,9 @@ def _daily_budget_pace_projection(
     pacing_start: date,
     today: date,
     daily_limit: float,
+    *,
+    debt_balance: float = 0.0,
+    goals_capacity: float = 0.0,
 ) -> dict:
     """How MTD discretionary spend reshapes the rest-of-period daily projection."""
     days_in_period = (period_end - period_start).days + 1
@@ -2916,12 +3005,28 @@ def _daily_budget_pace_projection(
     if mode == 'carry_surplus' and today > start:
         yesterday = today - timedelta(days=1)
         if yesterday >= start:
+            priority = figures.get('underspend_priority') or 'debt_first'
+            if priority not in DAILY_BUDGET_UNDERSPEND_PRIORITIES:
+                priority = 'debt_first'
+            debt_left = max(0.0, round(float(debt_balance or 0), 2))
+            capacity = max(0.0, round(float(goals_capacity or 0), 2))
             leftover = 0.0
+            goals_filled = 0.0
             d = start
             while d <= yesterday:
                 allowance = round(base + leftover, 2)
                 spent = float(spend_by_date.get(d.isoformat(), 0) or 0)
-                leftover = max(0.0, round(allowance - spent, 2))
+                raw = max(0.0, round(allowance - spent, 2))
+                repay, roll, filled_delta = _daily_budget_allocate_day_leftover(
+                    raw,
+                    debt_left=debt_left,
+                    goals_filled=goals_filled,
+                    goals_capacity=capacity,
+                    priority=priority,
+                )
+                debt_left = round(max(0.0, debt_left - repay), 2)
+                goals_filled = round(goals_filled + filled_delta, 2)
+                leftover = roll
                 d += timedelta(days=1)
             carry_from_yesterday = leftover
 
@@ -2946,6 +3051,269 @@ def _daily_budget_pace_projection(
         'carry_from_yesterday': round(carry_from_yesterday, 2),
         'daily_limit': round(float(daily_limit or 0), 2),
         'mid_period_start': start > period_start,
+    }
+
+
+def _daily_budget_today() -> date:
+    """Clock seam for daily-budget period/debt logic (patchable in tests)."""
+    return date.today()
+
+
+def _daily_budget_period_key(period_start: date, period_end: date) -> str:
+    return f'{period_start.isoformat()}_{period_end.isoformat()}'
+
+
+def _daily_budget_previous_pay_period(period_start: date, pay_day: int) -> tuple[date, date]:
+    """Pay period that ended the day before ``period_start``."""
+    return _daily_budget_pay_period(period_start - timedelta(days=1), pay_day)
+
+
+def _daily_budget_period_window_figures(
+    figures: dict,
+    plan: dict,
+    period_start: date,
+    period_end: date,
+) -> tuple[date, float, int]:
+    """Return (pacing_start, window_pool, days_in_period) for a pay period."""
+    days_in_period = (period_end - period_start).days + 1
+    pacing_start = _daily_budget_pacing_start(plan, period_start, period_end)
+    discretionary = float(figures.get('discretionary_monthly') or 0)
+    days_in_window = (period_end - pacing_start).days + 1
+    if pacing_start == period_start or not days_in_period:
+        window_pool = discretionary
+    else:
+        window_pool = round(discretionary * days_in_window / days_in_period, 2)
+    return pacing_start, window_pool, days_in_period
+
+
+def _daily_budget_period_net_overspend(
+    spending: dict,
+    plan: dict,
+    figures: dict,
+    period_start: date,
+    period_end: date,
+) -> dict:
+    """Net overspend for a completed pay period (spent − discretionary window)."""
+    pacing_start, window_pool, _days = _daily_budget_period_window_figures(
+        figures, plan, period_start, period_end,
+    )
+    spend_by_date = _daily_budget_spend_by_date(spending, period_start, period_end)
+    spent = 0.0
+    d = pacing_start
+    while d <= period_end:
+        spent += float(spend_by_date.get(d.isoformat(), 0) or 0)
+        d += timedelta(days=1)
+    spent = round(spent, 2)
+    net = round(max(0.0, spent - window_pool), 2)
+    return {
+        'period_start': period_start.isoformat(),
+        'period_end': period_end.isoformat(),
+        'pacing_start': pacing_start.isoformat(),
+        'discretionary': round(window_pool, 2),
+        'spent': spent,
+        'net_overspend': net,
+    }
+
+
+def _daily_budget_debt_open_balance(debt) -> float:
+    if not isinstance(debt, dict):
+        return 0.0
+    try:
+        open_bal = float(debt.get('balance_at_period_open'))
+    except (TypeError, ValueError):
+        open_bal = None
+    if open_bal is None:
+        try:
+            open_bal = float(debt.get('balance') or 0)
+        except (TypeError, ValueError):
+            open_bal = 0.0
+    return max(0.0, round(open_bal, 2))
+
+
+def _daily_budget_skim_totals(
+    limits: dict[str, float],
+    spend_by_date: dict[str, float],
+    pacing_start: date,
+    through: date,
+    period_end: date,
+    *,
+    debt_open: float,
+    goals_capacity: float,
+    priority: str,
+) -> dict:
+    """Sum debt repay + post-skim underspend from daily leftovers through ``through``."""
+    debt_left = max(0.0, round(float(debt_open or 0), 2))
+    goals_filled = 0.0
+    repaid = 0.0
+    saved = 0.0
+    end = min(through, period_end)
+    d = pacing_start
+    while d <= end:
+        key = d.isoformat()
+        lim = float(limits.get(key, 0) or 0)
+        spent = float(spend_by_date.get(key, 0) or 0)
+        raw = max(0.0, round(lim - spent, 2))
+        repay, roll, filled_delta = _daily_budget_allocate_day_leftover(
+            raw,
+            debt_left=debt_left,
+            goals_filled=goals_filled,
+            goals_capacity=goals_capacity,
+            priority=priority,
+        )
+        debt_left = round(max(0.0, debt_left - repay), 2)
+        goals_filled = round(goals_filled + filled_delta, 2)
+        repaid = round(repaid + repay, 2)
+        saved = round(saved + roll, 2)
+        d += timedelta(days=1)
+    return {
+        'repaid': repaid,
+        'goals_pot': saved,
+        'balance': debt_left,
+    }
+
+
+def _daily_budget_sync_overspend_state(spending: dict, as_of: date) -> bool:
+    """Roll debt open-balance when the active pay period changes.
+
+    Returns True when the bucket was mutated and should be saved.
+    """
+    bucket, changed = _ensure_daily_budget(spending)
+    debt = bucket.get('overspend_debt')
+    if not isinstance(debt, dict):
+        return changed
+
+    open_bal = _daily_budget_debt_open_balance(debt)
+    if open_bal <= 0 and float(debt.get('repaid_total') or 0) <= 0:
+        # Keep structure but nothing to sync.
+        return changed
+
+    plan = bucket.get('plan') or {}
+    figures = _daily_budget_plan_figures(plan)
+    pay_day = _daily_budget_parse_pay_day(plan.get('pay_day'))
+    period_start, period_end = _daily_budget_pay_period(as_of, pay_day)
+    active_raw = str(debt.get('active_period_start') or '').strip()[:10]
+    active_start = _parse_iso_date(active_raw) if active_raw else None
+    if active_start is None:
+        debt['active_period_start'] = period_start.isoformat()
+        debt['balance_at_period_open'] = open_bal
+        debt['balance'] = open_bal
+        return True
+
+    if active_start == period_start:
+        return changed
+
+    # Finalize skims for each intervening period up to the current one.
+    cursor = active_start
+    bal = open_bal
+    goals_capacity = _daily_budget_goals_capacity(bucket.get('goals'))
+    priority = figures.get('underspend_priority') or 'debt_first'
+    safety = 0
+    while cursor < period_start and bal > 0 and safety < 36:
+        safety += 1
+        cur_start, cur_end = _daily_budget_pay_period(cursor, pay_day)
+        pacing_start = _daily_budget_pacing_start(plan, cur_start, cur_end)
+        spend_by_date = _daily_budget_spend_by_date(spending, cur_start, cur_end)
+        limits = _daily_budget_day_limits(
+            figures,
+            spend_by_date,
+            cur_start,
+            cur_end,
+            pacing_start=pacing_start,
+            debt_balance=bal,
+            goals_capacity=goals_capacity,
+            underspend_priority=priority,
+        )
+        skim = _daily_budget_skim_totals(
+            limits,
+            spend_by_date,
+            pacing_start,
+            cur_end,
+            cur_end,
+            debt_open=bal,
+            goals_capacity=goals_capacity,
+            priority=priority,
+        )
+        repaid = float(skim['repaid'])
+        bal = round(max(0.0, bal - repaid), 2)
+        debt['repaid_total'] = round(float(debt.get('repaid_total') or 0) + repaid, 2)
+        cursor = cur_end + timedelta(days=1)
+
+    debt['balance_at_period_open'] = bal
+    debt['balance'] = bal
+    debt['active_period_start'] = period_start.isoformat()
+    if bal <= 0:
+        debt['balance_at_period_open'] = 0.0
+        debt['balance'] = 0.0
+    return True
+
+
+def _daily_budget_overspend_prompt(
+    spending: dict,
+    plan: dict,
+    figures: dict,
+    period_start: date,
+    as_of: date,
+) -> dict | None:
+    """Pending opt-in when the previous pay period finished net-over."""
+    if as_of < period_start:
+        return None
+    pay_day = _daily_budget_parse_pay_day(plan.get('pay_day'))
+    prev_start, prev_end = _daily_budget_previous_pay_period(period_start, pay_day)
+    if as_of <= prev_end:
+        return None
+    # Ignore periods entirely before tracking began.
+    tracking_from = _daily_budget_parse_tracking_from(plan.get('tracking_from'))
+    if tracking_from is not None and prev_end < tracking_from:
+        return None
+    bucket = spending.get('daily_budget') or {}
+    decisions = bucket.get('overspend_decisions') if isinstance(bucket.get('overspend_decisions'), dict) else {}
+    key = _daily_budget_period_key(prev_start, prev_end)
+    if key in decisions:
+        return None
+    summary = _daily_budget_period_net_overspend(
+        spending, plan, figures, prev_start, prev_end,
+    )
+    if float(summary.get('net_overspend') or 0) <= 0:
+        return None
+    return {
+        'period_start': summary['period_start'],
+        'period_end': summary['period_end'],
+        'net_overspend': summary['net_overspend'],
+        'spent': summary['spent'],
+        'discretionary': summary['discretionary'],
+    }
+
+
+def _daily_budget_serialize_debt(
+    debt,
+    *,
+    balance: float,
+    repaid_this_period: float,
+) -> dict | None:
+    if not isinstance(debt, dict):
+        return None
+    open_bal = _daily_budget_debt_open_balance(debt)
+    if open_bal <= 0 and balance <= 0 and float(debt.get('repaid_total') or 0) <= 0:
+        return None
+    try:
+        original = float(debt.get('original_amount') or open_bal or 0)
+    except (TypeError, ValueError):
+        original = open_bal
+    try:
+        repaid_total = float(debt.get('repaid_total') or 0)
+    except (TypeError, ValueError):
+        repaid_total = 0.0
+    # Include in-period skim not yet folded into repaid_total.
+    repaid_total_display = round(repaid_total + max(0.0, repaid_this_period), 2)
+    return {
+        'balance': round(max(0.0, balance), 2),
+        'balance_at_period_open': open_bal,
+        'original_amount': round(max(0.0, original), 2),
+        'repaid_total': repaid_total_display,
+        'repaid_this_period': round(max(0.0, repaid_this_period), 2),
+        'source_period_start': debt.get('source_period_start'),
+        'source_period_end': debt.get('source_period_end'),
+        'created_at': debt.get('created_at'),
     }
 
 
@@ -3045,8 +3413,20 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     days_in_period = (period_end - period_start).days + 1
     pacing_start = _daily_budget_pacing_start(plan, period_start, period_end)
     spend_by_date = _daily_budget_spend_by_date(spending, period_start, period_end)
+    goals = bucket.get('goals') or []
+    goals_capacity = _daily_budget_goals_capacity(goals)
+    priority = figures.get('underspend_priority') or 'debt_first'
+    debt = bucket.get('overspend_debt') if isinstance(bucket.get('overspend_debt'), dict) else None
+    debt_open = _daily_budget_debt_open_balance(debt)
     limits = _daily_budget_day_limits(
-        figures, spend_by_date, period_start, period_end, pacing_start=pacing_start,
+        figures,
+        spend_by_date,
+        period_start,
+        period_end,
+        pacing_start=pacing_start,
+        debt_balance=debt_open,
+        goals_capacity=goals_capacity,
+        underspend_priority=priority,
     )
     today_key = today.isoformat()
     spent_today = float(spend_by_date.get(today_key, 0) or 0)
@@ -3061,6 +3441,8 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         pacing_start,
         today,
         daily_limit,
+        debt_balance=debt_open,
+        goals_capacity=goals_capacity,
     )
 
     # Only count spend inside the pacing window (pre-tracking days are unknown /
@@ -3078,7 +3460,21 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     else:
         window_pool = round(discretionary * days_in_window / days_in_period, 2)
 
-    underspend_total = 0.0
+    skim_through = min(today, period_end)
+    skim = _daily_budget_skim_totals(
+        limits,
+        spend_by_date,
+        pacing_start,
+        skim_through,
+        period_end,
+        debt_open=debt_open,
+        goals_capacity=goals_capacity,
+        priority=priority,
+    )
+    underspend_total = float(skim['goals_pot'])
+    repaid_this_period = float(skim['repaid'])
+    debt_balance = float(skim['balance'])
+
     day_rows = []
     d = pacing_start
     while d <= min(today, period_end):
@@ -3086,7 +3482,6 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         lim = float(limits.get(key, 0) or 0)
         spent = float(spend_by_date.get(key, 0) or 0)
         under = round(max(0.0, lim - spent), 2)
-        underspend_total += under
         day_rows.append({
             'date': key,
             'limit': lim,
@@ -3097,7 +3492,6 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
             'is_today': key == today_key,
         })
         d += timedelta(days=1)
-    underspend_total = round(underspend_total, 2)
     day_insights = _daily_budget_day_insights(day_rows)
 
     txs_today = []
@@ -3112,6 +3506,14 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     txs_today.sort(key=lambda r: (r.get('created_at') or '', r.get('description') or ''), reverse=True)
 
     tracking_from = _daily_budget_parse_tracking_from(plan.get('tracking_from'))
+    overspend_prompt = _daily_budget_overspend_prompt(
+        spending, plan, figures, period_start, today,
+    )
+    overspend_debt = _daily_budget_serialize_debt(
+        debt,
+        balance=debt_balance,
+        repaid_this_period=repaid_this_period,
+    )
     return {
         'as_of': today_key,
         'month': today.strftime('%Y-%m'),
@@ -3133,10 +3535,13 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'discretionary_remaining_month': round(max(0.0, window_pool - spent_mtd), 2),
         'pace_projection': pace_projection,
         'underspend_saved': underspend_total,
+        'underspend_priority': priority,
+        'overspend_debt': overspend_debt,
+        'overspend_prompt': overspend_prompt,
         'days': day_rows,
         'day_insights': day_insights,
         'transactions_today': txs_today,
-        'goals': bucket.get('goals') or [],
+        'goals': goals,
     }
 
 
@@ -3461,6 +3866,105 @@ def _serialize_daily_budget_plan(plan: dict) -> dict:
         'bill_items': plan.get('bill_items') or [],
         'updated_at': plan.get('updated_at'),
     }
+
+
+def _daily_budget_accept_overspend(
+    bucket: dict,
+    *,
+    period_start: date,
+    period_end: date,
+    net_overspend: float,
+    current_period_start: date,
+    current_display_balance: float,
+) -> dict:
+    """Record accept decision and add net overspend to the debt balance."""
+    net = round(max(0.0, float(net_overspend)), 2)
+    key = _daily_budget_period_key(period_start, period_end)
+    decisions = bucket.setdefault('overspend_decisions', {})
+    if not isinstance(decisions, dict):
+        decisions = {}
+        bucket['overspend_decisions'] = decisions
+    now_iso = datetime.utcnow().isoformat() + 'Z'
+    decisions[key] = {
+        'decision': 'accepted',
+        'net_overspend': net,
+        'decided_at': now_iso,
+    }
+    debt = bucket.get('overspend_debt') if isinstance(bucket.get('overspend_debt'), dict) else None
+    base_bal = max(0.0, round(float(current_display_balance or 0), 2))
+    new_open = round(base_bal + net, 2)
+    if debt is None or (
+        _daily_budget_debt_open_balance(debt) <= 0
+        and base_bal <= 0
+        and float(debt.get('repaid_total') or 0) <= 0
+    ):
+        debt = {
+            'balance_at_period_open': new_open,
+            'balance': new_open,
+            'original_amount': net,
+            'repaid_total': 0.0,
+            'source_period_start': period_start.isoformat(),
+            'source_period_end': period_end.isoformat(),
+            'created_at': now_iso,
+            'active_period_start': current_period_start.isoformat(),
+        }
+    else:
+        debt['balance_at_period_open'] = new_open
+        debt['balance'] = new_open
+        debt['original_amount'] = round(float(debt.get('original_amount') or 0) + net, 2)
+        debt['last_source_period_start'] = period_start.isoformat()
+        debt['last_source_period_end'] = period_end.isoformat()
+        debt['active_period_start'] = current_period_start.isoformat()
+    bucket['overspend_debt'] = debt
+    return debt
+
+
+def _daily_budget_decline_overspend(
+    bucket: dict,
+    *,
+    period_start: date,
+    period_end: date,
+    net_overspend: float,
+) -> None:
+    key = _daily_budget_period_key(period_start, period_end)
+    decisions = bucket.setdefault('overspend_decisions', {})
+    if not isinstance(decisions, dict):
+        decisions = {}
+        bucket['overspend_decisions'] = decisions
+    decisions[key] = {
+        'decision': 'declined',
+        'net_overspend': round(max(0.0, float(net_overspend)), 2),
+        'decided_at': datetime.utcnow().isoformat() + 'Z',
+    }
+
+
+def _daily_budget_write_off_debt(bucket: dict) -> dict | None:
+    debt = bucket.get('overspend_debt') if isinstance(bucket.get('overspend_debt'), dict) else None
+    if debt is None:
+        return None
+    now_iso = datetime.utcnow().isoformat() + 'Z'
+    try:
+        wiped = max(0.0, float(debt.get('balance') or debt.get('balance_at_period_open') or 0))
+    except (TypeError, ValueError):
+        wiped = 0.0
+    debt['balance_at_period_open'] = 0.0
+    debt['balance'] = 0.0
+    debt['written_off_at'] = now_iso
+    debt['written_off_amount'] = wiped
+    # Keep a trail but clear active debt for status serialization.
+    bucket['overspend_debt'] = None
+    history = bucket.get('overspend_write_offs')
+    if not isinstance(history, list):
+        history = []
+        bucket['overspend_write_offs'] = history
+    history.append({
+        'written_off_at': now_iso,
+        'amount': wiped,
+        'original_amount': debt.get('original_amount'),
+        'source_period_start': debt.get('source_period_start'),
+        'source_period_end': debt.get('source_period_end'),
+    })
+    return debt
 
 
 # --- LLM "savings coach" --------------------------------------------------------------------
@@ -6943,12 +7447,13 @@ def spending_pair_reapply():
 def spending_daily_status():
     data = load_data()
     spending, changed = _ensure_user_spending(data, session['username'])
-    if changed:
-        save_data(data)
     as_of_raw = (request.args.get('date') or '').strip()
     as_of = _parse_iso_date(as_of_raw) if as_of_raw else date.today()
     if as_of is None:
         return jsonify({'error': 'Invalid date'}), 400
+    debt_changed = _daily_budget_sync_overspend_state(spending, as_of)
+    if changed or debt_changed:
+        save_data(data)
     status = _daily_budget_status(spending, as_of=as_of)
     return jsonify({'ok': True, **status})
 
@@ -7068,6 +7573,13 @@ def spending_daily_plan():
         if mode not in DAILY_BUDGET_MODES:
             return jsonify({'error': f'daily_mode must be one of {sorted(DAILY_BUDGET_MODES)}'}), 400
         plan['daily_mode'] = mode
+    if 'underspend_priority' in payload:
+        priority = str(payload.get('underspend_priority') or '').strip()
+        if priority not in DAILY_BUDGET_UNDERSPEND_PRIORITIES:
+            return jsonify({
+                'error': f'underspend_priority must be one of {sorted(DAILY_BUDGET_UNDERSPEND_PRIORITIES)}',
+            }), 400
+        plan['underspend_priority'] = priority
     if 'bill_items' in payload:
         plan['bill_items'] = _normalize_daily_bill_items(payload.get('bill_items'))
         plan['bills_monthly'] = round(
@@ -7228,6 +7740,111 @@ def spending_daily_goal_item(goal_id):
     save_data(data)
     status = _daily_budget_status(spending)
     return jsonify({'ok': True, 'goal': goal, 'goals': goals, 'underspend_saved': status.get('underspend_saved', 0)})
+
+
+@app.route('/api/spending/daily/overspend/decision', methods=['POST'])
+@login_required
+def spending_daily_overspend_decision():
+    """Opt in/out of carrying a completed period's net overspend as repay debt."""
+    payload = request.get_json(silent=True) or {}
+    decision = str(payload.get('decision') or '').strip().lower()
+    if decision in ('accept', 'accepted', 'carry'):
+        decision = 'accept'
+    elif decision in ('decline', 'declined', 'skip', 'not_this_time'):
+        decision = 'decline'
+    else:
+        return jsonify({'error': 'decision must be accept or decline'}), 400
+
+    period_start = _parse_iso_date(str(payload.get('period_start') or '').strip())
+    period_end = _parse_iso_date(str(payload.get('period_end') or '').strip())
+    if period_start is None or period_end is None or period_end < period_start:
+        return jsonify({'error': 'period_start and period_end are required as YYYY-MM-DD'}), 400
+
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    as_of = _daily_budget_today()
+    debt_changed = _daily_budget_sync_overspend_state(spending, as_of)
+    bucket, _ = _ensure_daily_budget(spending)
+    plan = bucket.get('plan') or {}
+    figures = _daily_budget_plan_figures(plan)
+    pay_day = _daily_budget_parse_pay_day(plan.get('pay_day'))
+    current_start, _current_end = _daily_budget_pay_period(as_of, pay_day)
+    prev_start, prev_end = _daily_budget_previous_pay_period(current_start, pay_day)
+    if period_start != prev_start or period_end != prev_end:
+        return jsonify({'error': 'Can only decide for the immediately previous pay period'}), 400
+    if as_of <= prev_end:
+        return jsonify({'error': 'That pay period has not finished yet'}), 400
+
+    key = _daily_budget_period_key(period_start, period_end)
+    decisions = bucket.get('overspend_decisions') if isinstance(bucket.get('overspend_decisions'), dict) else {}
+    if key in decisions:
+        return jsonify({'error': 'Already decided for this pay period'}), 400
+
+    summary = _daily_budget_period_net_overspend(
+        spending, plan, figures, period_start, period_end,
+    )
+    net = float(summary.get('net_overspend') or 0)
+    if net <= 0:
+        return jsonify({'error': 'No net overspend for that pay period'}), 400
+
+    status_before = _daily_budget_status(spending, as_of=as_of)
+    current_bal = 0.0
+    if isinstance(status_before.get('overspend_debt'), dict):
+        current_bal = float(status_before['overspend_debt'].get('balance') or 0)
+
+    if decision == 'accept':
+        _daily_budget_accept_overspend(
+            bucket,
+            period_start=period_start,
+            period_end=period_end,
+            net_overspend=net,
+            current_period_start=current_start,
+            current_display_balance=current_bal,
+        )
+    else:
+        _daily_budget_decline_overspend(
+            bucket,
+            period_start=period_start,
+            period_end=period_end,
+            net_overspend=net,
+        )
+
+    save_data(data)
+    status = _daily_budget_status(spending, as_of=as_of)
+    return jsonify({
+        'ok': True,
+        'decision': decision,
+        'net_overspend': net,
+        'status': status,
+        'changed': changed or debt_changed,
+    })
+
+
+@app.route('/api/spending/daily/overspend/write-off', methods=['POST'])
+@login_required
+def spending_daily_overspend_write_off():
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    as_of = _daily_budget_today()
+    debt_changed = _daily_budget_sync_overspend_state(spending, as_of)
+    bucket, _ = _ensure_daily_budget(spending)
+    debt = bucket.get('overspend_debt') if isinstance(bucket.get('overspend_debt'), dict) else None
+    if debt is None or _daily_budget_debt_open_balance(debt) <= 0:
+        # Also allow write-off when only in-period display balance remains.
+        status_check = _daily_budget_status(spending, as_of=as_of)
+        od = status_check.get('overspend_debt')
+        if not isinstance(od, dict) or float(od.get('balance') or 0) <= 0:
+            return jsonify({'error': 'No overspend debt to write off'}), 400
+
+    wiped = _daily_budget_write_off_debt(bucket)
+    save_data(data)
+    status = _daily_budget_status(spending, as_of=as_of)
+    return jsonify({
+        'ok': True,
+        'written_off': wiped,
+        'status': status,
+        'changed': changed or debt_changed,
+    })
 
 
 if __name__ == '__main__':

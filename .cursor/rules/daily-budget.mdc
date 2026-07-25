@@ -52,6 +52,17 @@ Depends on plan `daily_mode` (see `_daily_budget_day_limits` / `_daily_budget_st
 
 No effect on today if the past date is **outside the current pay period** or **before `tracking_from` / pacing start**.
 
+## Cross-period overspend debt
+
+No automatic month-to-month limit change. After a pay period ends **net over** (`spent − discretionary window`):
+
+1. Status exposes `overspend_prompt` once (opt-in every time).
+2. `POST /api/spending/daily/overspend/decision` — `accept` creates/adds `overspend_debt`, `decline` records skip.
+3. Daily leftovers skim toward debt per plan `underspend_priority` (`debt_first` | `goals_first`) without cutting the base daily limit.
+4. `carry_surplus`: skim debt before rolling leftover to tomorrow.
+5. Goals shows debt progress; Today shows a small note when `overspend_debt.balance > 0`.
+6. `POST /api/spending/daily/overspend/write-off` clears active debt.
+
 Production user has been on `envelope` with a mid-month `tracking_from` and payday ≠ 1 — verify live plan before assuming fixed-mode behavior.
 
 ## UX / CSS patterns

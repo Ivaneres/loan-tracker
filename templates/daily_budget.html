@@ -44,6 +44,17 @@
                 </div>
             </div>
 
+            <div id="db-overspend-prompt" class="db-overspend-prompt hidden" hidden role="region" aria-label="Overspend carry forward">
+                <p class="db-overspend-prompt-title">Last cycle went over</p>
+                <p class="db-overspend-prompt-body" id="db-overspend-prompt-body"></p>
+                <div class="db-overspend-prompt-actions">
+                    <button type="button" class="db-btn db-btn--solid" id="db-overspend-accept">Carry forward</button>
+                    <button type="button" class="db-btn db-btn--ghost" id="db-overspend-decline">Not this time</button>
+                </div>
+            </div>
+
+            <p id="db-debt-note" class="db-debt-note hidden" hidden></p>
+
             <form id="db-entry-form" class="db-entry" autocomplete="off">
                 <label class="db-entry-amount-wrap">
                     <span class="db-entry-currency">£</span>
@@ -156,6 +167,27 @@
                     </div>
                 </fieldset>
 
+                <fieldset class="db-mode-fieldset">
+                    <legend>Leftover priority</legend>
+                    <p class="db-hint">When a day finishes under budget, choose what leftover helps first.</p>
+                    <div class="db-mode-grid" id="plan-priority-grid">
+                        <label class="db-mode">
+                            <input type="radio" name="underspend_priority" value="debt_first" checked>
+                            <span class="db-mode-card">
+                                <strong>Debt first</strong>
+                                <small>Repay carried overspend, then count toward goals.</small>
+                            </span>
+                        </label>
+                        <label class="db-mode">
+                            <input type="radio" name="underspend_priority" value="goals_first">
+                            <span class="db-mode-card">
+                                <strong>Goals first</strong>
+                                <small>Fill goal targets, then repay overspend debt.</small>
+                            </span>
+                        </label>
+                    </div>
+                </fieldset>
+
                 <div class="db-pull">
                     <h3 class="db-subsection-title db-subsection-title--flush">Monthly bills</h3>
                     <p class="db-hint">Pull bill categories and recurring merchants from a statement month. Tick what counts toward your reserved bills.</p>
@@ -206,6 +238,29 @@
                     <span class="db-goals-hero-label">Saved this period</span>
                     <span class="db-goals-hero-value" id="goals-saved">£0.00</span>
                 </p>
+
+                <div id="goals-debt-card" class="db-debt-card hidden" hidden>
+                    <div class="db-debt-card-top">
+                        <div>
+                            <p class="db-debt-card-label">Overspend to repay</p>
+                            <p class="db-debt-card-value" id="goals-debt-balance">£0.00</p>
+                        </div>
+                        <button type="button" class="db-btn db-btn--ghost" id="goals-debt-writeoff">Write off</button>
+                    </div>
+                    <p class="db-debt-card-meta" id="goals-debt-meta"></p>
+                    <div class="db-goal-bar" aria-hidden="true">
+                        <div class="db-goal-bar-fill db-goal-bar-fill--debt" id="goals-debt-bar"></div>
+                    </div>
+                </div>
+
+                <div id="goals-overspend-prompt" class="db-overspend-prompt hidden" hidden>
+                    <p class="db-overspend-prompt-title">Last cycle went over</p>
+                    <p class="db-overspend-prompt-body" id="goals-overspend-prompt-body"></p>
+                    <div class="db-overspend-prompt-actions">
+                        <button type="button" class="db-btn db-btn--solid" id="goals-overspend-accept">Carry forward</button>
+                        <button type="button" class="db-btn db-btn--ghost" id="goals-overspend-decline">Not this time</button>
+                    </div>
+                </div>
 
                 <form id="goal-form" class="db-goal-form">
                     <label class="db-field">

@@ -114,6 +114,33 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
         ):
             self.assertIn(needle, js)
 
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_overspend_debt_ui_hooks_present(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/spending/daily')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        self.assertIn('id="db-overspend-prompt"', html)
+        self.assertIn('id="db-debt-note"', html)
+        self.assertIn('id="goals-debt-card"', html)
+        self.assertIn('id="goals-debt-writeoff"', html)
+        self.assertIn('name="underspend_priority"', html)
+        self.assertIn('Leftover priority', html)
+
+        js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        for needle in (
+            'decideOverspend',
+            'writeOffDebt',
+            '/api/spending/daily/overspend/decision',
+            '/api/spending/daily/overspend/write-off',
+            'underspend_priority',
+            'renderDebtNote',
+            'renderDebtCard',
+        ):
+            self.assertIn(needle, js)
+
 
 if __name__ == '__main__':
     unittest.main()

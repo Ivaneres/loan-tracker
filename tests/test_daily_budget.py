@@ -1,4 +1,4 @@
-"""Daily Budget plan math, modes, underspend, and manual-import dedup."""
+"""Daily Budget plan math, modes, underspend, overspend debt, and manual-import dedup."""
 import unittest
 from datetime import date
 from unittest import mock
@@ -629,6 +629,305 @@ class TestDailyPlanTrackingFromApi(unittest.TestCase):
         self._login()
         resp = self.client.put('/api/spending/daily/plan', json={'pay_day': 40})
         self.assertEqual(resp.status_code, 400)
+
+
+class TestOverspendDebt(unittest.TestCase):
+    def _plan(self, **kwargs):
+        plan = {
+            'income_monthly': 310,
+            'bills_monthly': 0,
+            'savings_percent': 0,
+            'daily_mode': 'fixed',
+            'pay_day': 1,
+            'underspend_priority': 'debt_first',
+            'bill_items': [],
+        }
+        plan.update(kwargs)
+        return plan
+
+    def test_period_net_overspend_is_spent_minus_discretionary(self):
+        spending = {
+            'daily_budget': {'plan': self._plan(), 'goals': []},
+            'transactions': [
+                _tx(id='1', date='2024-01-15', amount=400, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        summary = app_mod._daily_budget_period_net_overspend(
+            spending,
+            spending['daily_budget']['plan'],
+            app_mod._daily_budget_plan_figures(spending['daily_budget']['plan']),
+            date(2024, 1, 1),
+            date(2024, 1, 31),
+        )
+        self.assertEqual(summary['discretionary'], 310.0)
+        self.assertEqual(summary['spent'], 400.0)
+        self.assertEqual(summary['net_overspend'], 90.0)
+
+    def test_prompt_appears_only_after_period_ends_with_net_over(self):
+        spending = {
+            'daily_budget': {
+                'plan': self._plan(),
+                'goals': [],
+                'overspend_decisions': {},
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-10', amount=400, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        # Still inside January — no prompt.
+        status_jan = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 20))
+        self.assertIsNone(status_jan.get('overspend_prompt'))
+
+        status_feb = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 1))
+        prompt = status_feb.get('overspend_prompt')
+        self.assertIsNotNone(prompt)
+        self.assertEqual(prompt['period_start'], '2024-01-01')
+        self.assertEqual(prompt['period_end'], '2024-01-31')
+        self.assertEqual(prompt['net_overspend'], 90.0)
+
+    def test_accept_creates_debt_and_decline_suppresses_prompt(self):
+        spending = {
+            'daily_budget': {
+                'plan': self._plan(),
+                'goals': [],
+                'overspend_decisions': {},
+                'overspend_debt': None,
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-10', amount=400, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        bucket = spending['daily_budget']
+        app_mod._daily_budget_accept_overspend(
+            bucket,
+            period_start=date(2024, 1, 1),
+            period_end=date(2024, 1, 31),
+            net_overspend=90.0,
+            current_period_start=date(2024, 2, 1),
+            current_display_balance=0.0,
+        )
+        self.assertEqual(bucket['overspend_debt']['balance_at_period_open'], 90.0)
+        self.assertEqual(bucket['overspend_debt']['original_amount'], 90.0)
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 1))
+        self.assertIsNone(status.get('overspend_prompt'))
+        # Feb 1 has no spend → that day's leftover skims the new debt immediately.
+        self.assertEqual(status['overspend_debt']['original_amount'], 90.0)
+        self.assertLess(status['overspend_debt']['balance'], 90.0)
+        self.assertGreater(status['overspend_debt']['repaid_this_period'], 0.0)
+
+        spending2 = {
+            'daily_budget': {
+                'plan': self._plan(),
+                'goals': [],
+                'overspend_decisions': {},
+                'overspend_debt': None,
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-10', amount=400, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        app_mod._daily_budget_decline_overspend(
+            spending2['daily_budget'],
+            period_start=date(2024, 1, 1),
+            period_end=date(2024, 1, 31),
+            net_overspend=90.0,
+        )
+        status2 = app_mod._daily_budget_status(spending2, as_of=date(2024, 2, 1))
+        self.assertIsNone(status2.get('overspend_prompt'))
+        self.assertIsNone(status2.get('overspend_debt'))
+
+    def test_debt_first_skims_leftovers_from_underspend(self):
+        spending = {
+            'daily_budget': {
+                'plan': self._plan(underspend_priority='debt_first'),
+                'goals': [],
+                'overspend_debt': {
+                    'balance_at_period_open': 15.0,
+                    'balance': 15.0,
+                    'original_amount': 15.0,
+                    'repaid_total': 0.0,
+                    'source_period_start': '2024-01-01',
+                    'source_period_end': '2024-01-31',
+                    'active_period_start': '2024-02-01',
+                    'created_at': '2024-02-01T00:00:00Z',
+                },
+            },
+            # Feb has 29 days in 2024; discretionary 310 → base 10.69/day.
+            # Use round numbers via income 290 → 10/day.
+            'transactions': [
+                _tx(id='1', date='2024-02-01', amount=2, category='dining'),
+                _tx(id='2', date='2024-02-02', amount=2, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        spending['daily_budget']['plan']['income_monthly'] = 290
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 2))
+        # 2 days × (£10 − £2) = £16 leftover; debt 15 → fully repaid; saved £1.
+        self.assertEqual(status['overspend_debt']['balance'], 0.0)
+        self.assertEqual(status['overspend_debt']['repaid_this_period'], 15.0)
+        self.assertEqual(status['underspend_saved'], 1.0)
+
+    def test_goals_first_protects_goal_capacity_before_debt(self):
+        spending = {
+            'daily_budget': {
+                'plan': self._plan(
+                    income_monthly=290,
+                    underspend_priority='goals_first',
+                ),
+                'goals': [{'id': 'g1', 'name': 'Fund', 'target_amount': 12.0}],
+                'overspend_debt': {
+                    'balance_at_period_open': 20.0,
+                    'balance': 20.0,
+                    'original_amount': 20.0,
+                    'repaid_total': 0.0,
+                    'source_period_start': '2024-01-01',
+                    'source_period_end': '2024-01-31',
+                    'active_period_start': '2024-02-01',
+                    'created_at': '2024-02-01T00:00:00Z',
+                },
+            },
+            'transactions': [
+                _tx(id='1', date='2024-02-01', amount=0.01, category='dining'),
+                _tx(id='2', date='2024-02-02', amount=0.01, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        # Almost full leftover ~£9.99/day × 2 ≈ £19.98.
+        # Goals protect £12; remainder ~£7.98 skims to debt.
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 2))
+        self.assertGreaterEqual(status['underspend_saved'], 12.0)
+        self.assertAlmostEqual(status['overspend_debt']['repaid_this_period'], 7.98, places=2)
+        self.assertAlmostEqual(status['overspend_debt']['balance'], 12.02, places=2)
+
+    def test_carry_surplus_skims_debt_before_roll(self):
+        figures = {
+            'discretionary_monthly': 310.0,
+            'daily_mode': 'carry_surplus',
+            'underspend_priority': 'debt_first',
+        }
+        spend = {'2024-01-01': 0.0}
+        limits = app_mod._daily_budget_day_limits(
+            figures,
+            spend,
+            date(2024, 1, 1),
+            date(2024, 1, 31),
+            debt_balance=5.0,
+            goals_capacity=0.0,
+            underspend_priority='debt_first',
+        )
+        # Day 1 base 10; leftover 10 → repay 5, roll 5 → day 2 allowance 15.
+        self.assertEqual(limits['2024-01-01'], 10.0)
+        self.assertEqual(limits['2024-01-02'], 15.0)
+
+        limits_no_debt = app_mod._daily_budget_day_limits(
+            figures,
+            spend,
+            date(2024, 1, 1),
+            date(2024, 1, 31),
+            debt_balance=0.0,
+        )
+        self.assertEqual(limits_no_debt['2024-01-02'], 20.0)
+
+    def test_write_off_clears_active_debt(self):
+        bucket = {
+            'plan': self._plan(),
+            'goals': [],
+            'overspend_debt': {
+                'balance_at_period_open': 40.0,
+                'balance': 40.0,
+                'original_amount': 40.0,
+                'repaid_total': 0.0,
+                'source_period_start': '2024-01-01',
+                'source_period_end': '2024-01-31',
+                'active_period_start': '2024-02-01',
+            },
+        }
+        wiped = app_mod._daily_budget_write_off_debt(bucket)
+        self.assertIsNotNone(wiped)
+        self.assertIsNone(bucket.get('overspend_debt'))
+        self.assertEqual(len(bucket.get('overspend_write_offs') or []), 1)
+
+
+class TestOverspendDebtApi(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self.spending = {
+            'transactions': [
+                _tx(id='1', date='2024-01-10', amount=400, category='dining'),
+            ],
+            'statements': [],
+            'monthly_insights': {},
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'pay_day': 1,
+                    'underspend_priority': 'debt_first',
+                    'bill_items': [],
+                    'updated_at': '2024-01-01T00:00:00Z',
+                },
+                'goals': [],
+                'overspend_decisions': {},
+                'overspend_debt': None,
+            },
+        }
+        self.data = {'users': {'ivan': {'spending': self.spending}}, 'loans': {}}
+
+    def _login(self):
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'ivan'
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    @mock.patch.object(app_mod, '_daily_budget_today', return_value=date(2024, 2, 1))
+    def test_decision_accept_via_api(self, _today_mock, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.post(
+            '/api/spending/daily/overspend/decision',
+            json={
+                'decision': 'accept',
+                'period_start': '2024-01-01',
+                'period_end': '2024-01-31',
+            },
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body.get('ok'))
+        self.assertEqual(body.get('decision'), 'accept')
+        self.assertEqual(body.get('net_overspend'), 90.0)
+        self.assertIsNotNone(body.get('status', {}).get('overspend_debt'))
+        self.assertEqual(
+            self.spending['daily_budget']['overspend_debt']['original_amount'],
+            90.0,
+        )
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    @mock.patch.object(app_mod, '_daily_budget_today', return_value=date(2024, 2, 5))
+    def test_write_off_via_api(self, _today_mock, load_mock, save_mock):
+        self.spending['daily_budget']['overspend_debt'] = {
+            'balance_at_period_open': 40.0,
+            'balance': 40.0,
+            'original_amount': 40.0,
+            'repaid_total': 0.0,
+            'source_period_start': '2024-01-01',
+            'source_period_end': '2024-01-31',
+            'active_period_start': '2024-02-01',
+            'created_at': '2024-02-01T00:00:00Z',
+        }
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.post('/api/spending/daily/overspend/write-off', json={})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json().get('ok'))
+        self.assertIsNone(self.spending['daily_budget'].get('overspend_debt'))
 
 
 class TestHybridBillsEstimate(unittest.TestCase):
