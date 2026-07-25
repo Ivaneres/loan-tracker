@@ -3406,8 +3406,9 @@ def _daily_budget_day_insights(day_rows: list[dict]) -> dict:
 def _daily_budget_common_titles(spending: dict, limit: int = 3) -> dict:
     """Most common payment-reference titles per category (up to ``limit`` each).
 
-    Counts outgoing spends (manual + statement), merges case/punctuation via
-    ``_normalize_label``, and skips bare category labels used as form prefills.
+    Counts **manual** outgoing spends only (ignores statement imports), merges
+    case/punctuation via ``_normalize_label``, and skips bare category labels
+    used as form prefills.
     """
     # cat -> norm -> {count, displays Counter, last_date}
     tallies: dict[str, dict[str, dict]] = defaultdict(
@@ -3415,6 +3416,8 @@ def _daily_budget_common_titles(spending: dict, limit: int = 3) -> dict:
     )
     entry_cats = set(DAILY_ENTRY_CATEGORIES)
     for t in spending.get('transactions') or []:
+        if str(t.get('source') or '') != 'manual':
+            continue
         if t.get('direction') != 'outgoing':
             continue
         if _spending_excluded_from_insight_metrics(t):
