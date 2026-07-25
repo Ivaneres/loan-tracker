@@ -10,7 +10,7 @@ import time
 import re
 import smtplib
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from email.message import EmailMessage
 from difflib import SequenceMatcher
 from dateutil.relativedelta import relativedelta
@@ -3403,6 +3403,59 @@ def _daily_budget_day_insights(day_rows: list[dict]) -> dict:
     }
 
 
+def _daily_budget_common_titles(spending: dict, limit: int = 3) -> dict:
+    """Most common payment-reference titles per category (up to ``limit`` each).
+
+    Counts outgoing spends (manual + statement), merges case/punctuation via
+    ``_normalize_label``, and skips bare category labels used as form prefills.
+    """
+    # cat -> norm -> {count, displays Counter, last_date}
+    tallies: dict[str, dict[str, dict]] = defaultdict(
+        lambda: defaultdict(lambda: {'count': 0, 'displays': Counter(), 'last_date': ''})
+    )
+    entry_cats = set(DAILY_ENTRY_CATEGORIES)
+    for t in spending.get('transactions') or []:
+        if t.get('direction') != 'outgoing':
+            continue
+        if _spending_excluded_from_insight_metrics(t):
+            continue
+        cat = str(t.get('category') or '').strip().lower()
+        if cat not in entry_cats:
+            continue
+        raw = str(t.get('description') or '').strip()[:200]
+        if not raw:
+            continue
+        norm = _normalize_label(raw)
+        if not norm:
+            continue
+        cat_norm = _normalize_label(cat.replace('_', ' '))
+        if norm == cat_norm:
+            continue
+        bucket = tallies[cat][norm]
+        bucket['count'] += 1
+        bucket['displays'][raw] += 1
+        d_str = str(t.get('date') or '')[:10]
+        if d_str > (bucket['last_date'] or ''):
+            bucket['last_date'] = d_str
+
+    out: dict[str, list[str]] = {}
+    for cat in DAILY_ENTRY_CATEGORIES:
+        items = tallies.get(cat) or {}
+        ranked = sorted(
+            items.items(),
+            key=lambda kv: (kv[1]['count'], kv[1]['last_date'] or '', kv[0]),
+            reverse=True,
+        )
+        titles: list[str] = []
+        for _norm, info in ranked[: max(0, int(limit))]:
+            displays = info['displays']
+            if not displays:
+                continue
+            titles.append(displays.most_common(1)[0][0])
+        out[cat] = titles
+    return out
+
+
 def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     bucket, _ = _ensure_daily_budget(spending)
     plan = bucket.get('plan') or {}
@@ -3544,6 +3597,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'day_insights': day_insights,
         'transactions_today': txs_today,
         'goals': goals,
+        'common_titles_by_category': _daily_budget_common_titles(spending, limit=3),
     }
 
 

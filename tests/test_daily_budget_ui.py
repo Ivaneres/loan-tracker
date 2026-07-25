@@ -116,6 +116,30 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
+    def test_title_suggestion_chips_hooks_present(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/spending/daily')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        self.assertIn('id="db-title-suggestions"', html)
+        self.assertIn('Common references for this category', html)
+
+        js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        for needle in (
+            'renderTitleSuggestions',
+            'common_titles_by_category',
+            'db-title-chip',
+            'db-title-suggestions',
+        ):
+            self.assertIn(needle, js)
+
+        css = (ROOT / 'static' / 'style.css').read_text(encoding='utf-8')
+        self.assertIn('.db-title-suggestions', css)
+        self.assertIn('.db-title-chip', css)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
     def test_overspend_debt_ui_hooks_present(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()

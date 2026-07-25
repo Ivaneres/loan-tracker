@@ -33,6 +33,7 @@ Two independent date states in `daily_budget.js`:
 ## APIs
 
 - `GET /api/spending/daily/status?date=YYYY-MM-DD` — optional `as_of`; default today
+  - Includes `common_titles_by_category`: up to 3 most-used “What for?” titles per category (normalized merge; skips bare category labels)
 - `POST /api/spending/daily/entry` — body: `amount`, `title`, `category`, optional `date`
   - Omitting `date` → today
   - Future dates → **400** (`Cannot log spend for a future date`)
@@ -67,7 +68,8 @@ Production user has been on `envelope` with a mid-month `tracking_from` and payd
 
 ## UX / CSS patterns
 
-- Chip toggles: `.db-cat` / `.db-date-chip` (+ `--selected`); reuse rather than new widgets.
+- Chip toggles: `.db-cat` / `.db-date-chip` / `.db-title-chip` (+ `--selected`); reuse rather than new widgets.
+- Title suggestions: `#db-title-suggestions` under What for?; filled from `common_titles_by_category` for the selected category.
 - Daily page styles: `.db-*` in `@static/style.css`; `body.db-page button…` overrides exist for selected states.
 - Screenshots for PRs have lived under `docs/screenshots/…` with raw.githubusercontent.com image URLs in the PR body.
 
