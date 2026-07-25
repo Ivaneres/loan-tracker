@@ -1,0 +1,78 @@
+---
+description: Daily budget tab — entry/view dates, APIs, limit modes (fixed/envelope/carry), and UX patterns
+globs: app.py,static/daily_budget.js,templates/daily_budget.html,tests/test_daily_budget*.py,static/style.css
+alwaysApply: false
+---
+
+# Daily budget
+
+Primary UI: `/spending/daily` → `@templates/daily_budget.html` + `@static/daily_budget.js`.
+Server logic: `_daily_budget_*` helpers and `/api/spending/daily/*` routes in `@app.py`.
+
+## Panels
+
+- **Today** — hero (left/limit/spent/saved), add-spend form, spends list
+- **Plan** — income, bills, savings %, pay day, tracking from, daily mode
+- **Goals** — goals + day chart + pace projection math
+
+## Entry date vs view date (important)
+
+Two independent date states in `daily_budget.js`:
+
+| State | Controls | Purpose |
+|---|---|---|
+| `entryDate` | form **When?** chips + `#db-entry-date` | Date written on POST |
+| `viewDate` | list **Show** chips + `#db-view-date` | Date for hero + spends list (`GET status?date=`) |
+
+- Both default to **today** on load.
+- Changing **When?** must **not** refresh the viewer by itself.
+- After a successful log, jump `viewDate` to the spend’s date so the new item is visible.
+- Shortcuts: Today / Yesterday / 2 days ago (+ native `<input type="date">`, `max=today`).
+- List title stays **Spends** (do not rename to “Yesterday’s spends”).
+
+## APIs
+
+- `GET /api/spending/daily/status?date=YYYY-MM-DD` — optional `as_of`; default today
+- `POST /api/spending/daily/entry` — body: `amount`, `title`, `category`, optional `date`
+  - Omitting `date` → today
+  - Future dates → **400** (`Cannot log spend for a future date`)
+  - Response `status` is computed for the **entry’s date**
+- `DELETE /api/spending/daily/entry/<id>` — manual only; client should `refresh(viewDate)` afterward
+- `GET`/`PUT /api/spending/daily/plan` — plan fields including `pay_day`, `tracking_from`, `daily_mode`, `bill_items`
+
+Manual txs: `source: "manual"`, discretionary outgoing, counted in daily spend when category isn’t a bill/ignored category.
+
+## How past spends affect today’s limit
+
+Depends on plan `daily_mode` (see `_daily_budget_day_limits` / `_daily_budget_status`):
+
+- **fixed** — today’s limit unchanged; only that past day’s spent/leftover updates.
+- **envelope** — past spend in the current pay period (on/after `tracking_from`) **tightens** today’s limit by shrinking the remaining pool ÷ days left. **This is expected.**
+- **carry_surplus** — today drops only if prior days still had surplus to roll; past overspend does not create a debt against today’s base.
+
+No effect on today if the past date is **outside the current pay period** or **before `tracking_from` / pacing start**.
+
+## Cross-period overspend debt
+
+No automatic month-to-month limit change. After a pay period ends **net over** (`spent − discretionary window`):
+
+1. Status exposes `overspend_prompt` once (opt-in every time).
+2. `POST /api/spending/daily/overspend/decision` — `accept` creates/adds `overspend_debt`, `decline` records skip.
+3. Daily leftovers skim toward debt per plan `underspend_priority` (`debt_first` | `goals_first`) without cutting the base daily limit.
+4. `carry_surplus`: skim debt before rolling leftover to tomorrow.
+5. Goals shows debt progress; Today shows a small note when `overspend_debt.balance > 0`.
+6. `POST /api/spending/daily/overspend/write-off` clears active debt.
+
+Production user has been on `envelope` with a mid-month `tracking_from` and payday ≠ 1 — verify live plan before assuming fixed-mode behavior.
+
+## UX / CSS patterns
+
+- Chip toggles: `.db-cat` / `.db-date-chip` (+ `--selected`); reuse rather than new widgets.
+- Daily page styles: `.db-*` in `@static/style.css`; `body.db-page button…` overrides exist for selected states.
+- Screenshots for PRs have lived under `docs/screenshots/…` with raw.githubusercontent.com image URLs in the PR body.
+
+## Tests
+
+- `@tests/test_daily_budget.py` — modes, pay period, tracking_from, entry create (incl. past date + future reject)
+- `@tests/test_daily_budget_ui.py` — HTML/JS presence (When?/Show chips, plan fields, goals pace copy)
+- Local Playwright smoke helpers sometimes under `tmp/` (not required CI); useful for screenshot capture.

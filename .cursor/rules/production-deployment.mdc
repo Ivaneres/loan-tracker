@@ -1,0 +1,65 @@
+---
+description: Production deployment procedure for the finance tracker
+alwaysApply: true
+---
+
+# Production deployment
+
+Use this procedure when the user explicitly asks to deploy or launch the app in production.
+
+- Host: `root@195.201.98.136`
+- App directory: `~/loan-tracker`
+- Gunicorn binary: `.venv/bin/gunicorn` (not on system PATH)
+- App command:
+
+  ```sh
+  .venv/bin/gunicorn --workers 4 --bind 0.0.0.0:8000 --timeout 120 --access-logfile - --error-logfile - app:app
+  ```
+
+Deployment sequence (run via SSH as a single remote script):
+
+1. `cd ~/loan-tracker` and `git pull`. Stop and report the error if it fails; do not kill anything if pull fails.
+2. Kill any existing loan-tracker gunicorn. **No existing process is valid** — skip kill and continue.
+3. Source `.env`, then start gunicorn detached with `nohup`, logging to `/tmp/loan-tracker-gunicorn.log`.
+4. Verify processes and port `8000`; report revision and result.
+
+Use this remote script (do not match PIDs with `pgrep -f` against a pattern that also appears in the SSH `bash -c` line — that kills the deploy shell):
+
+```sh
+ssh -o BatchMode=yes -o ConnectTimeout=15 root@195.201.98.136 'bash -s' <<'EOF'
+set -euo pipefail
+cd ~/loan-tracker
+git pull
+
+mapfile -t PIDS < <(ps -eo pid=,args= | awk '/\.venv\/bin\/gunicorn .*app:app/ {print $1}')
+if ((${#PIDS[@]})); then
+  kill "${PIDS[@]}" 2>/dev/null || true
+  sleep 2
+  mapfile -t PIDS2 < <(ps -eo pid=,args= | awk '/\.venv\/bin\/gunicorn .*app:app/ {print $1}')
+  if ((${#PIDS2[@]})); then
+    kill -9 "${PIDS2[@]}" 2>/dev/null || true
+    sleep 1
+  fi
+else
+  echo "No existing loan-tracker gunicorn found (ok)"
+fi
+
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
+
+nohup .venv/bin/gunicorn --workers 4 --bind 0.0.0.0:8000 --timeout 120 --access-logfile - --error-logfile - app:app > /tmp/loan-tracker-gunicorn.log 2>&1 &
+disown || true
+sleep 3
+
+ps -eo pid=,args= | awk '/\.venv\/bin\/gunicorn .*app:app/ {print}'
+ss -ltnp | grep ':8000' || echo "NOT LISTENING"
+git rev-parse --short HEAD
+git log -1 --oneline
+tail -n 40 /tmp/loan-tracker-gunicorn.log || true
+EOF
+```
+
+Do not deploy merely because feature work is complete. Deployment is a production mutation and requires an explicit request from the user.
+
