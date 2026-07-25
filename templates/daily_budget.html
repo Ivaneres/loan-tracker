@@ -82,7 +82,19 @@
             </form>
 
             <div class="db-today-list-wrap">
-                <h2 class="db-section-title" id="db-today-list-title">Today’s spends</h2>
+                <h2 class="db-section-title" id="db-today-list-title">Spends</h2>
+                <fieldset class="db-dates db-dates--view">
+                    <legend>Show</legend>
+                    <div class="db-date-chip-row" id="db-view-date-chips" role="group" aria-label="View spends date shortcuts">
+                        <button type="button" class="db-date-chip db-date-chip--selected" data-offset="0">Today</button>
+                        <button type="button" class="db-date-chip" data-offset="-1">Yesterday</button>
+                        <button type="button" class="db-date-chip" data-offset="-2">2 days ago</button>
+                    </div>
+                    <label class="db-date-other">
+                        <span class="db-date-other-label">Or pick a date</span>
+                        <input id="db-view-date" type="date" aria-label="View spends date">
+                    </label>
+                </fieldset>
                 <ul id="db-today-list" class="db-today-list"></ul>
                 <p id="db-today-empty" class="db-empty">Nothing logged yet — tap above when you spend.</p>
             </div>

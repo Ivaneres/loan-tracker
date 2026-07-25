@@ -2469,6 +2469,10 @@ body.db-page button.db-title-clear:active {
     padding: 0;
 }
 
+.db-dates--view {
+    margin: 0 0 0.85rem;
+}
+
 .db-dates legend,
 .db-cats legend {
     font-size: 0.78rem;

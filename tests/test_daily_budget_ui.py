@@ -28,6 +28,8 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
         self.assertIn('id="db-date-chips"', html)
         self.assertIn('id="db-entry-date"', html)
         self.assertIn('id="db-entry-date-value"', html)
+        self.assertIn('id="db-view-date-chips"', html)
+        self.assertIn('id="db-view-date"', html)
         self.assertIn('data-offset="0"', html)
         self.assertIn('data-offset="-1"', html)
         self.assertIn('data-offset="-2"', html)
@@ -35,16 +37,20 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
         self.assertIn('2 days ago', html)
         self.assertIn('Or pick a date', html)
         self.assertIn('id="db-today-list-title"', html)
+        self.assertIn('>Spends</h2>', html)
+        self.assertIn('<legend>Show</legend>', html)
 
         js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
         for needle in (
             'selectEntryDate',
+            'selectViewDate',
             'date: spendDate',
             'Add for yesterday',
-            'Yesterday’s spends',
-            'db-date-chip',
+            'db-view-date-chips',
+            'viewDate',
         ):
             self.assertIn(needle, js)
+        self.assertNotIn('Yesterday’s spends', js)
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')

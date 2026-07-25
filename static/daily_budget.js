@@ -83,6 +83,7 @@
   let state = null;
   let billItems = [];
   let entryDate = '';
+  let viewDate = '';
 
   function localISODate(d) {
     const dt = d instanceof Date ? d : new Date();
@@ -98,6 +99,12 @@
     return localISODate(d);
   }
 
+  function clampToToday(iso) {
+    const today = localISODate();
+    const next = String(iso || '').trim() || today;
+    return next > today ? today : next;
+  }
+
   function dateOffsetLabel(iso) {
     const today = localISODate();
     if (iso === today) return 'today';
@@ -105,22 +112,6 @@
     if (iso === addDaysISO(today, -2)) return '2 days ago';
     const d = new Date(iso + 'T12:00:00');
     return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-  }
-
-  function updateSpendListTitle() {
-    const title = $('db-today-list-title');
-    if (!title) return;
-    const today = localISODate();
-    if (entryDate === today) {
-      title.textContent = 'Today’s spends';
-    } else if (entryDate === addDaysISO(today, -1)) {
-      title.textContent = 'Yesterday’s spends';
-    } else {
-      const d = new Date(entryDate + 'T12:00:00');
-      title.textContent =
-        'Spends · ' +
-        d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-    }
   }
 
   function updateAddButtonLabel() {
@@ -138,16 +129,20 @@
     }
   }
 
-  function syncDateControls() {
+  function syncChipRow(rowId, selectedIso) {
+    const chips = $(rowId);
+    if (!chips) return;
     const today = localISODate();
-    const chips = $('db-date-chips');
-    if (chips) {
-      chips.querySelectorAll('.db-date-chip').forEach((btn) => {
-        const offset = Number(btn.dataset.offset);
-        const chipDate = addDaysISO(today, offset);
-        btn.classList.toggle('db-date-chip--selected', entryDate === chipDate);
-      });
-    }
+    chips.querySelectorAll('.db-date-chip').forEach((btn) => {
+      const offset = Number(btn.dataset.offset);
+      const chipDate = addDaysISO(today, offset);
+      btn.classList.toggle('db-date-chip--selected', selectedIso === chipDate);
+    });
+  }
+
+  function syncEntryDateControls() {
+    const today = localISODate();
+    syncChipRow('db-date-chips', entryDate);
     const input = $('db-entry-date');
     if (input) {
       input.max = today;
@@ -155,21 +150,38 @@
     }
     const hidden = $('db-entry-date-value');
     if (hidden) hidden.value = entryDate;
-    updateSpendListTitle();
     updateAddButtonLabel();
   }
 
-  async function selectEntryDate(iso, opts) {
-    const options = opts || {};
+  function syncViewDateControls() {
     const today = localISODate();
-    let next = String(iso || '').trim() || today;
-    if (next > today) next = today;
-    const changed = next !== entryDate;
-    entryDate = next;
-    syncDateControls();
-    if (options.refreshView === false || !changed) return;
+    syncChipRow('db-view-date-chips', viewDate);
+    const input = $('db-view-date');
+    if (input) {
+      input.max = today;
+      input.value = viewDate;
+    }
+  }
+
+  function syncDateControls() {
+    syncEntryDateControls();
+    syncViewDateControls();
+  }
+
+  function selectEntryDate(iso) {
+    entryDate = clampToToday(iso);
+    syncEntryDateControls();
+  }
+
+  async function selectViewDate(iso, opts) {
+    const options = opts || {};
+    const next = clampToToday(iso);
+    const changed = next !== viewDate;
+    viewDate = next;
+    syncViewDateControls();
+    if (options.refresh === false || !changed) return;
     try {
-      await refresh(entryDate);
+      await refresh(viewDate);
     } catch (e) {
       flash(e.message, 'error');
     }
@@ -1036,6 +1048,10 @@
 
   function applyStatus(status) {
     state = status;
+    if (status && status.as_of) {
+      viewDate = status.as_of;
+      syncViewDateControls();
+    }
     renderToday(status);
     renderGoals(status);
     if (status.plan) {
@@ -1044,14 +1060,15 @@
   }
 
   async function refresh(dateStr) {
-    const iso = String(dateStr || entryDate || localISODate()).trim();
-    const q = iso ? '?date=' + encodeURIComponent(iso) : '';
+    const iso = clampToToday(dateStr || viewDate || localISODate());
+    viewDate = iso;
+    const q = '?date=' + encodeURIComponent(iso);
     const data = await api('/api/spending/daily/status' + q);
     applyStatus(data);
     if (data && data.as_of) {
-      entryDate = data.as_of;
-      syncDateControls();
+      viewDate = data.as_of;
     }
+    syncViewDateControls();
     return data;
   }
 
@@ -1063,7 +1080,7 @@
   async function deleteEntry(id) {
     try {
       await api('/api/spending/daily/entry/' + encodeURIComponent(id), { method: 'DELETE' });
-      await refresh(entryDate);
+      await refresh(viewDate);
       flash('Deleted', 'ok');
     } catch (e) {
       flash(e.message, 'error');
@@ -1146,6 +1163,22 @@
       });
     }
 
+    const viewChips = $('db-view-date-chips');
+    if (viewChips) {
+      viewChips.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.db-date-chip');
+        if (!btn) return;
+        const offset = Number(btn.dataset.offset);
+        selectViewDate(addDaysISO(localISODate(), offset));
+      });
+    }
+    const viewDateInput = $('db-view-date');
+    if (viewDateInput) {
+      viewDateInput.addEventListener('change', () => {
+        selectViewDate(viewDateInput.value || localISODate());
+      });
+    }
+
     $('db-entry-form').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const raw = String($('db-amount').value || '').replace(/,/g, '').trim();
@@ -1159,7 +1192,9 @@
         flash('Add a short title', 'error');
         return;
       }
-      const spendDate = String(($('db-entry-date-value') && $('db-entry-date-value').value) || entryDate || localISODate());
+      const spendDate = clampToToday(
+        ($('db-entry-date-value') && $('db-entry-date-value').value) || entryDate || localISODate()
+      );
       const btn = $('db-add-btn');
       btn.disabled = true;
       try {
@@ -1172,9 +1207,9 @@
             date: spendDate,
           }),
         });
-        if (data.status && data.status.as_of) {
-          entryDate = data.status.as_of;
-        }
+        entryDate = spendDate;
+        // Jump the spends viewer to the day just logged so the new item is visible.
+        viewDate = (data.status && data.status.as_of) || spendDate;
         applyStatus(data.status);
         syncDateControls();
         $('db-amount').value = '';
@@ -1306,10 +1341,11 @@
 
   document.addEventListener('DOMContentLoaded', async () => {
     entryDate = localISODate();
+    viewDate = localISODate();
     syncDateControls();
     bind();
     try {
-      await refresh(entryDate);
+      await refresh(viewDate);
       await loadPlan();
     } catch (e) {
       flash(e.message || 'Failed to load daily budget', 'error');
