@@ -38,6 +38,7 @@ Two independent date states in `daily_budget.js`:
   - Omitting `date` → today
   - Future dates → **400** (`Cannot log spend for a future date`)
   - Response `status` is computed for the **entry’s date**
+- **Calendar “today”** is `_daily_budget_today()` → **Europe/London** civil date (not the host’s `date.today()` / UTC). Needed so logging “today” right after midnight BST/GMT works when production runs on UTC.
 - `DELETE /api/spending/daily/entry/<id>` — manual only; client should `refresh(viewDate)` afterward
 - `GET`/`PUT /api/spending/daily/plan` — plan fields including `pay_day`, `tracking_from`, `daily_mode`, `bill_items`
 
