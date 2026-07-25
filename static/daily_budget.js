@@ -223,6 +223,91 @@
     if (name === 'goals') scrollDayChartToToday();
   }
 
+  function overspendPromptCopy(prompt) {
+    if (!prompt) return '';
+    return (
+      'You finished ' +
+      money(prompt.net_overspend) +
+      ' over discretionary (' +
+      money(prompt.spent) +
+      ' spent vs ' +
+      money(prompt.discretionary) +
+      '). Carry it forward to repay from daily leftovers?'
+    );
+  }
+
+  function setOverspendPromptVisible(el, prompt) {
+    if (!el) return;
+    const show = !!(prompt && Number(prompt.net_overspend) > 0);
+    el.classList.toggle('hidden', !show);
+    el.hidden = !show;
+  }
+
+  function renderOverspendPrompt(status) {
+    const prompt = status.overspend_prompt || null;
+    const body = overspendPromptCopy(prompt);
+    const todayPrompt = $('db-overspend-prompt');
+    const goalsPrompt = $('goals-overspend-prompt');
+    setOverspendPromptVisible(todayPrompt, prompt);
+    setOverspendPromptVisible(goalsPrompt, prompt);
+    const todayBody = $('db-overspend-prompt-body');
+    const goalsBody = $('goals-overspend-prompt-body');
+    if (todayBody) todayBody.textContent = body;
+    if (goalsBody) goalsBody.textContent = body;
+  }
+
+  function renderDebtNote(status) {
+    const note = $('db-debt-note');
+    if (!note) return;
+    const debt = status.overspend_debt;
+    const bal = debt ? Number(debt.balance) || 0 : 0;
+    if (bal <= 0) {
+      note.classList.add('hidden');
+      note.hidden = true;
+      note.textContent = '';
+      return;
+    }
+    const repaid = Number(debt.repaid_this_period) || 0;
+    let text = money(bal) + ' left to repay from last cycle';
+    if (repaid > 0) {
+      text += ' · ' + money(repaid) + ' skimmed from leftovers this period';
+    }
+    note.textContent = text;
+    note.classList.remove('hidden');
+    note.hidden = false;
+  }
+
+  function renderDebtCard(status) {
+    const card = $('goals-debt-card');
+    if (!card) return;
+    const debt = status.overspend_debt;
+    const bal = debt ? Number(debt.balance) || 0 : 0;
+    const original = debt ? Number(debt.original_amount) || 0 : 0;
+    const repaidTotal = debt ? Number(debt.repaid_total) || 0 : 0;
+    const show = bal > 0 || repaidTotal > 0;
+    card.classList.toggle('hidden', !show || bal <= 0);
+    card.hidden = !show || bal <= 0;
+    if (bal <= 0) return;
+    $('goals-debt-balance').textContent = money(bal);
+    const meta = $('goals-debt-meta');
+    if (meta) {
+      const parts = [];
+      if (original > 0) parts.push('Started at ' + money(original));
+      if (repaidTotal > 0) parts.push(money(repaidTotal) + ' repaid');
+      if (debt.source_period_end) {
+        parts.push('from cycle ending ' + formatDayLabel(debt.source_period_end));
+      }
+      meta.textContent = parts.join(' · ');
+    }
+    const bar = $('goals-debt-bar');
+    if (bar && original > 0) {
+      const pct = Math.min(100, Math.max(0, (repaidTotal / original) * 100));
+      bar.style.width = pct + '%';
+    } else if (bar) {
+      bar.style.width = '0%';
+    }
+  }
+
   function renderToday(status) {
     const remaining = status.remaining_today;
     const limit = status.daily_limit;
@@ -244,6 +329,9 @@
       day: 'numeric',
       month: 'long',
     });
+
+    renderOverspendPrompt(status);
+    renderDebtNote(status);
 
     const list = $('db-today-list');
     const empty = $('db-today-empty');
@@ -520,6 +608,10 @@
     const mode = plan.daily_mode || 'envelope';
     document.querySelectorAll('input[name="daily_mode"]').forEach((r) => {
       r.checked = r.value === mode;
+    });
+    const priority = plan.underspend_priority || 'debt_first';
+    document.querySelectorAll('input[name="underspend_priority"]').forEach((r) => {
+      r.checked = r.value === priority;
     });
     billItems = Array.isArray(plan.bill_items) ? plan.bill_items.map((b) => ({ ...b })) : [];
     if (plan.source_month) {
@@ -1018,13 +1110,28 @@
   }
 
   function renderGoals(status) {
-    $('goals-saved').textContent = money(status.underspend_saved);
+    const netSaved =
+      status.period_net_saved != null
+        ? Number(status.period_net_saved) || 0
+        : Number(status.underspend_saved) || 0;
+    const savedEl = $('goals-saved');
+    const savedLabel = $('goals-saved-label');
+    if (savedEl) {
+      savedEl.textContent = money(netSaved);
+      savedEl.classList.toggle('db-goals-hero-value--over', netSaved < 0);
+    }
+    if (savedLabel) {
+      savedLabel.textContent = netSaved < 0 ? 'Over this period' : 'Saved this period';
+    }
+    renderOverspendPrompt(status);
+    renderDebtCard(status);
     const goals = status.goals || [];
     const list = $('goals-list');
     const empty = $('goals-empty');
     list.innerHTML = '';
     empty.classList.toggle('hidden', goals.length > 0);
-    const saved = Number(status.underspend_saved) || 0;
+    // Goal bars still use leftover pot (daily underspend after debt skim), not net.
+    const saved = Math.max(0, Number(status.underspend_saved) || 0);
     goals.forEach((g) => {
       const target = Number(g.target_amount) || 1;
       const pct = Math.min(100, Math.round((saved / target) * 1000) / 10);
@@ -1097,10 +1204,61 @@
     }
   }
 
+  async function decideOverspend(decision) {
+    const prompt = state && state.overspend_prompt;
+    if (!prompt) return;
+    try {
+      const data = await api('/api/spending/daily/overspend/decision', {
+        method: 'POST',
+        body: JSON.stringify({
+          decision: decision,
+          period_start: prompt.period_start,
+          period_end: prompt.period_end,
+        }),
+      });
+      if (data && data.status) applyStatus(data.status);
+      else await refresh(viewDate);
+      flash(decision === 'accept' ? 'Overspend carried forward' : 'Skipped — no debt added', 'ok');
+    } catch (e) {
+      flash(e.message, 'error');
+    }
+  }
+
+  async function writeOffDebt() {
+    const debt = state && state.overspend_debt;
+    const bal = debt ? Number(debt.balance) || 0 : 0;
+    if (bal <= 0) return;
+    if (!window.confirm('Write off ' + money(bal) + ' of overspend debt? This cannot be undone.')) {
+      return;
+    }
+    try {
+      const data = await api('/api/spending/daily/overspend/write-off', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      if (data && data.status) applyStatus(data.status);
+      else await refresh(viewDate);
+      flash('Overspend debt written off', 'ok');
+    } catch (e) {
+      flash(e.message, 'error');
+    }
+  }
+
   function bind() {
     document.querySelectorAll('.db-panel-tab').forEach((btn) => {
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
     });
+
+    ['db-overspend-accept', 'goals-overspend-accept'].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('click', () => decideOverspend('accept'));
+    });
+    ['db-overspend-decline', 'goals-overspend-decline'].forEach((id) => {
+      const el = $(id);
+      if (el) el.addEventListener('click', () => decideOverspend('decline'));
+    });
+    const writeOffBtn = $('goals-debt-writeoff');
+    if (writeOffBtn) writeOffBtn.addEventListener('click', () => writeOffDebt());
 
     document.addEventListener('click', (ev) => {
       if (!ev.target.closest('.db-day-dot')) hideDayTooltip();
@@ -1234,10 +1392,12 @@
     $('plan-save-btn').addEventListener('click', async () => {
       const saveBtn = $('plan-save-btn');
       const modeEl = document.querySelector('input[name="daily_mode"]:checked');
+      const priorityEl = document.querySelector('input[name="underspend_priority"]:checked');
       const body = {
         income_monthly: Number($('plan-income').value) || 0,
         savings_percent: Number($('plan-savings-pct').value) || 0,
         daily_mode: modeEl ? modeEl.value : 'envelope',
+        underspend_priority: priorityEl ? priorityEl.value : 'debt_first',
         bill_items: billItems,
         source_month: $('plan-source-month').value || null,
         pay_day: Number($('plan-pay-day') && $('plan-pay-day').value) || 1,
