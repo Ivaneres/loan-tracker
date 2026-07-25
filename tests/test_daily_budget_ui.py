@@ -138,8 +138,12 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
             'underspend_priority',
             'renderDebtNote',
             'renderDebtCard',
+            'period_net_saved',
+            'Over this period',
+            'db-goals-hero-value--over',
         ):
             self.assertIn(needle, js)
+        self.assertIn('id="goals-saved-label"', html)
 
 
 if __name__ == '__main__':

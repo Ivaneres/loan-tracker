@@ -3258,6 +3258,10 @@ body.db-page button.db-today-del:hover {
     color: var(--db-accent-deep);
 }
 
+.db-goals-hero-value--over {
+    color: var(--db-warn);
+}
+
 .db-goal-form {
     display: grid;
     gap: 0.65rem;

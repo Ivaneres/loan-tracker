@@ -373,6 +373,30 @@ class TestDailyBudgetStatus(unittest.TestCase):
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
         # limit 10/day; leftover 8+8
         self.assertEqual(status['underspend_saved'], 16.0)
+        # Net = discretionary − spent_mtd; Jan has 31 days → pool 310, spent 4.
+        self.assertEqual(status['period_net_saved'], 306.0)
+
+    def test_period_net_saved_goes_negative_when_over_discretionary(self):
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 310,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-01', amount=400, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
+        self.assertEqual(status['period_net_saved'], -90.0)
+        # Daily leftover sum stays non-negative (day 2 clear under limit).
+        self.assertGreaterEqual(status['underspend_saved'], 0.0)
 
     def test_day_insights_track_under_over_clear_and_streak(self):
         spending = {

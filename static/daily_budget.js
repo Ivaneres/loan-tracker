@@ -1110,7 +1110,19 @@
   }
 
   function renderGoals(status) {
-    $('goals-saved').textContent = money(status.underspend_saved);
+    const netSaved =
+      status.period_net_saved != null
+        ? Number(status.period_net_saved) || 0
+        : Number(status.underspend_saved) || 0;
+    const savedEl = $('goals-saved');
+    const savedLabel = $('goals-saved-label');
+    if (savedEl) {
+      savedEl.textContent = money(netSaved);
+      savedEl.classList.toggle('db-goals-hero-value--over', netSaved < 0);
+    }
+    if (savedLabel) {
+      savedLabel.textContent = netSaved < 0 ? 'Over this period' : 'Saved this period';
+    }
     renderOverspendPrompt(status);
     renderDebtCard(status);
     const goals = status.goals || [];
@@ -1118,7 +1130,8 @@
     const empty = $('goals-empty');
     list.innerHTML = '';
     empty.classList.toggle('hidden', goals.length > 0);
-    const saved = Number(status.underspend_saved) || 0;
+    // Goal bars still use leftover pot (daily underspend after debt skim), not net.
+    const saved = Math.max(0, Number(status.underspend_saved) || 0);
     goals.forEach((g) => {
       const target = Number(g.target_amount) || 1;
       const pct = Math.min(100, Math.round((saved / target) * 1000) / 10);

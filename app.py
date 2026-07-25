@@ -3533,6 +3533,8 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'remaining_today': remaining_today,
         'spent_mtd': spent_mtd,
         'discretionary_remaining_month': round(max(0.0, window_pool - spent_mtd), 2),
+        # Unclamped period result for Goals hero (negative when net over discretionary).
+        'period_net_saved': round(window_pool - spent_mtd, 2),
         'pace_projection': pace_projection,
         'underspend_saved': underspend_total,
         'underspend_priority': priority,
