@@ -46,20 +46,31 @@ Prefer extending existing unittest files; UI presence checks often assert substr
 Before considering a feature done:
 
 1. **Run all unit tests** — `python -m unittest discover -s tests -v` must pass.
-2. **UI demos** — if the change is user-visible, capture Playwright screenshots and embed them **inline in the PR body** (see below). Non-UI / backend-only changes still need the full test run; screenshots only when UX changed.
+2. **Step-by-step UI playthrough** — if the change is user-visible, exercise the real flow end-to-end and capture screenshots as PR evidence (see below). Non-UI / backend-only changes still need the full test run; playthrough screenshots only when UX changed.
 3. **Commit + push** screenshot assets under `docs/screenshots/<feature>/` on the PR branch before updating the PR description.
 4. **Update agent rules** when you learn durable repo facts (APIs, invariants, UX contracts).
 
-## PR demo screenshots
+## PR demo screenshots (step-by-step playthrough)
 
-For PRs that change user-visible UI, include at least one demo screenshot **inline in the PR body** (no click-through to another page):
+For PRs that change user-visible UI, **do not** ship only a single static screenshot of the finished state. Carry out a **step-by-step playthrough** of the feature as a user would, and add those screenshots **inline in the PR body** as ordered evidence (visible without opening another page).
 
-1. Capture with a Playwright helper under `tmp/screenshot_*.py` (see existing `tmp/screenshot_*.py` scripts).
+Cover the meaningful steps of the flow, for example:
+
+- Starting state / empty or prior data
+- Reusing an existing value or control (when the feature has suggestions, history, or defaults)
+- Creating or adding something **new** (new label, new source, new entry, etc.)
+- Confirm / save / import (mid-flow “ready to submit” when useful)
+- After-save result (list, table, success state, updated suggestions)
+- Any filter/sort/follow-on view that proves the new data stuck
+
+How to capture and embed:
+
+1. Drive the playthrough with a Playwright helper under `tmp/screenshot_*.py` (see existing `tmp/screenshot_*.py` scripts; bank-source flow is a good full-playthrough example).
 2. Commit copies under `docs/screenshots/<feature>/` and push the branch.
-3. Embed with HTML `<img>` tags using **`raw.githubusercontent.com`** URLs for this branch, e.g.  
+3. In the PR body, present them as a numbered **Demo — full flow** (or similar) with HTML `<img>` tags using **`raw.githubusercontent.com`** URLs for this branch, e.g.  
    `https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/<feature>/<file>.png`
 4. Do **not** use Cursor artifact `/tmp/cursor/artifacts/…` paths or markdown links to `cursor.com/agents/…/artifacts` — those become click-through links, not inline images.
-5. Prefer a tight crop of the changed control plus one full mobile/desktop frame when helpful.
+5. Prefer tight crops of the changed control for each step, plus one full mobile/desktop frame when helpful.
 
 Daily Budget specifics: `@.cursor/rules/daily-budget.mdc`.
 
