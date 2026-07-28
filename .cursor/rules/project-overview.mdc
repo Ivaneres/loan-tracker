@@ -32,18 +32,40 @@ Flask monolith finance tracker (loans + spending + daily budget). No separate fr
 ## Tests
 
 ```sh
+# Full suite (required before handing off a feature PR)
+python -m unittest discover -s tests -v
+
+# Focused examples
 .venv/bin/python -m unittest tests.test_daily_budget tests.test_daily_budget_ui -v
 ```
 
 Prefer extending existing unittest files; UI presence checks often assert substrings in rendered HTML + JS source.
 
-## Production
+## Feature handoff checklist (standard for every new feature)
 
-Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`.
+Before considering a feature done:
+
+1. **Run all unit tests** — `python -m unittest discover -s tests -v` must pass.
+2. **UI demos** — if the change is user-visible, capture Playwright screenshots and embed them **inline in the PR body** (see below). Non-UI / backend-only changes still need the full test run; screenshots only when UX changed.
+3. **Commit + push** screenshot assets under `docs/screenshots/<feature>/` on the PR branch before updating the PR description.
+4. **Update agent rules** when you learn durable repo facts (APIs, invariants, UX contracts).
 
 ## PR demo screenshots
 
-For PRs that change user-visible UI, include at least one demo screenshot **inline in the PR body** (no click-through to another page). Commit under `docs/screenshots/<feature>/`, push, then embed with HTML `<img src="https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/...">`. Do not use Cursor artifact links. Daily Budget details: `@.cursor/rules/daily-budget.mdc`.
+For PRs that change user-visible UI, include at least one demo screenshot **inline in the PR body** (no click-through to another page):
+
+1. Capture with a Playwright helper under `tmp/screenshot_*.py` (see existing `tmp/screenshot_*.py` scripts).
+2. Commit copies under `docs/screenshots/<feature>/` and push the branch.
+3. Embed with HTML `<img>` tags using **`raw.githubusercontent.com`** URLs for this branch, e.g.  
+   `https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/<feature>/<file>.png`
+4. Do **not** use Cursor artifact `/tmp/cursor/artifacts/…` paths or markdown links to `cursor.com/agents/…/artifacts` — those become click-through links, not inline images.
+5. Prefer a tight crop of the changed control plus one full mobile/desktop frame when helpful.
+
+Daily Budget specifics: `@.cursor/rules/daily-budget.mdc`.
+
+## Production
+
+Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`.
 
 ## Keeping agent context fresh
 
