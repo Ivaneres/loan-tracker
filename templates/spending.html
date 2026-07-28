@@ -223,6 +223,9 @@
                                     <th scope="col" class="px-3 py-2.5 text-left align-top min-w-[8rem]">
                                         <button type="button" class="insight-sort-btn" data-sort-key="description"><span class="sort-label">Description</span><span class="sort-ind" aria-hidden="true"></span></button>
                                     </th>
+                                    <th scope="col" class="px-3 py-2.5 text-left align-top min-w-[6rem]">
+                                        <button type="button" class="insight-sort-btn" data-sort-key="source" title="Bank or account the statement came from"><span class="sort-label">Source</span><span class="sort-ind" aria-hidden="true"></span></button>
+                                    </th>
                                     <th scope="col" class="px-3 py-2.5 text-left align-top whitespace-nowrap">
                                         <button type="button" class="insight-sort-btn" data-sort-key="direction"><span class="sort-label">Direction</span><span class="sort-ind" aria-hidden="true"></span></button>
                                     </th>
@@ -256,6 +259,12 @@
                                     <th class="px-3 py-1.5 align-top font-normal" scope="col">
                                         <label class="sr-only" for="insight-tx-filter-description">Filter by description</label>
                                         <input id="insight-tx-filter-description" class="spending-tx-header-filter" type="search" inputmode="search" autocomplete="off" placeholder="Contains…" title="Text must appear in the description" />
+                                    </th>
+                                    <th class="px-3 py-1.5 align-top font-normal" scope="col">
+                                        <label class="sr-only" for="insight-tx-filter-source">Filter by source</label>
+                                        <select id="insight-tx-filter-source" class="spending-tx-header-filter" title="Filter by statement source (bank)">
+                                            <option value="">All</option>
+                                        </select>
                                     </th>
                                     <th class="px-3 py-1.5 align-top font-normal" scope="col">
                                         <label class="sr-only" for="insight-tx-filter-direction">Filter by direction</label>

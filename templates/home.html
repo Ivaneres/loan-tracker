@@ -73,6 +73,23 @@
                         <span class="import-label">Period end</span>
                         <input id="period-end" type="date" class="spending-control" />
                     </label>
+                    <label class="import-field" for="statement-source">
+                        <span class="import-label">Source <span class="font-normal">(optional)</span></span>
+                        <input
+                            id="statement-source"
+                            type="text"
+                            list="statement-source-options"
+                            class="spending-control"
+                            placeholder="e.g. Monzo, Barclays"
+                            autocomplete="off"
+                            maxlength="80"
+                        />
+                        <datalist id="statement-source-options">
+                            {% for src in known_bank_sources %}
+                            <option value="{{ src }}"></option>
+                            {% endfor %}
+                        </datalist>
+                    </label>
                 </div>
                 <button type="button" id="period-reset-btn" class="spending-btn spending-btn--muted import-reset">Reset range from month</button>
 
@@ -138,6 +155,9 @@
                     <span>
                         <strong>{{ s.file_name or 'Statement' }}</strong>
                         · {{ s.report_month or '—' }}
+                        {% if s.bank_source %}
+                        · {{ s.bank_source }}
+                        {% endif %}
                         {% if s.period_start and s.period_end %}
                         <span class="spending-muted">({{ s.period_start }} → {{ s.period_end }})</span>
                         {% endif %}
@@ -155,6 +175,7 @@
 
     <script>
         window.SPENDING_CATEGORIES = {{ spending_categories | tojson }};
+        window.KNOWN_BANK_SOURCES = {{ known_bank_sources | tojson }};
     </script>
     <script src="{{ asset_url('spending.js') }}"></script>
 </body>

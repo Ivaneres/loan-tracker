@@ -258,6 +258,10 @@ function insightTxCompare(a, b, key) {
             return String(a.description || '')
                 .toLowerCase()
                 .localeCompare(String(b.description || '').toLowerCase(), undefined, { sensitivity: 'base' });
+        case 'source':
+            return String(a.bank_source || '')
+                .toLowerCase()
+                .localeCompare(String(b.bank_source || '').toLowerCase(), undefined, { sensitivity: 'base' });
         case 'direction':
             return String(a.direction || '').localeCompare(String(b.direction || ''));
         case 'amount':
@@ -290,6 +294,7 @@ function readInsightTransactionFilters() {
     return {
         date: g('insight-tx-filter-date'),
         description: g('insight-tx-filter-description'),
+        source: g('insight-tx-filter-source'),
         direction: g('insight-tx-filter-direction'),
         amount: g('insight-tx-filter-amount'),
         transfer: g('insight-tx-filter-transfer'),
@@ -304,6 +309,7 @@ function insightTransactionFiltersAreActive(f) {
         (f.date && f.date.trim()) ||
         (f.description && f.description.trim()) ||
         (f.amount && f.amount.trim()) ||
+        f.source ||
         f.direction ||
         f.transfer ||
         f.category ||
@@ -321,6 +327,14 @@ function applyInsightTransactionFilters(rows, f) {
         }
         if (qdesc && !String(tx.description || '').toLowerCase().includes(qdesc)) {
             return false;
+        }
+        if (f.source) {
+            const src = String(tx.bank_source || '').trim();
+            if (f.source === '__none__') {
+                if (src) return false;
+            } else if (src.toLowerCase() !== f.source.toLowerCase()) {
+                return false;
+            }
         }
         if (f.direction && String(tx.direction || '') !== f.direction) {
             return false;
@@ -411,6 +425,45 @@ function populateInsightTxCategoryFilter(transactions) {
     }
 }
 
+function populateInsightTxSourceFilter(transactions) {
+    const sel = document.getElementById('insight-tx-filter-source');
+    if (!sel) return;
+    const prev = sel.value;
+    const byLower = new Map();
+    let hasBlank = false;
+    (transactions || []).forEach((tx) => {
+        const raw = tx && tx.bank_source != null ? String(tx.bank_source).trim() : '';
+        if (!raw) {
+            hasBlank = true;
+            return;
+        }
+        const low = raw.toLowerCase();
+        if (!byLower.has(low)) {
+            byLower.set(low, raw);
+        }
+    });
+    const labels = Array.from(byLower.values());
+    labels.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+    sel.innerHTML = '<option value="">All</option>';
+    labels.forEach((label) => {
+        const o = document.createElement('option');
+        o.value = label;
+        o.textContent = label;
+        sel.appendChild(o);
+    });
+    if (hasBlank) {
+        const o = document.createElement('option');
+        o.value = '__none__';
+        o.textContent = '(none)';
+        sel.appendChild(o);
+    }
+    if (prev && Array.from(sel.options).some((op) => op.value === prev)) {
+        sel.value = prev;
+    } else {
+        sel.value = '';
+    }
+}
+
 function clearInsightTransactionFilters() {
     [
         'insight-tx-filter-date',
@@ -422,14 +475,18 @@ function clearInsightTransactionFilters() {
             el.value = '';
         }
     });
-    ['insight-tx-filter-direction', 'insight-tx-filter-transfer', 'insight-tx-filter-category', 'insight-tx-filter-insights'].forEach(
-        (id) => {
-            const el = document.getElementById(id);
-            if (el) {
-                el.value = '';
-            }
-        },
-    );
+    [
+        'insight-tx-filter-source',
+        'insight-tx-filter-direction',
+        'insight-tx-filter-transfer',
+        'insight-tx-filter-category',
+        'insight-tx-filter-insights',
+    ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.value = '';
+        }
+    });
 }
 
 function setInsightTxFilterStatus(filteredCount, totalCount) {
@@ -1167,7 +1224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = '';
         if (totalCount > 0 && sorted.length === 0) {
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td colspan="7" class="px-3 py-6 text-center text-sm text-gray-500">No transactions match the column filters.</td>`;
+            tr.innerHTML = `<td colspan="8" class="px-3 py-6 text-center text-sm text-gray-500">No transactions match the column filters.</td>`;
             tbody.appendChild(tr);
             return;
         }
@@ -1179,6 +1236,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isPaired || userExcl) {
                 tr.classList.add('spending-insight-tx-muted');
             }
+            const sourceLabel = String(tx.bank_source || '').trim();
+            const sourceCell = sourceLabel
+                ? `<td class="px-3 py-2 whitespace-nowrap">${escapeHtml(sourceLabel)}</td>`
+                : '<td class="px-3 py-2 text-gray-400">—</td>';
             const insightsCol = isPaired
                 ? '<span class="text-xs" title="Not counted in income, outgoing, or category totals">Not in totals (linked)</span>'
                 : userExcl
@@ -1187,6 +1248,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.innerHTML = `
                         <td class="px-3 py-2 whitespace-nowrap">${tx.date}</td>
                         <td class="px-3 py-2">${tx.description}</td>
+                        ${sourceCell}
                         <td class="px-3 py-2 capitalize">${tx.direction}</td>
                         <td class="px-3 py-2 whitespace-nowrap spending-insight-tx-amount">${Number(tx.amount).toFixed(2)}</td>
                         <td class="px-3 py-2 text-sm align-top">
@@ -2004,6 +2066,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 clearInsightTransactionFilters();
                 loadInsight._lastLoadedMonth = null;
                 populateInsightTxCategoryFilter();
+                populateInsightTxSourceFilter();
                 const tbodyEmpty = document.getElementById('insight-transactions-tbody');
                 if (tbodyEmpty) {
                     tbodyEmpty.innerHTML = '';
@@ -2097,6 +2160,7 @@ document.addEventListener('DOMContentLoaded', () => {
             loadInsight._lastLoadedMonth = month;
             insightTransactionsSnapshot = data.transactions || [];
             populateInsightTxCategoryFilter(insightTransactionsSnapshot);
+            populateInsightTxSourceFilter(insightTransactionsSnapshot);
             updateInsightSortIndicators();
             renderInsightTransactionsBody();
             loadInsight._budgetItems = (data.insight && data.insight.budget_action_items) || [];
@@ -2192,11 +2256,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const fileName = statement.file_name || 'Statement';
         const reportMonth = statement.report_month || '—';
+        const bankSource = statement.bank_source ? String(statement.bank_source).trim() : '';
         const periodStart = statement.period_start;
         const periodEnd = statement.period_end;
         const importedCount = statement.imported_count || 0;
         const uploadedAt = statement.uploaded_at ? String(statement.uploaded_at).slice(0, 10) : '';
 
+        const sourceHtml = bankSource ? ` · ${escapeHtml(bankSource)}` : '';
         const periodHtml = periodStart && periodEnd
             ? ` <span class="spending-muted">(${escapeHtml(periodStart)} → ${escapeHtml(periodEnd)})</span>`
             : '';
@@ -2204,7 +2270,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const li = document.createElement('li');
         li.innerHTML =
-            `<span><strong>${escapeHtml(fileName)}</strong> · ${escapeHtml(reportMonth)}${periodHtml}</span>` +
+            `<span><strong>${escapeHtml(fileName)}</strong> · ${escapeHtml(reportMonth)}${sourceHtml}${periodHtml}</span>` +
             `<span class="spending-muted">${importedCount} imported${uploadedHtml}</span>`;
 
         list.insertBefore(li, list.firstChild);
@@ -2214,6 +2280,35 @@ document.addEventListener('DOMContentLoaded', () => {
         while (list.children.length > 8) {
             list.removeChild(list.lastChild);
         }
+    }
+
+    function syncStatementSourceOptions(sources) {
+        const list = document.getElementById('statement-source-options');
+        if (!list) return;
+        const labels = Array.isArray(sources) ? sources : [];
+        const byLower = new Map();
+        labels.forEach((raw) => {
+            const label = String(raw || '').trim();
+            if (!label) return;
+            const low = label.toLowerCase();
+            if (!byLower.has(low)) byLower.set(low, label);
+        });
+        const sorted = Array.from(byLower.values()).sort((a, b) =>
+            a.toLowerCase().localeCompare(b.toLowerCase()),
+        );
+        list.innerHTML = '';
+        sorted.forEach((label) => {
+            const opt = document.createElement('option');
+            opt.value = label;
+            list.appendChild(opt);
+        });
+        window.KNOWN_BANK_SOURCES = sorted;
+    }
+
+    function readStatementSourceInput() {
+        const el = document.getElementById('statement-source');
+        if (!el) return '';
+        return String(el.value || '').trim().slice(0, 80);
     }
 
     if (importBtn) {
@@ -2249,16 +2344,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
                 const fileName = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0].name : '';
+                const source = readStatementSourceInput();
+                const payload = {
+                    transactions: selected,
+                    file_name: fileName,
+                    report_month: period.report_month,
+                    period_start: period.period_start,
+                    period_end: period.period_end,
+                };
+                if (source) {
+                    payload.source = source;
+                }
                 const response = await fetch('/api/spending/statement/import', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        transactions: selected,
-                        file_name: fileName,
-                        report_month: period.report_month,
-                        period_start: period.period_start,
-                        period_end: period.period_end,
-                    }),
+                    body: JSON.stringify(payload),
                 });
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.error || 'Import failed');
@@ -2270,6 +2370,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 setStatus(msg, false);
                 clearPreview();
                 prependRecentStatement(data.statement);
+                if (Array.isArray(data.known_bank_sources)) {
+                    syncStatementSourceOptions(data.known_bank_sources);
+                } else if (source) {
+                    const prev = Array.isArray(window.KNOWN_BANK_SOURCES) ? window.KNOWN_BANK_SOURCES.slice() : [];
+                    prev.push(source);
+                    syncStatementSourceOptions(prev);
+                }
                 const homeNext = document.getElementById('home-import-next');
                 const reportMonth = data.report_month || (data.months && data.months.length ? data.months[0] : null);
                 if (homeNext && reportMonth) {
@@ -2497,6 +2604,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     populateInsightTxCategoryFilter();
+    populateInsightTxSourceFilter();
+    if (Array.isArray(window.KNOWN_BANK_SOURCES) && window.KNOWN_BANK_SOURCES.length) {
+        syncStatementSourceOptions(window.KNOWN_BANK_SOURCES);
+    }
 
     const subscriptionToggleBtn = document.getElementById('subscription-signals-toggle-btn');
     if (subscriptionToggleBtn) {

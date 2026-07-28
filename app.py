@@ -443,6 +443,28 @@ def _ensure_data_shape(data: dict) -> bool:
     return changed
 
 
+def _normalize_bank_source(raw) -> str | None:
+    """Optional bank/account label for a statement import (UI column: Source)."""
+    s = str(raw or '').strip()[:80]
+    return s or None
+
+
+def _collect_bank_sources(spending: dict) -> list[str]:
+    """Unique prior bank_source values for autocomplete (statements + transactions)."""
+    seen: dict[str, str] = {}
+    for bucket_key in ('statements', 'transactions'):
+        for row in spending.get(bucket_key) or []:
+            if not isinstance(row, dict):
+                continue
+            label = _normalize_bank_source(row.get('bank_source'))
+            if not label:
+                continue
+            key = label.casefold()
+            if key not in seen:
+                seen[key] = label
+    return sorted(seen.values(), key=lambda x: x.casefold())
+
+
 def _ensure_user_spending(data: dict, username: str) -> tuple[dict, bool]:
     changed = False
     users = data.setdefault('users', {})
@@ -5772,6 +5794,7 @@ def index():
     statements = list(spending.get('statements') or [])
     statements.sort(key=lambda s: str(s.get('uploaded_at') or ''), reverse=True)
     recent_statements = statements[:8]
+    known_bank_sources = _collect_bank_sources(spending)
 
     return render_template(
         'home.html',
@@ -5787,6 +5810,7 @@ def index():
         loan_count=loan_count,
         loan_total=loan_total,
         recent_statements=recent_statements,
+        known_bank_sources=known_bank_sources,
     )
 
 
@@ -6961,6 +6985,9 @@ def spending_statement_import():
     report_month = period['report_month']
     ps_d = period['period_start_date']
     pe_d = period['period_end_date']
+    # Optional bank/account the statement came from (UI: "Source").
+    # Accept top-level `source` or `bank_source`; do not confuse with tx.origin `source`.
+    bank_source = _normalize_bank_source(payload.get('bank_source') or payload.get('source'))
 
     data = load_data()
     spending, changed = _ensure_user_spending(data, session['username'])
@@ -7066,6 +7093,8 @@ def spending_statement_import():
             'created_at': now_iso,
             'fingerprint': fp,
         }
+        if bank_source:
+            tx['bank_source'] = bank_source
         tx_store.append(tx)
         inserted += 1
         affected_months.add(report_month)
@@ -7085,6 +7114,8 @@ def spending_statement_import():
         'skipped_duplicates': skipped,
         'months': sorted({report_month}),
     }
+    if bank_source:
+        statement_record['bank_source'] = bank_source
     statement_store.append(statement_record)
     reconciliation = apply_auto_transfer_pairing_for_month(spending, report_month)
     _recompute_monthly_insights(spending, affected_months if affected_months else None)
@@ -7101,6 +7132,7 @@ def spending_statement_import():
         'months': sorted({report_month}),
         'reconciliation': reconciliation,
         'statement': statement_record,
+        'known_bank_sources': _collect_bank_sources(spending),
     })
 
 
@@ -7215,7 +7247,12 @@ def spending_insights():
     requested_month = (request.args.get('month') or '').strip()
     months = sorted((spending.get('monthly_insights') or {}).keys(), reverse=True)
     if not months:
-        return jsonify({'month': None, 'insight': None, 'available_months': []})
+        return jsonify({
+            'month': None,
+            'insight': None,
+            'available_months': [],
+            'known_bank_sources': _collect_bank_sources(spending),
+        })
     target_month = requested_month or months[0]
     insight_map = spending.get('monthly_insights') or {}
     need_recompute = target_month not in insight_map
@@ -7236,6 +7273,7 @@ def spending_insights():
         'insight': insight,
         'available_months': sorted((spending.get('monthly_insights') or {}).keys(), reverse=True),
         'transactions': month_rows,
+        'known_bank_sources': _collect_bank_sources(spending),
     })
 
 
