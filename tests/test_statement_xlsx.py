@@ -140,14 +140,18 @@ class TestSpreadsheetHelpers(unittest.TestCase):
 
 
 class TestTabularLocalParse(unittest.TestCase):
+    def setUp(self):
+        app_mod._TABULAR_HEADER_MAP_CACHE.clear()
+
     def test_revolut_xlsx_parses_without_llm(self):
         raw = _revolut_like_xlsx_bytes(rows=3, include_pending=True)
         text = app_mod._extract_spreadsheet_text(raw, 'revolut.xlsx')
-        parsed = app_mod._try_parse_tabular_spending_transactions(text)
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
         self.assertIsNotNone(parsed)
         rows, meta = parsed
         self.assertEqual(meta['mode'], 'tabular')
         self.assertEqual(meta['profile'], 'revolut_like')
+        self.assertEqual(meta['header_map_source'], 'alias')
         self.assertEqual(len(rows), 3)  # pending skipped
         coffee = next(r for r in rows if 'COFFEE' in r['description'])
         self.assertEqual(coffee['direction'], 'outgoing')
@@ -158,23 +162,86 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(topup['direction'], 'incoming')
         self.assertEqual(topup['amount'], 50.0)
 
-    def test_iter_extraction_uses_tabular_not_llm(self):
+    def test_iter_extraction_uses_tabular_not_full_llm(self):
         raw = _revolut_like_xlsx_bytes()
         text = app_mod._extract_spreadsheet_text(raw, 'revolut.xlsx')
-        with mock.patch.object(app_mod, '_iter_extract_spending_transactions_llm') as llm:
-            events = list(app_mod.iter_spending_transaction_extraction(text))
-            llm.assert_not_called()
+        with mock.patch.object(app_mod, '_iter_extract_spending_transactions_llm') as full_llm:
+            with mock.patch.object(app_mod, '_llm_map_tabular_headers') as header_llm:
+                events = list(app_mod.iter_spending_transaction_extraction(text))
+                full_llm.assert_not_called()
+                header_llm.assert_not_called()  # alias fast path
         steps = [e.get('step') for e in events if e.get('type') == 'progress']
         self.assertIn('tabular_parse', steps)
         result = next(e for e in events if e.get('type') == 'result')
         self.assertEqual(result['meta']['mode'], 'tabular')
+        self.assertEqual(result['meta']['header_map_source'], 'alias')
         self.assertGreaterEqual(len(result['rows']), 2)
+
+    def test_unknown_headers_use_tiny_llm_then_local_rows(self):
+        text = (
+            'Txn when,What happened,Cash delta,Settle flag\n'
+            '2024-07-01,Coffee shop,-4.80,COMPLETED\n'
+            '2024-07-02,Payroll,1000.00,COMPLETED\n'
+        )
+        # Without LLM mapping, unfamiliar headers fail.
+        self.assertIsNone(
+            app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        )
+
+        def fake_llm(header_row):
+            self.assertEqual(header_row[0], 'Txn when')
+            return {
+                'columns': {
+                    'date': 0,
+                    'description': 1,
+                    'amount': 2,
+                    'state': 3,
+                },
+                'amount_sign': 'negative_is_outgoing',
+            }
+
+        with mock.patch.object(app_mod, '_llm_map_tabular_headers', side_effect=fake_llm):
+            with mock.patch.object(app_mod, '_iter_extract_spending_transactions_llm') as full_llm:
+                events = list(app_mod.iter_spending_transaction_extraction(text))
+                full_llm.assert_not_called()
+        steps = [e.get('step') for e in events if e.get('type') == 'progress']
+        self.assertIn('tabular_headers', steps)
+        self.assertIn('tabular_parse', steps)
+        result = next(e for e in events if e.get('type') == 'result')
+        self.assertEqual(result['meta']['header_map_source'], 'llm_headers')
+        self.assertEqual(len(result['rows']), 2)
+        by_desc = {r['description']: r for r in result['rows']}
+        self.assertEqual(by_desc['Coffee shop']['direction'], 'outgoing')
+        self.assertEqual(by_desc['Coffee shop']['amount'], 4.8)
+        self.assertEqual(by_desc['Payroll']['direction'], 'incoming')
+
+    def test_llm_header_map_cached_across_calls(self):
+        text = (
+            'Txn when,What happened,Cash delta\n'
+            '2024-07-01,A,-1.00\n'
+            '2024-07-02,B,-2.00\n'
+        )
+        calls = {'n': 0}
+
+        def fake_llm(header_row):
+            calls['n'] += 1
+            return {
+                'columns': {'date': 0, 'description': 1, 'amount': 2},
+                'amount_sign': 'negative_is_outgoing',
+            }
+
+        with mock.patch.object(app_mod, '_llm_map_tabular_headers', side_effect=fake_llm):
+            first = app_mod._try_parse_tabular_spending_transactions(text)
+            second = app_mod._try_parse_tabular_spending_transactions(text)
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(calls['n'], 1)
 
     def test_large_revolut_parse_is_fast(self):
         raw = _revolut_like_xlsx_bytes(rows=800)
         text = app_mod._extract_spreadsheet_text(raw, 'revolut.xlsx')
         t0 = time.perf_counter()
-        parsed = app_mod._try_parse_tabular_spending_transactions(text)
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
         elapsed = time.perf_counter() - t0
         self.assertIsNotNone(parsed)
         rows, _meta = parsed
@@ -185,7 +252,7 @@ class TestTabularLocalParse(unittest.TestCase):
     def test_normalize_preserves_revolut_dates(self):
         raw = _revolut_like_xlsx_bytes(rows=1)
         text = app_mod._extract_spreadsheet_text(raw, 'revolut.xlsx')
-        rows, _ = app_mod._try_parse_tabular_spending_transactions(text)
+        rows, _ = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
         normalized = app_mod._normalize_spending_transactions(rows)
         self.assertEqual(len(normalized), 1)
         self.assertEqual(normalized[0]['date'], '2024-07-01')
@@ -198,7 +265,7 @@ class TestTabularLocalParse(unittest.TestCase):
             '01/07/2024,Salary,2000.00,\n'
             '02/07/2024,Rent,,850.00\n'
         )
-        parsed = app_mod._try_parse_tabular_spending_transactions(text)
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
         self.assertIsNotNone(parsed)
         rows, meta = parsed
         self.assertEqual(meta['profile'], 'money_columns')
@@ -221,6 +288,27 @@ class TestTabularLocalParse(unittest.TestCase):
     def test_unstructured_text_does_not_tabular_parse(self):
         text = 'This is a scanned PDF dump without headers\n01 Jul Coffee 4.80\n'
         self.assertIsNone(app_mod._try_parse_tabular_spending_transactions(text))
+
+    def test_positive_is_outgoing_sign_from_llm(self):
+        text = (
+            'Booking,Narration,Amt\n'
+            '2024-07-01,Shop,12.50\n'
+            '2024-07-02,Refund,-3.00\n'
+        )
+
+        def fake_llm(header_row):
+            return {
+                'columns': {'date': 0, 'description': 1, 'amount': 2},
+                'amount_sign': 'positive_is_outgoing',
+            }
+
+        with mock.patch.object(app_mod, '_llm_map_tabular_headers', side_effect=fake_llm):
+            parsed = app_mod._try_parse_tabular_spending_transactions(text)
+        self.assertIsNotNone(parsed)
+        rows, _ = parsed
+        by_desc = {r['description']: r for r in rows}
+        self.assertEqual(by_desc['Shop']['direction'], 'outgoing')
+        self.assertEqual(by_desc['Refund']['direction'], 'incoming')
 
 
 class TestStatementXlsxUiAccept(unittest.TestCase):

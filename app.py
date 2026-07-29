@@ -1002,7 +1002,16 @@ def _normalize_tabular_header(cell: str) -> str:
     return re.sub(r'[\s_]+', ' ', (cell or '').strip().lower())
 
 
+def _tabular_header_fingerprint(header_row: list[str]) -> str:
+    return '\x1f'.join(_normalize_tabular_header(h) for h in header_row)
+
+
+# Process-local cache: fingerprint -> {'columns': dict[str,int], 'amount_sign': str, 'source': str}
+_TABULAR_HEADER_MAP_CACHE: dict[str, dict] = {}
+
+
 def _tabular_header_aliases() -> dict[str, tuple[str, ...]]:
+    """Optional zero-cost fast path only — unknown banks use a tiny header LLM call."""
     return {
         'description': (
             'description', 'details', 'narrative', 'merchant', 'reference',
@@ -1031,16 +1040,36 @@ def _tabular_header_aliases() -> dict[str, tuple[str, ...]]:
             'settled', 'finished date',
         ),
         'state': ('state', 'status'),
+        'direction': ('direction', 'flow', 'credit/debit', 'dr/cr'),
         'type': ('type', 'transaction type', 'product type'),
     }
 
 
-def _map_tabular_headers(header_row: list[str]) -> dict[str, int] | None:
-    """
-    Map a CSV/XLSX header row to canonical fields. Requires description plus
-    either a signed amount column or separate money-in/money-out columns, and
-    at least one date column (date / started / completed).
-    """
+def _validate_tabular_column_map(col: dict[str, int], header_len: int) -> dict[str, int] | None:
+    cleaned: dict[str, int] = {}
+    for field, idx in col.items():
+        if field not in {
+            'description', 'amount', 'money_in', 'money_out', 'date',
+            'started_date', 'completed_date', 'state', 'direction', 'type',
+        }:
+            continue
+        try:
+            i = int(idx)
+        except (TypeError, ValueError):
+            continue
+        if i < 0 or i >= header_len:
+            continue
+        cleaned[field] = i
+    has_desc = 'description' in cleaned
+    has_amount = 'amount' in cleaned or ('money_in' in cleaned and 'money_out' in cleaned)
+    has_date = 'date' in cleaned or 'started_date' in cleaned or 'completed_date' in cleaned
+    if not (has_desc and has_amount and has_date):
+        return None
+    return cleaned
+
+
+def _map_tabular_headers_alias(header_row: list[str]) -> dict[str, int] | None:
+    """Deterministic alias match (fast path). Returns None when headers are unfamiliar."""
     aliases = _tabular_header_aliases()
     normalized = [_normalize_tabular_header(h) for h in header_row]
     col: dict[str, int] = {}
@@ -1053,12 +1082,127 @@ def _map_tabular_headers(header_row: list[str]) -> dict[str, int] | None:
             if h in names:
                 col[field] = idx
                 break
-    has_desc = 'description' in col
-    has_amount = 'amount' in col or ('money_in' in col and 'money_out' in col)
-    has_date = 'date' in col or 'started_date' in col or 'completed_date' in col
-    if not (has_desc and has_amount and has_date):
+    return _validate_tabular_column_map(col, len(header_row))
+
+
+def _normalize_amount_sign(raw) -> str:
+    s = str(raw or '').strip().lower().replace('-', '_').replace(' ', '_')
+    if s in {
+        'negative_is_outgoing', 'negative_outgoing', 'signed_negative_out',
+        'revolut', 'accounting',
+    }:
+        return 'negative_is_outgoing'
+    if s in {
+        'positive_is_outgoing', 'positive_outgoing', 'signed_positive_out',
+    }:
+        return 'positive_is_outgoing'
+    if s in {'absolute', 'unsigned', 'abs', 'money_columns'}:
+        return 'absolute'
+    return 'negative_is_outgoing'
+
+
+def _llm_map_tabular_headers(header_row: list[str]) -> dict | None:
+    """
+    Tiny LLM call: header titles only → column indices for local row parsing.
+    Returns {'columns': dict[str,int], 'amount_sign': str} or None.
+    """
+    client = _get_openai_client()
+    if not client:
         return None
-    return col
+    headers = [(h if h is not None else '') for h in header_row]
+    if sum(1 for h in headers if str(h).strip()) < 3:
+        return None
+
+    indexed = [{'index': i, 'title': str(h)} for i, h in enumerate(headers)]
+    model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
+    system = (
+        'You map bank CSV/Excel column headers to canonical fields for transaction import. '
+        'Return only valid JSON: '
+        '{"is_transaction_table":boolean,'
+        '"columns":{"description":int|null,"amount":int|null,"money_in":int|null,'
+        '"money_out":int|null,"date":int|null,"started_date":int|null,'
+        '"completed_date":int|null,"state":int|null,"direction":int|null},'
+        '"amount_sign":"negative_is_outgoing"|"positive_is_outgoing"|"absolute"}. '
+        'Use the provided header index integers (0-based). Set unused fields to null. '
+        'Rules: (1) description = merchant/payee/narrative/details. '
+        '(2) Prefer separate money_in/money_out (Paid in/Paid out) when both exist; else use amount. '
+        '(3) date = single booking/value date; started_date/completed_date when both start and settle exist. '
+        '(4) amount_sign: negative_is_outgoing when negatives are debits (e.g. Revolut); '
+        'positive_is_outgoing when positives are debits; absolute when amounts are unsigned '
+        'or when money_in/money_out columns are used. '
+        '(5) is_transaction_table=false for non-transaction sheets (balances-only, metadata).'
+    )
+    user_msg = 'Header columns:\n' + json.dumps(indexed, ensure_ascii=False)
+    try:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user_msg},
+            ],
+            response_format={'type': 'json_object'},
+            temperature=0,
+        )
+    except Exception as e:
+        logger.warning('tabular header LLM mapping failed: %s', e)
+        return None
+    raw = completion.choices[0].message.content or '{}'
+    data, jerr = _parse_llm_json_object(raw, context='tabular_header_map')
+    if jerr or not isinstance(data, dict):
+        logger.warning('tabular header LLM JSON failed: %s', jerr)
+        return None
+    if data.get('is_transaction_table') is False:
+        return None
+    cols_raw = data.get('columns')
+    if not isinstance(cols_raw, dict):
+        return None
+    # Drop nulls; keep int indices.
+    tentative: dict[str, int] = {}
+    for field, val in cols_raw.items():
+        if val is None or val == '':
+            continue
+        tentative[str(field)] = val
+    cleaned = _validate_tabular_column_map(tentative, len(headers))
+    if cleaned is None:
+        return None
+    return {
+        'columns': cleaned,
+        'amount_sign': _normalize_amount_sign(data.get('amount_sign')),
+    }
+
+
+def _resolve_tabular_headers(header_row: list[str], *, allow_llm: bool = True) -> dict | None:
+    """
+    Resolve header titles → column map.
+    Prefer process cache, then deterministic aliases (no API), then a tiny header-only LLM call.
+    Returns {'columns', 'amount_sign', 'source'} or None.
+    """
+    fp = _tabular_header_fingerprint(header_row)
+    cached = _TABULAR_HEADER_MAP_CACHE.get(fp)
+    if isinstance(cached, dict) and isinstance(cached.get('columns'), dict):
+        return dict(cached)
+
+    alias = _map_tabular_headers_alias(header_row)
+    if alias is not None:
+        # Signed amount exports (Revolut-like) use negative=outgoing by convention.
+        amount_sign = 'negative_is_outgoing' if 'amount' in alias else 'absolute'
+        resolved = {'columns': alias, 'amount_sign': amount_sign, 'source': 'alias'}
+        _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+        return dict(resolved)
+
+    if not allow_llm:
+        return None
+
+    llm = _llm_map_tabular_headers(header_row)
+    if llm is None:
+        return None
+    resolved = {
+        'columns': llm['columns'],
+        'amount_sign': llm.get('amount_sign') or 'negative_is_outgoing',
+        'source': 'llm_headers',
+    }
+    _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+    return dict(resolved)
 
 
 def _parse_signed_amount_cell(val) -> float | None:
@@ -1078,7 +1222,43 @@ def _parse_signed_amount_cell(val) -> float | None:
         return None
 
 
-def _tabular_row_to_raw_tx(cells: list[str], col: dict[str, int]) -> dict | None:
+def _row_looks_numeric_heavy(row: list[str]) -> bool:
+    """True when most cells look like amounts — unlikely to be a header row."""
+    non_empty = [c for c in row if str(c or '').strip()]
+    if len(non_empty) < 3:
+        return True
+    numeric = 0
+    for c in non_empty:
+        if _parse_signed_amount_cell(c) is not None:
+            numeric += 1
+            continue
+        # ISO-ish dates alone don't make a header numeric-heavy.
+        if re.match(r'^\d{4}-\d{2}-\d{2}', str(c).strip()):
+            numeric += 1
+    return numeric >= max(2, (len(non_empty) + 1) // 2)
+
+
+def _direction_from_cell(raw: str) -> str | None:
+    d = _normalize_tabular_header(raw).replace('/', ' ')
+    if not d:
+        return None
+    if d in {'in', 'incoming', 'credit', 'cr', 'deposit', 'money in', 'paid in'}:
+        return 'incoming'
+    if d in {'out', 'outgoing', 'debit', 'dr', 'withdrawal', 'money out', 'paid out'}:
+        return 'outgoing'
+    if 'credit' in d or d.endswith(' cr'):
+        return 'incoming'
+    if 'debit' in d or d.endswith(' dr'):
+        return 'outgoing'
+    return None
+
+
+def _tabular_row_to_raw_tx(
+    cells: list[str],
+    col: dict[str, int],
+    *,
+    amount_sign: str = 'negative_is_outgoing',
+) -> dict | None:
     def cell(field: str) -> str:
         i = col.get(field)
         if i is None or i >= len(cells):
@@ -1104,12 +1284,25 @@ def _tabular_row_to_raw_tx(cells: list[str], col: dict[str, int]) -> dict | None
         signed = _parse_signed_amount_cell(cell('amount'))
         if signed is None or signed == 0:
             return None
-        if signed < 0:
-            direction = 'outgoing'
+        dir_cell = _direction_from_cell(cell('direction'))
+        sign = _normalize_amount_sign(amount_sign)
+        if dir_cell is not None and sign == 'absolute':
+            direction = dir_cell
             amount = abs(signed)
+        elif sign == 'positive_is_outgoing':
+            if signed > 0:
+                direction, amount = 'outgoing', signed
+            else:
+                direction, amount = 'incoming', abs(signed)
         else:
-            direction = 'incoming'
-            amount = signed
+            # negative_is_outgoing (default) and absolute without direction column
+            if signed < 0:
+                direction, amount = 'outgoing', abs(signed)
+            else:
+                direction, amount = 'incoming', signed
+            if dir_cell is not None:
+                direction = dir_cell
+                amount = abs(signed)
     else:
         money_in = _spending_optional_money(cell('money_in'))
         money_out = _spending_optional_money(cell('money_out'))
@@ -1171,38 +1364,48 @@ def _iter_csv_like_rows(statement_text: str):
         return
 
 
-def _try_parse_tabular_spending_transactions(statement_text: str) -> tuple[list, dict] | None:
+def _split_tabular_statement(statement_text: str) -> tuple[list[str], list[list[str]]] | None:
     """
-    Fast local parse for bank CSV / Excel exports with a recognizable header row
-    (e.g. Revolut: Started Date, Completed Date, Description, Amount, State).
-    Returns (raw_rows, meta) or None when the text is not a confident tabular export.
+    Split CSV-like text into (header_row, data_rows) when it looks like a table export.
+    Does not map columns — that happens via alias or a header-only LLM call.
     """
-    rows_iter = _iter_csv_like_rows(statement_text)
     header = None
-    col = None
     data_rows: list[list[str]] = []
-    for row in rows_iter:
+    for row in _iter_csv_like_rows(statement_text):
         if not any((c or '').strip() for c in row):
             continue
-        if col is None:
-            mapped = _map_tabular_headers(row)
-            if mapped is not None:
-                header = [(_normalize_tabular_header(c) or '') for c in row]
-                col = mapped
+        if header is None:
+            if _row_looks_numeric_heavy(row):
+                # First row already looks like data — not a confident tabular export.
+                return None
+            header = row
             continue
         data_rows.append(row)
-
-    if col is None:
+    if header is None or not data_rows:
         return None
+    if sum(1 for c in header if str(c or '').strip()) < 3:
+        return None
+    return header, data_rows
 
+
+def _parse_tabular_data_rows(
+    header: list[str],
+    data_rows: list[list[str]],
+    col: dict[str, int],
+    *,
+    amount_sign: str = 'negative_is_outgoing',
+) -> tuple[list[dict], dict]:
+    header_fp = _tabular_header_fingerprint(header)
     raw: list[dict] = []
     skipped_state = 0
     skipped_other = 0
     for cells in data_rows:
-        # Header-like repeats mid-file (multi-sheet concat without banner).
-        if _map_tabular_headers(cells) is not None:
+        # Skip repeated header rows (multi-sheet concat).
+        if _tabular_header_fingerprint(cells) == header_fp:
             continue
-        tx = _tabular_row_to_raw_tx(cells, col)
+        if not _row_looks_numeric_heavy(cells) and _map_tabular_headers_alias(cells) is not None:
+            continue
+        tx = _tabular_row_to_raw_tx(cells, col, amount_sign=amount_sign)
         if tx is None:
             state_i = col.get('state')
             if state_i is not None and state_i < len(cells) and (cells[state_i] or '').strip():
@@ -1213,7 +1416,30 @@ def _try_parse_tabular_spending_transactions(statement_text: str) -> tuple[list,
             skipped_other += 1
             continue
         raw.append(tx)
+    stats = {'skipped_state': skipped_state, 'skipped_other': skipped_other}
+    return raw, stats
 
+
+def _try_parse_tabular_spending_transactions(
+    statement_text: str,
+    *,
+    allow_llm: bool = True,
+) -> tuple[list, dict] | None:
+    """
+    Parse bank CSV / Excel exports locally after mapping headers.
+    Header mapping: alias fast path, else tiny LLM call on header titles only (not row data).
+    Returns (raw_rows, meta) or None when not a confident tabular export.
+    """
+    split = _split_tabular_statement(statement_text)
+    if split is None:
+        return None
+    header, data_rows = split
+    resolved = _resolve_tabular_headers(header, allow_llm=allow_llm)
+    if resolved is None:
+        return None
+    col = resolved['columns']
+    amount_sign = resolved.get('amount_sign') or 'negative_is_outgoing'
+    raw, stats = _parse_tabular_data_rows(header, data_rows, col, amount_sign=amount_sign)
     if len(raw) < SPENDING_TABULAR_MIN_ROWS:
         return None
 
@@ -1225,14 +1451,87 @@ def _try_parse_tabular_spending_transactions(statement_text: str) -> tuple[list,
         'mode': 'tabular',
         'reason': 'structured_csv_headers',
         'profile': profile,
-        'header': header,
+        'header': [_normalize_tabular_header(c) for c in header],
         'columns': sorted(col.keys()),
+        'header_map_source': resolved.get('source'),
+        'amount_sign': amount_sign,
         'row_count': len(raw),
-        'skipped_state': skipped_state,
-        'skipped_other': skipped_other,
+        'skipped_state': stats['skipped_state'],
+        'skipped_other': stats['skipped_other'],
     }
     return raw, meta
 
+
+def _iter_tabular_spending_extraction(statement_text: str):
+    """
+    Yield progress for header mapping, then {'type':'result',...} or nothing if not tabular.
+    """
+    split = _split_tabular_statement(statement_text)
+    if split is None:
+        return
+    header, data_rows = split
+
+    # Alias / cache first (no progress needed).
+    fp = _tabular_header_fingerprint(header)
+    cached = _TABULAR_HEADER_MAP_CACHE.get(fp)
+    if isinstance(cached, dict) and isinstance(cached.get('columns'), dict):
+        resolved = dict(cached)
+    else:
+        alias = _map_tabular_headers_alias(header)
+        if alias is not None:
+            amount_sign = 'negative_is_outgoing' if 'amount' in alias else 'absolute'
+            resolved = {'columns': alias, 'amount_sign': amount_sign, 'source': 'alias'}
+            _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+        else:
+            yield {
+                'type': 'progress',
+                'step': 'tabular_headers',
+                'message': 'Mapping spreadsheet/CSV column headers with a small model call…',
+            }
+            llm = _llm_map_tabular_headers(header)
+            if llm is None:
+                return
+            resolved = {
+                'columns': llm['columns'],
+                'amount_sign': llm.get('amount_sign') or 'negative_is_outgoing',
+                'source': 'llm_headers',
+            }
+            _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+
+    col = resolved['columns']
+    amount_sign = resolved.get('amount_sign') or 'negative_is_outgoing'
+    raw, stats = _parse_tabular_data_rows(header, data_rows, col, amount_sign=amount_sign)
+    if len(raw) < SPENDING_TABULAR_MIN_ROWS:
+        return
+
+    profile = 'revolut_like' if (
+        'started_date' in col and 'completed_date' in col and 'amount' in col
+    ) else 'signed_amount' if 'amount' in col else 'money_columns'
+
+    yield {
+        'type': 'progress',
+        'step': 'tabular_parse',
+        'message': (
+            f'Parsed {len(raw)} transactions from spreadsheet/CSV locally '
+            f'({profile}, headers via {resolved.get("source")})…'
+        ),
+    }
+    yield {
+        'type': 'result',
+        'rows': raw,
+        'meta': {
+            'mode': 'tabular',
+            'reason': 'structured_csv_headers',
+            'profile': profile,
+            'header': [_normalize_tabular_header(c) for c in header],
+            'columns': sorted(col.keys()),
+            'header_map_source': resolved.get('source'),
+            'amount_sign': amount_sign,
+            'row_count': len(raw),
+            'skipped_state': stats['skipped_state'],
+            'skipped_other': stats['skipped_other'],
+        },
+    }
 
 def _split_statement_text_into_llm_chunks(text: str, max_chars: int = STATEMENT_LLM_CHUNK_CHARS) -> list[str]:
     """Split long statement text into line-aligned chunks for sequential LLM extraction."""
@@ -1680,19 +1979,15 @@ def iter_spending_transaction_extraction(statement_text: str, period_hint: str |
     Yields {'type':'progress','step':str,'message':str} then
     {'type':'result','rows':list,'meta':dict}.
     """
-    # Fast path: structured CSV / Excel exports (e.g. Revolut) — no LLM extraction.
-    tabular = _try_parse_tabular_spending_transactions(statement_text)
-    if tabular is not None:
-        rows, meta = tabular
-        yield {
-            'type': 'progress',
-            'step': 'tabular_parse',
-            'message': (
-                f'Parsed {len(rows)} transactions from spreadsheet/CSV headers locally '
-                f'({meta.get("profile", "tabular")})…'
-            ),
-        }
-        yield {'type': 'result', 'rows': rows, 'meta': meta}
+    # Fast path: structured CSV / Excel — map headers (alias or tiny LLM), parse rows locally.
+    tabular_result = None
+    for ev in _iter_tabular_spending_extraction(statement_text):
+        if ev.get('type') == 'progress':
+            yield ev
+        elif ev.get('type') == 'result':
+            tabular_result = ev
+    if tabular_result is not None:
+        yield tabular_result
         return
 
     base, hints_block = _split_spending_statement_text_for_model(statement_text)
@@ -7332,9 +7627,12 @@ def spending_statement_preview():
         return jsonify({'error': err}), 400
     text, truncated_text, direction_hints, pipeline = prep
 
-    # Structured CSV/XLSX (e.g. Revolut) parses locally — OpenAI only required when
-    # we must fall through to LLM extraction.
-    if _try_parse_tabular_spending_transactions(text) is None and not _get_openai_client():
+    # Alias-mapped CSV/XLSX can proceed without OpenAI; unfamiliar headers need a
+    # tiny header LLM call (or full extract), so require the API key then.
+    if (
+        _try_parse_tabular_spending_transactions(text, allow_llm=False) is None
+        and not _get_openai_client()
+    ):
         return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
 
     period, perr = _parse_spending_period_from_values(
@@ -7436,7 +7734,10 @@ def spending_statement_preview_stream():
 
         text, truncated_text, direction_hints, pipeline = prep
 
-        if _try_parse_tabular_spending_transactions(text) is None and not _get_openai_client():
+        if (
+            _try_parse_tabular_spending_transactions(text, allow_llm=False) is None
+            and not _get_openai_client()
+        ):
             yield emit({
                 'type': 'error',
                 'message': 'Statement analysis is not configured (set OPENAI_API_KEY).',
