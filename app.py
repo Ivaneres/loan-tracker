@@ -770,10 +770,17 @@ def _parse_spending_period_from_values(
     }, None
 
 
-def _filter_spending_rows_by_period(rows: list, d_start: date, d_end: date) -> tuple[list, int]:
-    """Keep rows whose transaction date falls in [d_start, d_end] inclusive."""
+def _filter_spending_rows_by_period(rows: list, d_start: date, d_end: date) -> tuple[list, int, int]:
+    """
+    Keep rows whose primary transaction date falls in [d_start, d_end] inclusive.
+
+    Rows whose started_date falls outside the period (but primary/completed date
+    is inside) are kept and tagged as date-boundary cases for preview UX.
+    Returns (kept_rows, dropped_count, boundary_count).
+    """
     kept = []
     dropped = 0
+    boundary = 0
     for row in rows:
         d = _parse_iso_date(str(row.get('date') or ''))
         if d is None:
@@ -782,8 +789,57 @@ def _filter_spending_rows_by_period(rows: list, d_start: date, d_end: date) -> t
         if d < d_start or d > d_end:
             dropped += 1
             continue
+        started = _parse_iso_date(str(row.get('started_date') or ''))
+        if started is not None and (started < d_start or started > d_end):
+            row['date_boundary'] = True
+            row['date_boundary_reason'] = 'started_outside'
+            boundary += 1
+        else:
+            row['date_boundary'] = False
+            row.pop('date_boundary_reason', None)
         kept.append(row)
-    return kept, dropped
+    return kept, dropped, boundary
+
+
+def _resolve_spending_transaction_dates(row: dict) -> tuple[date | None, date | None, date | None]:
+    """
+    Resolve (primary, started, completed) dates from an extracted transaction row.
+
+    Prefer completed/settled date as the ledger date when both start and completed
+    exist (e.g. Revolut Started Date vs Completed Date). Fall back to explicit
+    date/statement_date, then started.
+    """
+    if not isinstance(row, dict):
+        return None, None, None
+    started = _parse_bank_statement_date(
+        str(
+            row.get('started_date')
+            or row.get('start_date')
+            or row.get('Started Date')
+            or row.get('started')
+            or ''
+        )
+    )
+    completed = _parse_bank_statement_date(
+        str(
+            row.get('completed_date')
+            or row.get('completion_date')
+            or row.get('Completed Date')
+            or row.get('completed')
+            or row.get('settled_date')
+            or ''
+        )
+    )
+    explicit = _parse_bank_statement_date(
+        str(row.get('date') or row.get('statement_date') or '')
+    )
+    if completed is not None:
+        primary = completed
+    elif explicit is not None:
+        primary = explicit
+    else:
+        primary = started
+    return primary, started, completed
 
 
 def _strip_llm_markdown_fence(s: str) -> str:
@@ -947,7 +1003,8 @@ def _extract_spending_transactions_llm(statement_text: str, period_hint: str | N
 
     system = (
         'You extract ALL individual bank transactions from the statement text into structured JSON. '
-        'Return only valid JSON as {"transactions":[{"date":"YYYY-MM-DD","description":"string","amount":number,'
+        'Return only valid JSON as {"transactions":[{"date":"YYYY-MM-DD","started_date":"YYYY-MM-DD"|null,'
+        '"completed_date":"YYYY-MM-DD"|null,"description":"string","amount":number,'
         '"direction":"incoming|outgoing","money_in":number|null,"money_out":number|null}]}. '
         'Rules: (1) amount is always a positive absolute number (same as the money in or money out value for that row). '
         '(2) Many statements use TWO columns: Paid in / Money in / Credits vs Paid out / Money out / Debits. '
@@ -958,7 +1015,11 @@ def _extract_spending_transactions_llm(statement_text: str, period_hint: str | N
         '(4) Be exhaustive: include every posted transaction line. Do not merge rows; do not omit small items. '
         '(5) Skip only running balances, headers, page numbers, and non-transaction summaries. '
         '(6) Use ISO dates YYYY-MM-DD. If the statement shows DD/MM/YYYY, convert to ISO. '
-        '(7) Lines beginning with LINE_HINT are layout hints — use them to fill money_in/money_out and direction correctly.'
+        '(7) Lines beginning with LINE_HINT are layout hints — use them to fill money_in/money_out and direction correctly. '
+        '(8) When a statement has both a start/started date and a completed/settled date (e.g. Revolut '
+        '"Started Date" and "Completed Date"), set started_date and completed_date accordingly, and set '
+        '"date" to the completed/settled date. If only one date exists, set date to that value and leave '
+        'started_date/completed_date null.'
     )
     user_msg = 'Bank statement text:\n\n' + text
     if period_hint:
@@ -1376,7 +1437,7 @@ def _normalize_spending_transactions(raw_list: list) -> list:
     for row in raw_list:
         if not isinstance(row, dict):
             continue
-        d = _parse_bank_statement_date(str(row.get('date') or row.get('statement_date') or ''))
+        d, started, completed = _resolve_spending_transaction_dates(row)
         if d is None:
             continue
         desc = str(row.get('description') or '').strip()[:500]
@@ -1394,7 +1455,7 @@ def _normalize_spending_transactions(raw_list: list) -> list:
             if amount <= 0:
                 continue
             direction = _normalize_spending_direction(row.get('direction'), desc, amount)
-        out.append({
+        item = {
             'id': str(uuid.uuid4()),
             'date': d.strftime('%Y-%m-%d'),
             'month': d.strftime('%Y-%m'),
@@ -1404,7 +1465,13 @@ def _normalize_spending_transactions(raw_list: list) -> list:
             'category': None,
             'confidence': None,
             'rationale': '',
-        })
+            'date_boundary': False,
+        }
+        if started is not None:
+            item['started_date'] = started.strftime('%Y-%m-%d')
+        if completed is not None:
+            item['completed_date'] = completed.strftime('%Y-%m-%d')
+        out.append(item)
     out.sort(key=lambda x: (x['date'], x['description']))
     return out
 
@@ -5359,7 +5426,7 @@ def _spending_statement_preview_finalize(
 ) -> dict:
     rows = _normalize_spending_transactions(raw_rows)
     before_ct = len(rows)
-    rows, dropped_outside = _filter_spending_rows_by_period(
+    rows, dropped_outside, boundary_count = _filter_spending_rows_by_period(
         rows, period['period_start_date'], period['period_end_date']
     )
     direction_stats = _reconcile_spending_directions(rows, direction_hints)
@@ -5392,6 +5459,7 @@ def _spending_statement_preview_finalize(
         'total_rows': len(rows),
         'raw_extraction_count': before_ct,
         'filtered_out_count': dropped_outside,
+        'date_boundary_count': boundary_count,
         'incoming_total': incoming_total,
         'outgoing_total': outgoing_total,
         'net': round(incoming_total - outgoing_total, 2),
@@ -5430,8 +5498,10 @@ def _spending_statement_preview_payload(
         save_data(data)
 
     period_hint = (
-        f'Prefer transactions that fall on or between {period["period_start"]} and {period["period_end"]} inclusive. '
-        f'When in doubt, include the row and use its statement date for the "date" field.'
+        f'Prefer transactions whose completed/settled date (or sole statement date) falls on or between '
+        f'{period["period_start"]} and {period["period_end"]} inclusive. '
+        f'When a row has both started and completed dates, always set date=completed_date even if started_date '
+        f'is outside that range — still include the row. When in doubt, include the row.'
     )
     raw_rows = None
     extraction_meta = None
@@ -6908,8 +6978,10 @@ def spending_statement_preview_stream():
         text, truncated_text, direction_hints, pipeline = prep
 
         period_hint = (
-            f'Prefer transactions that fall on or between {period["period_start"]} and {period["period_end"]} inclusive. '
-            f'When in doubt, include the row and use its statement date for the "date" field.'
+            f'Prefer transactions whose completed/settled date (or sole statement date) falls on or between '
+            f'{period["period_start"]} and {period["period_end"]} inclusive. '
+            f'When a row has both started and completed dates, always set date=completed_date even if started_date '
+            f'is outside that range — still include the row. When in doubt, include the row.'
         )
 
         yield emit({'type': 'progress', 'step': 'load_profile', 'message': 'Loading your spending profile…'})
