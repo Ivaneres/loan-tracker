@@ -780,6 +780,13 @@ body.home-page {
     box-sizing: border-box;
 }
 
+/* Same box for month/date/text so the Source column lines up with period fields. */
+.import-fields .import-field > input.spending-control {
+    height: 2.75rem;
+    min-height: 2.75rem;
+    line-height: 1.25;
+}
+
 .import-reset {
     align-self: stretch;
     text-align: center;
@@ -800,7 +807,9 @@ body.home-page {
 @media (min-width: 640px) {
     .import-fields {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        align-items: end;
+        /* Top-align so fields with different heights (e.g. Source + hint)
+           keep labels/inputs on the same row as siblings. */
+        align-items: start;
     }
 
     .import-reset {
