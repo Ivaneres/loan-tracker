@@ -1409,14 +1409,26 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.dataset.category = tx.category || '';
             tr.dataset.rationale = tx.rationale || '';
             tr.dataset.confidence = tx.confidence == null ? '' : String(tx.confidence);
+            if (tx.started_date) tr.dataset.startedDate = tx.started_date;
+            if (tx.completed_date) tr.dataset.completedDate = tx.completed_date;
             const isDup = tx.preview_duplicate === true;
+            const isBoundary = tx.date_boundary === true;
             if (isDup) tr.classList.add('spending-preview-row-duplicate');
+            if (isBoundary) tr.classList.add('spending-preview-row-boundary');
             const dupReason = (tx.preview_duplicate_reason && String(tx.preview_duplicate_reason)) || '';
             const dupCell = isDup
                 ? `<span class="preview-duplicate-pill" data-reason="${escapeHtml(dupReason)}">${
                       dupReason === 'ledger' ? 'Already in ledger' : 'Same as row in file'
                   }</span>`
                 : '<span class="text-gray-300">—</span>';
+
+            const startedLabel = tx.started_date ? String(tx.started_date) : '';
+            const boundaryCell = isBoundary
+                ? `<span class="preview-boundary-pill" title="Started outside the selected range; ledger date uses completed/settled date">Started ${escapeHtml(startedLabel || 'outside range')}</span>`
+                : '';
+            const dateCell = boundaryCell
+                ? `<div class="preview-date-stack"><span class="preview-date-primary">${escapeHtml(String(tx.date || ''))}</span>${boundaryCell}</div>`
+                : escapeHtml(String(tx.date || ''));
 
             const rec = tx.reconciliation || {};
             const transferCell =
@@ -1429,12 +1441,13 @@ document.addEventListener('DOMContentLoaded', () => {
                               : ''
                       }</span>`
                     : '<span class="text-gray-500">Unpaired</span>';
+            // Duplicates stay unchecked; boundary rows are included by default.
             const includeChecked = !isDup;
             tr.innerHTML = `
                 <td class="px-3 py-2"><input type="checkbox" class="preview-include" ${includeChecked ? 'checked' : ''}></td>
                 <td class="px-3 py-2 align-top preview-duplicate-cell text-sm">${dupCell}</td>
-                <td class="px-3 py-2 whitespace-nowrap">${tx.date}</td>
-                <td class="px-3 py-2">${tx.description}</td>
+                <td class="px-3 py-2 align-top whitespace-nowrap">${dateCell}</td>
+                <td class="px-3 py-2">${escapeHtml(String(tx.description || ''))}</td>
                 <td class="px-3 py-2 whitespace-nowrap">
                     <select class="preview-direction border border-gray-300 rounded px-2 py-1 bg-white text-sm">
                         <option value="outgoing" ${tx.direction === 'outgoing' ? 'selected' : ''}>Outgoing</option>
@@ -1479,6 +1492,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (summary.filtered_out_count != null && summary.filtered_out_count > 0) {
                 extra.push(`Dropped outside range: ${summary.filtered_out_count}`);
+            }
+            if (summary.date_boundary_count != null && summary.date_boundary_count > 0) {
+                extra.push(
+                    `Boundary dates: ${summary.date_boundary_count} (started outside range; included — uncheck to skip)`
+                );
             }
             if (summary.raw_extraction_count != null && summary.total_rows != null) {
                 extra.push(`Kept ${summary.total_rows} / ${summary.raw_extraction_count} extracted`);

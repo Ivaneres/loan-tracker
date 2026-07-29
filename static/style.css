@@ -1514,6 +1514,35 @@ span.preview-duplicate-pill[data-reason="ledger"] {
     border-color: #93c5fd;
 }
 
+/* Started outside period, completed/settled date inside (e.g. Revolut) */
+tr.spending-preview-row-boundary:not(.spending-preview-row-duplicate) td {
+    background-color: #f0fdfa;
+}
+.preview-date-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+}
+.preview-date-primary {
+    white-space: nowrap;
+}
+span.preview-boundary-pill {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #115e59;
+    background: #ccfbf1;
+    border: 1px solid #5eead4;
+    border-radius: 0.25rem;
+    padding: 0.12rem 0.35rem;
+    white-space: nowrap;
+    max-width: 14rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 #insight-transactions-tbody tr.spending-insight-tx-muted {
     color: #6b7280;
     background: #f3f4f6;
