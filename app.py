@@ -4540,6 +4540,82 @@ def _get_openai_client():
     return OpenAI(**kwargs)
 
 
+def _is_spreadsheet_filename(name: str) -> bool:
+    """True for Excel workbook extensions we can convert (or reject with a clear error)."""
+    n = (name or '').lower()
+    return n.endswith('.xlsx') or n.endswith('.xlsm') or n.endswith('.xls')
+
+
+def _csv_escape_cell(value: str) -> str:
+    if any(ch in value for ch in ',"\n\r'):
+        return '"' + value.replace('"', '""') + '"'
+    return value
+
+
+def _spreadsheet_cell_to_str(value) -> str:
+    if value is None:
+        return ''
+    if isinstance(value, datetime):
+        if value.hour or value.minute or value.second or value.microsecond:
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+        return value.strftime('%Y-%m-%d')
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return 'TRUE' if value else 'FALSE'
+    if isinstance(value, float):
+        # Avoid 4.800000000000001 noise for money-like values.
+        if value == int(value) and abs(value) < 1e15:
+            return str(int(value))
+        return f'{value:.10g}'
+    return str(value)
+
+
+def _extract_spreadsheet_text(raw: bytes, name: str = '') -> str:
+    """
+    Convert Excel (.xlsx / .xlsm) workbook bytes to CSV-like text for the statement LLM pipeline.
+    Old binary .xls is rejected with a clear message (export as .xlsx or CSV instead).
+    """
+    n = (name or '').lower()
+    if n.endswith('.xls') and not (n.endswith('.xlsx') or n.endswith('.xlsm')):
+        raise ValueError(
+            'Old .xls Excel format is not supported. Re-export as .xlsx or CSV from your bank (e.g. Revolut).'
+        )
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:  # pragma: no cover
+        raise RuntimeError('Excel (.xlsx) support requires the openpyxl package.') from e
+
+    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    try:
+        sheet_blocks: list[str] = []
+        for sheet in wb.worksheets:
+            rows_out: list[str] = []
+            for row in sheet.iter_rows(values_only=True):
+                if row is None:
+                    continue
+                cells = [_spreadsheet_cell_to_str(c) for c in row]
+                if not any(c.strip() for c in cells):
+                    continue
+                # Drop trailing empty cells so sparse Excel rows stay compact.
+                while cells and not cells[-1].strip():
+                    cells.pop()
+                rows_out.append(','.join(_csv_escape_cell(c) for c in cells))
+            if not rows_out:
+                continue
+            block = '\n'.join(rows_out)
+            if len(wb.worksheets) > 1:
+                sheet_blocks.append(f'--- Sheet: {sheet.title} ---\n{block}')
+            else:
+                sheet_blocks.append(block)
+        text = '\n\n'.join(sheet_blocks).strip()
+        if not text:
+            raise ValueError('Excel file has no readable rows.')
+        return text
+    finally:
+        wb.close()
+
+
 def _extract_pdf_text(raw: bytes, *, meta_out: dict | None = None) -> str:
     """
     Bank PDFs are often table-heavy; pypdf alone loses column order.
@@ -5329,7 +5405,16 @@ def _spending_pipeline_dict_pdf(pdf_parts: dict, hints: list, raw_len: int, comb
 
 
 def _spending_pipeline_dict_text(name: str, text: str, raw_len: int) -> dict:
-    src_fmt = 'csv' if name.endswith('.csv') else 'text'
+    n = (name or '').lower()
+    if n.endswith('.xlsx') or n.endswith('.xlsm'):
+        src_fmt = 'xlsx'
+        note = 'Converted Excel workbook to CSV-like text; no PDF layout or column-hint pass.'
+    elif n.endswith('.csv'):
+        src_fmt = 'csv'
+        note = 'Decoded as UTF-8 text; no PDF layout or column-hint pass.'
+    else:
+        src_fmt = 'text'
+        note = 'Decoded as UTF-8 text; no PDF layout or column-hint pass.'
     return {
         'source_format': src_fmt,
         'lengths': {
@@ -5343,7 +5428,7 @@ def _spending_pipeline_dict_text(name: str, text: str, raw_len: int) -> dict:
             'column_hints_block': _pipeline_text_preview('', SPENDING_PIPELINE_HINTS_PREVIEW),
         },
         'direction_hints': {'count': 0, 'sample': []},
-        'note': 'Decoded as UTF-8 text; no PDF layout or column-hint pass.',
+        'note': note,
     }
 
 
@@ -5354,13 +5439,16 @@ def _spending_text_hints_pipeline_from_raw(name: str, raw: bytes) -> tuple[str, 
         hints = _build_spending_direction_hints(raw)
         pipeline = _spending_pipeline_dict_pdf(pdf_parts, hints, len(raw), text)
         return text, hints, pipeline
+    if _is_spreadsheet_filename(name):
+        text = _extract_spreadsheet_text(raw, name)
+        return text, [], _spending_pipeline_dict_text(name, text, len(raw))
     text = raw.decode('utf-8', errors='replace')
     return text, [], _spending_pipeline_dict_text(name, text, len(raw))
 
 
 def _finalize_spending_upload(text: str, hints: list, pipeline: dict | None) -> tuple[tuple | None, str | None]:
     if not text or len(re.sub(r'\s+', '', text)) < 40:
-        return None, 'Extracted text is empty or too short. Try exporting CSV from your bank or another PDF.'
+        return None, 'Extracted text is empty or too short. Try exporting CSV or Excel (.xlsx) from your bank or another PDF.'
     truncated = False
     if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
         text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
@@ -5397,6 +5485,10 @@ def _iter_prepare_spending_raw(name: str, raw: bytes):
             yield {'type': 'progress', 'step': 'pdf_direction_hints', 'message': 'Deriving credit/debit hints from geometry…'}
             hints = _build_spending_direction_hints(raw)
             pipeline = _spending_pipeline_dict_pdf(pdf_parts, hints, len(raw), text)
+        elif _is_spreadsheet_filename(name):
+            yield {'type': 'progress', 'step': 'decode_spreadsheet', 'message': 'Converting Excel spreadsheet…'}
+            text = _extract_spreadsheet_text(raw, name)
+            pipeline = _spending_pipeline_dict_text(name, text, len(raw))
         else:
             yield {'type': 'progress', 'step': 'decode_text', 'message': 'Decoding text or CSV…'}
             text = raw.decode('utf-8', errors='replace')
@@ -5545,6 +5637,8 @@ def _prepare_statement_text_from_upload(*, for_spending: bool = False):
             text, hints, pipeline = _spending_text_hints_pipeline_from_raw(name, raw)
         elif name.endswith('.pdf'):
             text = _extract_pdf_text(raw)
+        elif _is_spreadsheet_filename(name):
+            text = _extract_spreadsheet_text(raw, name)
         else:
             text = raw.decode('utf-8', errors='replace')
     except Exception as e:
@@ -5556,7 +5650,7 @@ def _prepare_statement_text_from_upload(*, for_spending: bool = False):
             return None, ferr
         return fin, None
     if not text or len(re.sub(r'\s+', '', text)) < 40:
-        return None, 'Extracted text is empty or too short. Try exporting CSV from your bank or another PDF.'
+        return None, 'Extracted text is empty or too short. Try exporting CSV or Excel (.xlsx) from your bank or another PDF.'
     truncated = False
     if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
         text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
@@ -6401,7 +6495,7 @@ def delete_recurring_payment(loan_id, payment_index):
 @login_required
 def statement_preview(loan_id):
     """
-    Upload a bank statement (PDF, CSV, or plain text). Text is sent to OpenAI for extraction.
+    Upload a bank statement (PDF, CSV, Excel .xlsx, or plain text). Text is sent to OpenAI for extraction.
     Env: OPENAI_API_KEY (required), OPENAI_MODEL (default gpt-4o-mini), OPENAI_BASE_URL (optional).
     """
     data = load_data()
