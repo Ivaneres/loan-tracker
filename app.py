@@ -708,6 +708,114 @@ def _report_month_for_spending_tx(t: dict) -> str:
     return str(t.get('report_month') or t.get('month') or '').strip()
 
 
+def _parse_optional_amount(raw) -> float | None:
+    """Parse a query amount; blank/invalid → None (ignore filter)."""
+    if raw is None:
+        return None
+    s = str(raw).strip().replace(',', '')
+    if not s:
+        return None
+    try:
+        return float(s)
+    except (TypeError, ValueError):
+        return None
+
+
+def _spending_tx_search_haystack(tx: dict) -> str:
+    """Lowercase blob for free-text `q` matching across common ledger fields."""
+    parts = [
+        str(tx.get('date') or ''),
+        str(tx.get('description') or ''),
+        str(tx.get('category') or ''),
+        str(tx.get('bank_source') or ''),
+        str(tx.get('direction') or ''),
+        str(tx.get('source') or ''),
+        str(_report_month_for_spending_tx(tx) or ''),
+    ]
+    try:
+        amt = float(tx.get('amount'))
+        parts.append(f'{amt:.2f}')
+        parts.append(str(tx.get('amount')))
+    except (TypeError, ValueError):
+        parts.append(str(tx.get('amount') or ''))
+    return ' '.join(parts).lower()
+
+
+def _search_spending_transactions(
+    transactions: list,
+    *,
+    q: str = '',
+    date_from: str | None = None,
+    date_to: str | None = None,
+    category: str | None = None,
+    direction: str | None = None,
+    bank_source: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+) -> list[dict]:
+    """
+    Filter the flat spending ledger (all months). Free-text `q` is a case-insensitive
+    substring over description, date, category, bank_source, direction, source, month, amount.
+    Results are newest-first by ledger date, then description, then id.
+    """
+    q_norm = (q or '').strip().lower()
+    d_from = _parse_iso_date(date_from or '')
+    d_to = _parse_iso_date(date_to or '')
+    cat = (category or '').strip().lower()
+    direction_norm = (direction or '').strip().lower()
+    if direction_norm and direction_norm not in ('incoming', 'outgoing'):
+        direction_norm = ''
+    src_raw = (bank_source or '').strip()
+    src_none = src_raw == '__none__'
+    src_norm = '' if src_none else src_raw.casefold()
+
+    matched: list[dict] = []
+    for tx in transactions or []:
+        if not isinstance(tx, dict):
+            continue
+        tx_date = _parse_iso_date(str(tx.get('date') or ''))
+        if d_from is not None and (tx_date is None or tx_date < d_from):
+            continue
+        if d_to is not None and (tx_date is None or tx_date > d_to):
+            continue
+        if direction_norm and str(tx.get('direction') or '').lower() != direction_norm:
+            continue
+        if cat:
+            tx_cat = str(tx.get('category') or 'unclassified').strip().lower() or 'unclassified'
+            if tx_cat != cat:
+                continue
+        if src_none:
+            if _normalize_bank_source(tx.get('bank_source')):
+                continue
+        elif src_norm:
+            label = _normalize_bank_source(tx.get('bank_source'))
+            if not label or label.casefold() != src_norm:
+                continue
+        try:
+            amount = float(tx.get('amount'))
+        except (TypeError, ValueError):
+            amount = None
+        if min_amount is not None:
+            if amount is None or amount < min_amount:
+                continue
+        if max_amount is not None:
+            if amount is None or amount > max_amount:
+                continue
+        if q_norm and q_norm not in _spending_tx_search_haystack(tx):
+            continue
+        matched.append(tx)
+
+    matched.sort(
+        key=lambda t: (
+            str(t.get('date') or ''),
+            str(t.get('description') or ''),
+            str(t.get('id') or ''),
+        ),
+        reverse=True,
+    )
+    return matched
+
+
 def _first_day_of_month(month_key: str) -> date | None:
     mk = (month_key or '').strip()
     if len(mk) == 7:
@@ -7083,6 +7191,23 @@ def daily_budget_tab():
         daily_modes=sorted(DAILY_BUDGET_MODES),
     )
 
+
+@app.route('/spending/search')
+@login_required
+def spending_search_tab():
+    """Global transaction search across all months (manual + statement lines)."""
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    return render_template(
+        'spending_search.html',
+        username=session.get('username'),
+        spending_categories=SPENDING_ALLOWED_CATEGORIES,
+        known_bank_sources=_collect_bank_sources(spending),
+    )
+
+
 @app.route('/loan/<loan_id>')
 @login_required
 def loan_details(loan_id):
@@ -8385,6 +8510,96 @@ def spending_months():
         save_data(data)
     months = sorted((spending.get('monthly_insights') or {}).keys(), reverse=True)
     return jsonify({'months': months})
+
+
+@app.route('/api/spending/transactions/search', methods=['GET'])
+@login_required
+def spending_transactions_search():
+    """
+    Search the user's full spending ledger (all months).
+    Query params: q, date_from, date_to, category, direction, source, min_amount, max_amount,
+    limit (default 100, max 500), offset (default 0).
+    Requires at least one of q / date_from / date_to / category / direction / source /
+    min_amount / max_amount — otherwise returns an empty result set (prompt to search).
+    """
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+
+    q = str(request.args.get('q') or '').strip()
+    date_from = str(request.args.get('date_from') or request.args.get('from') or '').strip()[:10]
+    date_to = str(request.args.get('date_to') or request.args.get('to') or '').strip()[:10]
+    category = str(request.args.get('category') or '').strip().lower()
+    direction = str(request.args.get('direction') or '').strip().lower()
+    bank_source = str(request.args.get('source') or request.args.get('bank_source') or '').strip()
+    min_amount = _parse_optional_amount(request.args.get('min_amount'))
+    max_amount = _parse_optional_amount(request.args.get('max_amount'))
+
+    try:
+        limit = int(request.args.get('limit') or 100)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 500))
+    try:
+        offset = int(request.args.get('offset') or 0)
+    except (TypeError, ValueError):
+        offset = 0
+    offset = max(0, offset)
+
+    has_criterion = bool(
+        q
+        or date_from
+        or date_to
+        or category
+        or direction in ('incoming', 'outgoing')
+        or bank_source
+        or min_amount is not None
+        or max_amount is not None
+    )
+    filters = {
+        'q': q,
+        'date_from': date_from or None,
+        'date_to': date_to or None,
+        'category': category or None,
+        'direction': direction if direction in ('incoming', 'outgoing') else None,
+        'source': bank_source or None,
+        'min_amount': min_amount,
+        'max_amount': max_amount,
+    }
+    if not has_criterion:
+        return jsonify({
+            'transactions': [],
+            'total': 0,
+            'limit': limit,
+            'offset': offset,
+            'searched': False,
+            'filters': filters,
+            'known_bank_sources': _collect_bank_sources(spending),
+        })
+
+    matched = _search_spending_transactions(
+        spending.get('transactions') or [],
+        q=q,
+        date_from=date_from or None,
+        date_to=date_to or None,
+        category=category or None,
+        direction=direction or None,
+        bank_source=bank_source or None,
+        min_amount=min_amount,
+        max_amount=max_amount,
+    )
+    total = len(matched)
+    page = matched[offset : offset + limit]
+    return jsonify({
+        'transactions': page,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'searched': True,
+        'filters': filters,
+        'known_bank_sources': _collect_bank_sources(spending),
+    })
 
 
 @app.route('/api/spending/metrics-trend', methods=['GET'])

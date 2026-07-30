@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search transactions</title>
+    {% include 'partials/fonts.html' %}
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ asset_url('style.css') }}">
+</head>
+<body class="app-page spending-page search-page min-h-screen">
+    <div class="app-shell">
+        {% with active='search' %}{% include 'partials/app_header.html' %}{% endwith %}
+
+        <section class="spending-section card search-section mb-8" aria-labelledby="search-heading">
+            <div class="mb-4">
+                <h2 class="spending-h2" id="search-heading">Search transactions</h2>
+                <p class="spending-sub text-sm">Find any imported or manual line across all months.</p>
+            </div>
+
+            <form id="tx-search-form" class="search-form" role="search" autocomplete="off">
+                <label class="search-q-wrap">
+                    <span class="sr-only">Search query</span>
+                    <input
+                        id="tx-search-q"
+                        class="search-q-input"
+                        type="search"
+                        name="q"
+                        inputmode="search"
+                        placeholder="Description, amount, category, bank…"
+                        title="Matches description, date, category, bank source, direction, and amount"
+                        autofocus
+                    />
+                </label>
+
+                <div class="search-filters" id="tx-search-filters">
+                    <div class="search-filter-field">
+                        <label for="tx-search-date-from" class="import-label">From</label>
+                        <input id="tx-search-date-from" class="spending-control" type="date" name="date_from" />
+                    </div>
+                    <div class="search-filter-field">
+                        <label for="tx-search-date-to" class="import-label">To</label>
+                        <input id="tx-search-date-to" class="spending-control" type="date" name="date_to" />
+                    </div>
+                    <div class="search-filter-field">
+                        <label for="tx-search-direction" class="import-label">Direction</label>
+                        <select id="tx-search-direction" class="spending-control" name="direction">
+                            <option value="">All</option>
+                            <option value="outgoing">Outgoing</option>
+                            <option value="incoming">Incoming</option>
+                        </select>
+                    </div>
+                    <div class="search-filter-field">
+                        <label for="tx-search-category" class="import-label">Category</label>
+                        <select id="tx-search-category" class="spending-control" name="category">
+                            <option value="">All</option>
+                            {% for cat in spending_categories %}
+                            <option value="{{ cat }}">{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="search-filter-field">
+                        <label for="tx-search-source" class="import-label">Source</label>
+                        <select id="tx-search-source" class="spending-control" name="source">
+                            <option value="">All</option>
+                            {% for src in known_bank_sources %}
+                            <option value="{{ src }}">{{ src }}</option>
+                            {% endfor %}
+                            <option value="__none__">(none)</option>
+                        </select>
+                    </div>
+                    <div class="search-filter-field">
+                        <label for="tx-search-min-amount" class="import-label">Min £</label>
+                        <input id="tx-search-min-amount" class="spending-control" type="text" inputmode="decimal" name="min_amount" placeholder="0.00" autocomplete="off" />
+                    </div>
+                    <div class="search-filter-field">
+                        <label for="tx-search-max-amount" class="import-label">Max £</label>
+                        <input id="tx-search-max-amount" class="spending-control" type="text" inputmode="decimal" name="max_amount" placeholder="0.00" autocomplete="off" />
+                    </div>
+                </div>
+
+                <div class="search-form-actions">
+                    <button type="submit" class="spending-btn spending-btn--primary" id="tx-search-submit">Search</button>
+                    <button type="button" class="spending-btn spending-btn--muted" id="tx-search-clear">Clear</button>
+                </div>
+            </form>
+
+            <p id="tx-search-status" class="spending-hint text-sm mt-4" role="status" aria-live="polite">Type a query or set a filter, then search.</p>
+            <p id="tx-search-rollup" class="insight-tx-amount-rollup text-xs mt-1 hidden" role="status" aria-live="polite"></p>
+
+            <div class="spending-tx-scroll mt-4">
+                <table class="spending-tx-table min-w-full text-sm" id="tx-search-results-table" aria-label="Search results">
+                    <thead>
+                        <tr class="text-left text-xs uppercase tracking-wide" style="color: var(--muted);">
+                            <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Date</th>
+                            <th scope="col" class="px-3 py-2.5 min-w-[8rem]">Description</th>
+                            <th scope="col" class="px-3 py-2.5 min-w-[6rem]">Source</th>
+                            <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Direction</th>
+                            <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Amount (£)</th>
+                            <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Category</th>
+                            <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Month</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tx-search-tbody" class="spending-tx-tbody"></tbody>
+                </table>
+            </div>
+
+            <div class="search-pager mt-3 hidden" id="tx-search-pager">
+                <button type="button" class="spending-btn spending-btn--muted text-sm" id="tx-search-prev" disabled>Previous</button>
+                <span id="tx-search-page-label" class="spending-hint text-sm"></span>
+                <button type="button" class="spending-btn spending-btn--muted text-sm" id="tx-search-next" disabled>Next</button>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        window.SPENDING_CATEGORIES = {{ spending_categories | tojson }};
+        window.KNOWN_BANK_SOURCES = {{ known_bank_sources | tojson }};
+    </script>
+    <script src="{{ asset_url('spending_search.js') }}"></script>
+</body>
+</html>

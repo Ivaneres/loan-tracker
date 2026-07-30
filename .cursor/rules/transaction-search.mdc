@@ -1,0 +1,37 @@
+---
+description: Global transaction search across all spending months
+alwaysApply: false
+---
+
+# Global transaction search
+
+Find any spending ledger line (statement + manual) across **all months** — not limited to the Monthly page’s selected month.
+
+## Routes
+
+- Page: `GET /spending/search` → `templates/spending_search.html` + `static/spending_search.js`
+- API: `GET /api/spending/transactions/search`
+- Nav: **Search** tab (`active='search'`) in `templates/partials/app_nav.html`
+
+## API query params
+
+- `q` — case-insensitive substring over description, date, category, bank_source, direction, source, report month, amount
+- `date_from` / `date_to` (aliases `from` / `to`) — inclusive ISO dates
+- `category`, `direction` (`incoming`|`outgoing`), `source` / `bank_source` (use `__none__` for blank)
+- `min_amount`, `max_amount`
+- `limit` (default 100, max 500), `offset`
+
+If **no** criterion is set, response is `{ searched: false, transactions: [], total: 0 }` (UI prompts to search).
+
+Matching helpers: `_search_spending_transactions`, `_spending_tx_search_haystack` in `app.py`. Results newest-first by ledger `date`.
+
+## UI contract
+
+- Debounced search as the user types; filters trigger immediately on change
+- URL syncs query params for bookmarking/share
+- Result rows link to Monthly via `/spending?month=YYYY-MM`
+- Page amount rollup for the current result page; pager when `total > 100`
+
+## Tests
+
+`tests/test_transaction_search.py` — helper unit tests, API, page/nav markup.
