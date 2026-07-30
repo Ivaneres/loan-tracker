@@ -4345,6 +4345,56 @@ body.search-page {
     display: none;
 }
 
+.search-muted-section {
+    padding-top: 0.35rem;
+    border-top: 1px dashed rgba(15, 40, 34, 0.14);
+}
+
+.search-muted-section.hidden {
+    display: none;
+}
+
+.search-muted-heading {
+    margin: 0;
+    font-family: var(--font-display, inherit);
+    font-size: 0.95rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: #6b7280;
+}
+
+/* Desktop: muted/excluded rows are clearly grayed */
+body.search-page .search-tx-table--muted {
+    opacity: 0.92;
+}
+
+body.search-page .search-tx-table--muted tr.search-tx-row--muted,
+body.search-page #tx-search-muted-tbody tr.search-tx-row--muted {
+    color: #6b7280;
+    background: #f3f4f6;
+}
+
+body.search-page .search-tx-table--muted tr.search-tx-row--muted .spending-insight-tx-amount,
+body.search-page #tx-search-muted-tbody tr.search-tx-row--muted .spending-insight-tx-amount {
+    color: #6b7280;
+}
+
+body.search-page .search-tx-muted-badge {
+    display: inline-block;
+    margin-left: 0.45rem;
+    padding: 0.08rem 0.4rem;
+    border-radius: 0.3rem;
+    border: 1px solid #d1d5db;
+    background: #e5e7eb;
+    color: #4b5563;
+    font-size: 0.65rem;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
 /* Desktop: short mobile date chip stays hidden; toggle column too */
 .search-tx-toggle,
 .search-tx-toggle-col,
@@ -4437,7 +4487,34 @@ body.search-page {
     }
 
     body.search-page .search-tx-tbody tr.search-tx-row--muted {
-        opacity: 0.72;
+        opacity: 0.78;
+        color: #6b7280;
+        background: #f3f4f6 !important;
+    }
+
+    body.search-page .search-tx-tbody tr.search-tx-row--muted .search-tx-amount,
+    body.search-page .search-tx-tbody tr.search-tx-row--muted .search-tx-ref,
+    body.search-page .search-tx-tbody tr.search-tx-row--muted .search-tx-date-short {
+        color: #6b7280;
+    }
+
+    body.search-page .search-tx-tbody tr.search-tx-row--muted:hover,
+    body.search-page .search-tx-tbody tr.search-tx-row--muted:focus-visible {
+        background: #e5e7eb !important;
+    }
+
+    body.search-page .search-tx-muted-badge {
+        display: none;
+    }
+
+    body.search-page .search-tx-row--open .search-tx-muted-badge {
+        display: inline-block;
+        margin: 0.35rem 0 0;
+    }
+
+    body.search-page .search-muted-section {
+        margin-top: 1.15rem;
+        padding-top: 0.85rem;
     }
 
     body.search-page .search-tx-tbody tr.search-tx-row--open {
