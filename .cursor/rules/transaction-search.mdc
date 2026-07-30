@@ -31,6 +31,7 @@ Matching helpers: `_search_spending_transactions`, `_spending_tx_search_haystack
 - URL syncs query params for bookmarking/share
 - Result rows link to Monthly via `/spending?month=YYYY-MM`
 - Page amount rollup for the current result page; pager when `total > 100`
+- **Mobile (≤640px):** results render as stacked cards (`.search-tx-row` grid) — not a horizontally cramped table. Desktop keeps the wide table.
 
 ## Tests
 

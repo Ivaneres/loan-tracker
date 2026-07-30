@@ -204,8 +204,12 @@ class TestTransactionSearchPage(unittest.TestCase):
     def test_assets_present(self):
         self.assertIn('grid-template-columns: repeat(5, minmax(0, 1fr))', STYLE)
         self.assertIn('.search-q-input', STYLE)
+        self.assertIn('search-tx-row', STYLE)
+        self.assertIn('body.search-page .search-tx-tbody tr.search-tx-row', STYLE)
         self.assertIn('/api/spending/transactions/search', SEARCH_JS)
         self.assertIn('tx-search-tbody', SEARCH_JS)
+        self.assertIn('search-tx-row', SEARCH_JS)
+        self.assertIn('data-label', SEARCH_JS)
 
 
 if __name__ == '__main__':

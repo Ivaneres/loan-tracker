@@ -4314,6 +4314,14 @@ body.search-page {
     min-width: 0;
 }
 
+.search-filter-field--min {
+    grid-column: auto;
+}
+
+.search-filter-field--max {
+    grid-column: auto;
+}
+
 .search-filter-field .spending-control {
     width: 100%;
     min-width: 0;
@@ -4337,6 +4345,7 @@ body.search-page {
     display: none;
 }
 
+/* Mobile: stacked result cards instead of a cramped wide table */
 @media (max-width: 640px) {
     .search-q-input {
         font-size: 1rem;
@@ -4345,6 +4354,194 @@ body.search-page {
 
     .search-filters {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.75rem;
+    }
+
+    .search-filter-field .import-label {
+        font-size: 0.72rem;
+    }
+
+    body.search-page .search-tx-scroll {
+        overflow-x: visible;
+        margin-left: -0.15rem;
+        margin-right: -0.15rem;
+    }
+
+    /* Override monthly table mobile rule (display:table + max-content width). */
+    body.search-page .search-tx-scroll > table.search-tx-table {
+        display: block;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    body.search-page .search-tx-thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+
+    body.search-page .search-tx-tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+    }
+
+    body.search-page .search-tx-tbody tr.search-tx-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "desc amount"
+            "date dir"
+            "cat cat"
+            "source month";
+        column-gap: 0.85rem;
+        row-gap: 0.55rem;
+        align-items: baseline;
+        margin: 0;
+        padding: 1.05rem 1.15rem;
+        border: 1px solid var(--line) !important;
+        border-radius: 1rem;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 8px 20px rgba(15, 40, 34, 0.045);
+    }
+
+    body.search-page .search-tx-tbody tr.search-tx-row:nth-child(even) {
+        background: rgba(255, 255, 255, 0.92);
+    }
+
+    body.search-page .search-tx-tbody tr.search-tx-row:hover {
+        background: rgba(255, 255, 255, 0.97);
+    }
+
+    body.search-page .search-tx-tbody tr.search-tx-row--muted {
+        opacity: 0.72;
+    }
+
+    body.search-page .search-tx-tbody td {
+        border: 0;
+        padding: 0;
+        min-width: 0;
+        white-space: normal;
+        font-size: 0.92rem;
+        line-height: 1.4;
+        color: var(--ink);
+    }
+
+    body.search-page .search-tx-desc {
+        grid-area: desc;
+        font-family: var(--font-body, inherit);
+        font-size: 1.05rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        word-break: break-word;
+        padding-right: 0.35rem;
+    }
+
+    body.search-page .search-tx-amount {
+        grid-area: amount;
+        justify-self: end;
+        text-align: right;
+        font-size: 1.12rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+        white-space: nowrap;
+    }
+
+    body.search-page .search-tx-amount::before {
+        content: "£";
+        font-weight: 600;
+        margin-right: 0.05rem;
+        color: var(--muted);
+    }
+
+    body.search-page .search-tx-date {
+        grid-area: date;
+        color: var(--muted);
+        font-size: 0.86rem;
+        font-variant-numeric: tabular-nums;
+    }
+
+    body.search-page .search-tx-dir {
+        grid-area: dir;
+        justify-self: end;
+        text-align: right;
+        color: var(--muted);
+        font-size: 0.86rem;
+        text-transform: capitalize;
+    }
+
+    body.search-page .search-tx-cat {
+        grid-area: cat;
+        color: var(--muted);
+        font-size: 0.86rem;
+        text-transform: capitalize;
+        padding-top: 0.05rem;
+        border-top: 1px solid rgba(15, 40, 34, 0.06);
+        padding-top: 0.5rem;
+    }
+
+    body.search-page .search-tx-cat::before {
+        content: "Category ";
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        font-size: 0.68rem;
+        color: var(--muted);
+    }
+
+    body.search-page .search-tx-source {
+        grid-area: source;
+        font-size: 0.84rem;
+        color: var(--muted);
+        padding-top: 0.1rem;
+    }
+
+    body.search-page .search-tx-source::before {
+        content: attr(data-label) " ";
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        font-size: 0.68rem;
+    }
+
+    body.search-page .search-tx-month {
+        grid-area: month;
+        justify-self: end;
+        text-align: right;
+        font-size: 0.86rem;
+        padding-top: 0.1rem;
+    }
+
+    body.search-page .search-tx-month::before {
+        content: attr(data-label) " ";
+        color: var(--muted);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        font-size: 0.68rem;
+    }
+
+    .search-filters {
+        gap: 0.85rem 0.85rem;
+    }
+
+    .search-filter-field--source {
+        grid-column: 1 / -1;
+    }
+
+    .search-filter-field .spending-control {
+        min-height: 2.5rem;
+        padding-top: 0.45rem;
+        padding-bottom: 0.45rem;
     }
 }
+
 

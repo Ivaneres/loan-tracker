@@ -193,18 +193,19 @@
                         : '<span class="spending-muted">—</span>';
                 const muted =
                     (tx.internal_transfer && tx.transfer_pair_id) || tx.insights_excluded === true
-                        ? ' spending-insight-tx-muted'
+                        ? ' search-tx-row--muted spending-insight-tx-muted'
                         : '';
                 const amt = Number(tx.amount);
                 const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : escapeHtml(tx.amount);
-                return `<tr class="border-t${muted}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}">
-                    <td class="px-3 py-2 whitespace-nowrap">${escapeHtml(tx.date || '')}</td>
-                    <td class="px-3 py-2">${escapeHtml(tx.description || '')}</td>
-                    <td class="px-3 py-2">${src}</td>
-                    <td class="px-3 py-2 whitespace-nowrap">${escapeHtml(tx.direction || '')}</td>
-                    <td class="px-3 py-2 whitespace-nowrap spending-insight-tx-amount">${amtStr}</td>
-                    <td class="px-3 py-2 whitespace-nowrap">${cat}</td>
-                    <td class="px-3 py-2 whitespace-nowrap">${monthLink}</td>
+                const dir = String(tx.direction || '');
+                return `<tr class="search-tx-row border-t${muted}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}">
+                    <td class="search-tx-date px-3 py-2 whitespace-nowrap" data-label="Date">${escapeHtml(tx.date || '')}</td>
+                    <td class="search-tx-desc px-3 py-2" data-label="Description">${escapeHtml(tx.description || '')}</td>
+                    <td class="search-tx-source px-3 py-2" data-label="Source">${src}</td>
+                    <td class="search-tx-dir px-3 py-2 whitespace-nowrap" data-label="Direction">${escapeHtml(dir)}</td>
+                    <td class="search-tx-amount px-3 py-2 whitespace-nowrap spending-insight-tx-amount" data-label="Amount (£)">${amtStr}</td>
+                    <td class="search-tx-cat px-3 py-2 whitespace-nowrap" data-label="Category">${cat}</td>
+                    <td class="search-tx-month px-3 py-2 whitespace-nowrap" data-label="Month">${monthLink}</td>
                 </tr>`;
             })
             .join('');
