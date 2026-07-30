@@ -4403,7 +4403,7 @@ body.search-page {
     body.search-page .search-tx-tbody {
         display: flex;
         flex-direction: column;
-        gap: 0.55rem;
+        gap: 0.4rem;
     }
 
     body.search-page .search-tx-tbody tr.search-tx-row {
@@ -4412,15 +4412,15 @@ body.search-page {
         grid-template-areas:
             "desc amount toggle"
             "date date date";
-        column-gap: 0.55rem;
-        row-gap: 0.3rem;
+        column-gap: 0.45rem;
+        row-gap: 0.1rem;
         align-items: center;
         margin: 0;
-        padding: 0.85rem 0.95rem;
+        padding: 0.55rem 0.7rem;
         border: 1px solid var(--line) !important;
-        border-radius: 0.95rem;
+        border-radius: 0.8rem;
         background: rgba(255, 255, 255, 0.84);
-        box-shadow: 0 6px 16px rgba(15, 40, 34, 0.04);
+        box-shadow: 0 4px 12px rgba(15, 40, 34, 0.035);
         cursor: pointer;
         -webkit-tap-highlight-color: transparent;
         transition: background 0.15s ease, box-shadow 0.15s ease;
@@ -4449,8 +4449,8 @@ body.search-page {
             "cat cat cat"
             "source source source"
             "month month month";
-        row-gap: 0.45rem;
-        padding-bottom: 0.95rem;
+        row-gap: 0.35rem;
+        padding: 0.65rem 0.75rem 0.8rem;
         box-shadow: 0 10px 24px rgba(15, 40, 34, 0.07);
     }
 
@@ -4459,28 +4459,30 @@ body.search-page {
         padding: 0;
         min-width: 0;
         white-space: normal;
-        font-size: 0.92rem;
-        line-height: 1.35;
+        font-size: 0.9rem;
+        line-height: 1.25;
         color: var(--ink);
     }
 
     body.search-page .search-tx-desc {
         grid-area: desc;
-        font-size: 1rem;
+        font-size: 0.95rem;
         font-weight: 600;
         letter-spacing: -0.01em;
         word-break: break-word;
-        padding-right: 0.2rem;
+        padding-right: 0.15rem;
+        line-height: 1.25;
     }
 
     body.search-page .search-tx-amount {
         grid-area: amount;
         justify-self: end;
         text-align: right;
-        font-size: 1.05rem;
+        font-size: 0.98rem;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+        line-height: 1.25;
     }
 
     body.search-page .search-tx-amount::before {
@@ -4493,8 +4495,9 @@ body.search-page {
     body.search-page .search-tx-date {
         grid-area: date;
         color: var(--muted);
-        font-size: 0.82rem;
+        font-size: 0.75rem;
         font-variant-numeric: tabular-nums;
+        line-height: 1.2;
     }
 
     body.search-page .search-tx-toggle {
@@ -4502,8 +4505,8 @@ body.search-page {
         grid-area: toggle;
         align-items: center;
         justify-content: center;
-        width: 1.65rem;
-        height: 1.65rem;
+        width: 1.4rem;
+        height: 1.4rem;
         border-radius: 999px;
         background: rgba(15, 40, 34, 0.05);
         color: var(--muted);
