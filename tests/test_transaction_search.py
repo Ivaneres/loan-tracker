@@ -205,11 +205,25 @@ class TestTransactionSearchPage(unittest.TestCase):
         self.assertIn('grid-template-columns: repeat(5, minmax(0, 1fr))', STYLE)
         self.assertIn('.search-q-input', STYLE)
         self.assertIn('search-tx-row', STYLE)
+        self.assertIn('search-tx-row--open', STYLE)
         self.assertIn('body.search-page .search-tx-tbody tr.search-tx-row', STYLE)
         self.assertIn('/api/spending/transactions/search', SEARCH_JS)
         self.assertIn('tx-search-tbody', SEARCH_JS)
         self.assertIn('search-tx-row', SEARCH_JS)
+        self.assertIn('toggleRow', SEARCH_JS)
+        self.assertIn('aria-expanded', SEARCH_JS)
         self.assertIn('data-label', SEARCH_JS)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_search_page_has_expand_hint(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/spending/search')
+        html = resp.get_data(as_text=True)
+        self.assertIn('id="tx-search-expand-hint"', html)
+        self.assertIn('Tap a row for details', html)
+        self.assertIn('search-tx-toggle-col', html)
 
 
 if __name__ == '__main__':

@@ -178,13 +178,14 @@
         if (!tbody) return;
         if (!rows || !rows.length) {
             tbody.innerHTML = '';
+            setExpandHint(false);
             return;
         }
         tbody.innerHTML = rows
             .map((tx) => {
                 const month = String(tx.report_month || tx.month || '').slice(0, 7);
                 const monthLink = month
-                    ? `<a class="spending-skip" href="/spending?month=${encodeURIComponent(month)}">${escapeHtml(month)}</a>`
+                    ? `<a class="spending-skip search-tx-month-link" href="/spending?month=${encodeURIComponent(month)}">${escapeHtml(month)}</a>`
                     : '—';
                 const src = tx.bank_source ? escapeHtml(tx.bank_source) : '<span class="spending-muted">—</span>';
                 const cat =
@@ -198,17 +199,85 @@
                 const amt = Number(tx.amount);
                 const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : escapeHtml(tx.amount);
                 const dir = String(tx.direction || '');
-                return `<tr class="search-tx-row border-t${muted}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}">
+                const desc = escapeHtml(tx.description || '');
+                return `<tr class="search-tx-row border-t${muted}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}" tabindex="0" aria-expanded="false">
                     <td class="search-tx-date px-3 py-2 whitespace-nowrap" data-label="Date">${escapeHtml(tx.date || '')}</td>
-                    <td class="search-tx-desc px-3 py-2" data-label="Description">${escapeHtml(tx.description || '')}</td>
-                    <td class="search-tx-source px-3 py-2" data-label="Source">${src}</td>
-                    <td class="search-tx-dir px-3 py-2 whitespace-nowrap" data-label="Direction">${escapeHtml(dir)}</td>
+                    <td class="search-tx-desc px-3 py-2" data-label="Description">${desc}</td>
+                    <td class="search-tx-source px-3 py-2 search-tx-detail" data-label="Source">${src}</td>
+                    <td class="search-tx-dir px-3 py-2 whitespace-nowrap search-tx-detail" data-label="Direction">${escapeHtml(dir)}</td>
                     <td class="search-tx-amount px-3 py-2 whitespace-nowrap spending-insight-tx-amount" data-label="Amount (£)">${amtStr}</td>
-                    <td class="search-tx-cat px-3 py-2 whitespace-nowrap" data-label="Category">${cat}</td>
-                    <td class="search-tx-month px-3 py-2 whitespace-nowrap" data-label="Month">${monthLink}</td>
+                    <td class="search-tx-cat px-3 py-2 whitespace-nowrap search-tx-detail" data-label="Category">${cat}</td>
+                    <td class="search-tx-month px-3 py-2 whitespace-nowrap search-tx-detail" data-label="Month">${monthLink}</td>
+                    <td class="search-tx-toggle px-2 py-2">
+                        <span class="search-tx-chevron" aria-hidden="true"></span>
+                        <span class="sr-only">Show details</span>
+                    </td>
                 </tr>`;
             })
             .join('');
+        setExpandHint(true);
+    }
+
+    function isMobileSearchLayout() {
+        return window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+    }
+
+    function setExpandHint(hasRows) {
+        const hint = $('tx-search-expand-hint');
+        if (!hint) return;
+        if (hasRows && isMobileSearchLayout()) {
+            hint.classList.remove('hidden');
+        } else {
+            hint.classList.add('hidden');
+        }
+    }
+
+    function collapseAllRows(except) {
+        document.querySelectorAll('#tx-search-tbody tr.search-tx-row--open').forEach((row) => {
+            if (except && row === except) return;
+            row.classList.remove('search-tx-row--open');
+            row.setAttribute('aria-expanded', 'false');
+            const sr = row.querySelector('.search-tx-toggle .sr-only');
+            if (sr) sr.textContent = 'Show details';
+        });
+    }
+
+    function toggleRow(row) {
+        if (!row || !isMobileSearchLayout()) return;
+        const willOpen = !row.classList.contains('search-tx-row--open');
+        collapseAllRows(willOpen ? row : null);
+        row.classList.toggle('search-tx-row--open', willOpen);
+        row.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+        const sr = row.querySelector('.search-tx-toggle .sr-only');
+        if (sr) sr.textContent = willOpen ? 'Hide details' : 'Show details';
+    }
+
+    function bindRowExpand() {
+        const tbody = $('tx-search-tbody');
+        if (!tbody || tbody.dataset.expandBound === '1') return;
+        tbody.dataset.expandBound = '1';
+        tbody.addEventListener('click', (e) => {
+            if (e.target.closest('a.search-tx-month-link')) return;
+            const row = e.target.closest('tr.search-tx-row');
+            if (!row || !tbody.contains(row)) return;
+            toggleRow(row);
+        });
+        tbody.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.target.closest('a.search-tx-month-link')) return;
+            const row = e.target.closest('tr.search-tx-row');
+            if (!row || !tbody.contains(row)) return;
+            e.preventDefault();
+            toggleRow(row);
+        });
+        if (window.matchMedia) {
+            window.matchMedia('(max-width: 640px)').addEventListener('change', () => {
+                if (!isMobileSearchLayout()) {
+                    collapseAllRows();
+                }
+                setExpandHint(!!$('tx-search-tbody') && $('tx-search-tbody').children.length > 0);
+            });
+        }
     }
 
     async function runSearch(opts) {
@@ -366,6 +435,8 @@
         if (filtersHaveCriterion(readFilters())) {
             runSearch({ offset: currentOffset, skipUrl: true });
         }
+
+        bindRowExpand();
     }
 
     if (document.readyState === 'loading') {
