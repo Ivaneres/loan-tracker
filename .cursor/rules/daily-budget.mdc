@@ -72,6 +72,7 @@ Production user has been on `envelope` with a mid-month `tracking_from` and payd
 - Chip toggles: `.db-cat` / `.db-date-chip` / `.db-title-chip` (+ `--selected`); reuse rather than new widgets.
 - Title suggestions: `#db-title-suggestions` under What for?; filled from `common_titles_by_category` for the selected category.
 - Daily page styles: `.db-*` in `@static/style.css`; `body.db-page button…` overrides exist for selected states.
+- **Pull from statements** replaces the in-memory bill list (does not merge) with `apply: false` until Save. Diff vs previous list uses `@static/db_bill_diff.js`: New / Changed badges, old→new amounts, and a **Removed by this pull** section with Restore. Diff chrome clears after Save / `fillPlanForm`.
 
 ## PR demo screenshots (required for UI changes)
 
