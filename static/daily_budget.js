@@ -82,8 +82,114 @@
   }
   let state = null;
   let billItems = [];
+  /** Bills dropped by the latest pull; not part of the plan until restored. */
+  let removedBillItems = [];
+  let billPullHadBaseline = false;
   let entryDate = '';
   let viewDate = '';
+
+  const BillDiff = window.DbBillDiff || {};
+  const billAmount = BillDiff.billAmount || ((b) => Number(b && b.amount) || 0);
+  const stripBillDiffMeta =
+    BillDiff.stripBillDiffMeta ||
+    ((b) => {
+      const out = { ...b };
+      delete out.changeKind;
+      delete out.previousAmount;
+      return out;
+    });
+  const diffBillPull = BillDiff.diffBillPull || ((prev, next) => ({
+    items: next || [],
+    removed: [],
+    summary: { hadBaseline: false, newCount: 0, changedCount: 0, sameCount: 0, removedCount: 0 },
+  }));
+  const formatBillDiffSummary = BillDiff.formatBillDiffSummary || (() => '');
+
+  function serializeBillItemsForSave(items) {
+    return (items || []).map((b) => {
+      const row = stripBillDiffMeta(b);
+      return {
+        id: row.id,
+        label: row.label,
+        amount: billAmount(row),
+        category: row.category || 'other',
+        included: row.included !== false,
+        source: row.source || 'manual',
+        rationale: row.rationale,
+      };
+    });
+  }
+
+  function clearBillPullDiffUi() {
+    removedBillItems = [];
+    billPullHadBaseline = false;
+    billItems = billItems.map((b) => stripBillDiffMeta(b));
+    const sum = $('plan-bill-diff-summary');
+    if (sum) {
+      sum.textContent = '';
+      sum.classList.add('hidden');
+    }
+    renderRemovedBillList();
+  }
+
+  function renderBillDiffSummary(summary) {
+    const el = $('plan-bill-diff-summary');
+    if (!el) return;
+    const text = formatBillDiffSummary(summary);
+    el.textContent = text;
+    el.classList.toggle('hidden', !text);
+  }
+
+  function renderRemovedBillList() {
+    const wrap = $('plan-bill-removed-wrap');
+    const list = $('plan-bill-removed');
+    if (!wrap || !list) return;
+    list.innerHTML = '';
+    const show = billPullHadBaseline && removedBillItems.length > 0;
+    wrap.classList.toggle('hidden', !show);
+    if (!show) return;
+    removedBillItems.forEach((b, idx) => {
+      const li = document.createElement('li');
+      li.className = 'db-bill-item db-bill-item--removed';
+      const body = document.createElement('div');
+      body.className = 'db-bill-body';
+      const title = document.createElement('strong');
+      title.textContent = b.label || 'Bill';
+      const sub = document.createElement('small');
+      sub.textContent = 'Was in your list · not in this pull';
+      body.appendChild(title);
+      body.appendChild(sub);
+      const amt = document.createElement('span');
+      amt.className = 'db-bill-amt';
+      amt.textContent = money(b.amount);
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.className = 'db-btn db-btn--ghost db-bill-restore';
+      restore.textContent = 'Restore';
+      restore.addEventListener('click', () => {
+        const restored = stripBillDiffMeta(removedBillItems[idx]);
+        restored.changeKind = 'same';
+        restored.included = restored.included !== false;
+        removedBillItems.splice(idx, 1);
+        billItems.push(restored);
+        renderBillList();
+        renderRemovedBillList();
+        if (billPullHadBaseline) {
+          renderBillDiffSummary({
+            hadBaseline: true,
+            newCount: billItems.filter((x) => x.changeKind === 'new').length,
+            changedCount: billItems.filter((x) => x.changeKind === 'changed').length,
+            sameCount: billItems.filter((x) => x.changeKind === 'same' || !x.changeKind).length,
+            removedCount: removedBillItems.length,
+          });
+        }
+      });
+      li.appendChild(body);
+      li.appendChild(amt);
+      li.appendChild(restore);
+      list.appendChild(li);
+    });
+  }
 
   function localISODate(d) {
     const dt = d instanceof Date ? d : new Date();
@@ -574,7 +680,16 @@
     empty.classList.toggle('hidden', billItems.length > 0);
     billItems.forEach((b, idx) => {
       const li = document.createElement('li');
-      li.className = 'db-bill-item';
+      const kind = b.changeKind || '';
+      li.className =
+        'db-bill-item' +
+        (kind === 'new'
+          ? ' db-bill-item--new'
+          : kind === 'changed'
+            ? ' db-bill-item--changed'
+            : kind === 'same' && billPullHadBaseline
+              ? ' db-bill-item--same'
+              : '');
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.checked = b.included !== false;
@@ -584,19 +699,49 @@
       });
       const body = document.createElement('div');
       body.className = 'db-bill-body';
+      const titleRow = document.createElement('div');
+      titleRow.className = 'db-bill-title-row';
       const title = document.createElement('strong');
       title.textContent = b.label || 'Bill';
+      titleRow.appendChild(title);
+      if (kind === 'new' || kind === 'changed') {
+        const badge = document.createElement('span');
+        badge.className =
+          'db-bill-badge' +
+          (kind === 'new' ? ' db-bill-badge--new' : ' db-bill-badge--changed');
+        badge.textContent = kind === 'new' ? 'New' : 'Changed';
+        titleRow.appendChild(badge);
+      }
       const sub = document.createElement('small');
-      sub.textContent = (b.category || '') + (b.source ? ' · ' + b.source.replace('_', ' ') : '');
-      body.appendChild(title);
+      const bits = [];
+      if (b.category) bits.push(b.category);
+      if (b.source) bits.push(String(b.source).replace(/_/g, ' '));
+      sub.textContent = bits.join(' · ');
+      body.appendChild(titleRow);
       body.appendChild(sub);
       const amt = document.createElement('span');
       amt.className = 'db-bill-amt';
-      amt.textContent = money(b.amount);
+      if (kind === 'changed' && b.previousAmount != null) {
+        const oldEl = document.createElement('span');
+        oldEl.className = 'db-bill-amt-old';
+        oldEl.textContent = money(b.previousAmount);
+        const arrow = document.createElement('span');
+        arrow.className = 'db-bill-amt-arrow';
+        arrow.textContent = ' → ';
+        const neu = document.createElement('span');
+        neu.className = 'db-bill-amt-new';
+        neu.textContent = money(b.amount);
+        amt.appendChild(oldEl);
+        amt.appendChild(arrow);
+        amt.appendChild(neu);
+      } else {
+        amt.textContent = money(b.amount);
+      }
       const rm = document.createElement('button');
       rm.type = 'button';
       rm.className = 'db-today-del';
       rm.textContent = '×';
+      rm.setAttribute('aria-label', 'Remove bill');
       rm.addEventListener('click', () => {
         billItems.splice(idx, 1);
         renderBillList();
@@ -647,6 +792,7 @@
       const sel = $('plan-source-month');
       if (sel) sel.value = plan.source_month;
     }
+    clearBillPullDiffUi();
     renderBillList();
     renderPlanMath({
       income_monthly: plan.income_monthly,
@@ -1442,7 +1588,7 @@
         savings_percent: Number($('plan-savings-pct').value) || 0,
         daily_mode: modeEl ? modeEl.value : 'envelope',
         underspend_priority: priorityEl ? priorityEl.value : 'debt_first',
-        bill_items: billItems,
+        bill_items: serializeBillItemsForSave(billItems),
         source_month: $('plan-source-month').value || null,
         pay_day: Number($('plan-pay-day') && $('plan-pay-day').value) || 1,
         tracking_from: ($('plan-tracking-from') && $('plan-tracking-from').value) || null,
@@ -1482,19 +1628,37 @@
       btn.disabled = true;
       btn.textContent = 'Pulling…';
       try {
+        const previous = billItems.map((b) => stripBillDiffMeta(b));
         const data = await api('/api/spending/daily/plan/from-statements', {
           method: 'POST',
           body: JSON.stringify({ month, use_llm: true, apply: false }),
         });
         const est = data.estimate || {};
         if (est.income_monthly != null) $('plan-income').value = est.income_monthly;
-        billItems = Array.isArray(est.bill_items) ? est.bill_items.map((b) => ({ ...b })) : [];
+        const incoming = Array.isArray(est.bill_items)
+          ? est.bill_items.map((b) => ({ ...b }))
+          : [];
+        const { items, removed, summary } = diffBillPull(previous, incoming);
+        billItems = items;
+        removedBillItems = removed;
+        billPullHadBaseline = summary.hadBaseline;
         if (est.month) $('plan-source-month').value = est.month;
+        renderBillDiffSummary(summary);
         renderBillList();
+        renderRemovedBillList();
         const llmNote = est.llm_flagged_count
           ? ' · AI flagged ' + est.llm_flagged_count + ' regular bill(s)'
           : '';
-        flash('Loaded from ' + (est.month || 'statements') + llmNote + '. Review bills, then Save plan.', 'ok', 'plan-save-feedback');
+        const diffNote = formatBillDiffSummary(summary);
+        flash(
+          'Loaded from ' +
+            (est.month || 'statements') +
+            llmNote +
+            '.' +
+            (diffNote ? ' ' + diffNote : ' Review bills, then Save plan.'),
+          'ok',
+          'plan-save-feedback',
+        );
       } catch (e) {
         flash(e.message, 'error', 'plan-save-feedback');
       } finally {

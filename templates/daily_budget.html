@@ -206,8 +206,14 @@
                         <button type="button" id="plan-pull-btn" class="db-btn db-btn--ghost db-pull-btn">Pull from statements</button>
                     </div>
 
+                    <p id="plan-bill-diff-summary" class="db-bill-diff-summary hidden" role="status" aria-live="polite"></p>
                     <ul id="plan-bill-list" class="db-bill-list"></ul>
                     <p id="plan-bills-empty" class="db-empty">No bill lines yet — pull from a statement or add manually below.</p>
+                    <div id="plan-bill-removed-wrap" class="db-bill-removed-wrap hidden">
+                        <h4 class="db-bill-removed-title">Removed by this pull</h4>
+                        <p class="db-hint db-hint--tight">These were in your list before and are not in the new estimate. Restore any you still want, then Save plan.</p>
+                        <ul id="plan-bill-removed" class="db-bill-list db-bill-list--removed"></ul>
+                    </div>
 
                     <div class="db-bill-add">
                         <label class="db-field db-field--compact db-bill-add-name">
@@ -307,6 +313,7 @@
         window.DAILY_BUDGET_CATEGORIES = {{ spending_categories | tojson }};
         window.DAILY_BUDGET_MONTHS = {{ months | tojson }};
     </script>
+    <script src="{{ asset_url('db_bill_diff.js') }}"></script>
     <script src="{{ asset_url('daily_budget.js') }}"></script>
 </body>
 </html>

@@ -3243,6 +3243,22 @@ body.db-page button.db-today-del:hover {
     display: none;
 }
 
+.db-bill-diff-summary {
+    margin: 0 0 0.65rem;
+    padding: 0.65rem 0.8rem;
+    border-radius: 0.75rem;
+    background: rgba(15, 28, 26, 0.05);
+    border: 1px solid var(--db-line);
+    color: var(--db-ink);
+    font-size: 0.84rem;
+    line-height: 1.35;
+}
+
+.db-hint--tight {
+    margin-top: 0.15rem;
+    margin-bottom: 0.55rem;
+}
+
 .db-bill-item {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -3252,6 +3268,102 @@ body.db-page button.db-today-del:hover {
     border-radius: 0.9rem;
     background: rgba(255, 255, 255, 0.7);
     border: 1px solid var(--db-line);
+}
+
+.db-bill-item--new {
+    border-color: rgba(30, 120, 80, 0.45);
+    background: rgba(40, 140, 95, 0.1);
+    box-shadow: inset 3px 0 0 rgba(30, 120, 80, 0.75);
+}
+
+.db-bill-item--changed {
+    border-color: rgba(170, 110, 20, 0.45);
+    background: rgba(210, 140, 40, 0.12);
+    box-shadow: inset 3px 0 0 rgba(170, 110, 20, 0.8);
+}
+
+.db-bill-item--same {
+    opacity: 0.92;
+}
+
+.db-bill-item--removed {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    background: rgba(15, 28, 26, 0.04);
+    border-style: dashed;
+    opacity: 0.9;
+}
+
+.db-bill-title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+}
+
+.db-bill-title-row strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.db-bill-badge {
+    flex-shrink: 0;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    padding: 0.12rem 0.4rem;
+    border-radius: 0.35rem;
+    line-height: 1.2;
+}
+
+.db-bill-badge--new {
+    color: #0f5c3a;
+    background: rgba(40, 140, 95, 0.22);
+}
+
+.db-bill-badge--changed {
+    color: #7a4a08;
+    background: rgba(210, 140, 40, 0.28);
+}
+
+.db-bill-amt-old {
+    text-decoration: line-through;
+    color: var(--db-muted);
+    font-weight: 600;
+}
+
+.db-bill-amt-arrow {
+    color: var(--db-muted);
+    font-weight: 600;
+}
+
+.db-bill-amt-new {
+    font-weight: 700;
+}
+
+.db-bill-removed-wrap {
+    margin: 0.35rem 0 0.85rem;
+    padding: 0.75rem 0.85rem 0.85rem;
+    border-radius: 1rem;
+    border: 1px dashed var(--db-line);
+    background: rgba(15, 28, 26, 0.03);
+}
+
+.db-bill-removed-title {
+    margin: 0;
+    font-size: 0.86rem;
+    font-weight: 700;
+}
+
+.db-bill-list--removed {
+    margin-bottom: 0;
+}
+
+.db-bill-restore {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
 }
 
 .db-bill-item input[type="checkbox"] {
@@ -3272,6 +3384,10 @@ body.db-page button.db-today-del:hover {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.db-bill-title-row strong {
+    display: block;
 }
 
 .db-bill-body small {
