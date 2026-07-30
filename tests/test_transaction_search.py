@@ -213,6 +213,9 @@ class TestTransactionSearchPage(unittest.TestCase):
         self.assertIn('toggleRow', SEARCH_JS)
         self.assertIn('aria-expanded', SEARCH_JS)
         self.assertIn('data-label', SEARCH_JS)
+        self.assertIn('formatShortDate', SEARCH_JS)
+        self.assertIn('search-tx-date-short', SEARCH_JS)
+        self.assertIn('search-tx-date-short', STYLE)
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')

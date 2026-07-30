@@ -4345,9 +4345,10 @@ body.search-page {
     display: none;
 }
 
-/* Desktop: toggle column is mobile-only chrome */
+/* Desktop: short mobile date chip stays hidden; toggle column too */
 .search-tx-toggle,
-.search-tx-toggle-col {
+.search-tx-toggle-col,
+.search-tx-date-short {
     display: none;
 }
 
@@ -4467,12 +4468,24 @@ body.search-page {
         font-size: 0.9rem;
         font-weight: 600;
         letter-spacing: -0.01em;
-        word-break: break-word;
-        padding-right: 0.15rem;
         line-height: 1.25;
+        padding-right: 0.15rem;
+        min-width: 0;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+    }
+
+    body.search-page .search-tx-ref {
+        font-weight: 600;
+    }
+
+    body.search-page .search-tx-date-short {
+        display: inline;
+        font-weight: 500;
+        font-size: 0.78rem;
+        color: var(--muted);
+        white-space: nowrap;
     }
 
     body.search-page .search-tx-amount {
@@ -4493,7 +4506,7 @@ body.search-page {
         color: var(--muted);
     }
 
-    /* Date is a detail field on mobile until the row is expanded. */
+    /* Full ISO date is a detail field on mobile until the row is expanded. */
     body.search-page .search-tx-date {
         display: none;
         grid-area: date;
@@ -4524,6 +4537,10 @@ body.search-page {
         font-weight: 600;
         letter-spacing: 0.03em;
         text-transform: uppercase;
+    }
+
+    body.search-page .search-tx-row--open .search-tx-date-short {
+        display: none;
     }
 
     body.search-page .search-tx-toggle {

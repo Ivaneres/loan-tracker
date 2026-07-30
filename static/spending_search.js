@@ -173,6 +173,14 @@
         next.disabled = offset + PAGE_SIZE >= total;
     }
 
+    function formatShortDate(iso) {
+        const raw = String(iso || '').trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+        const d = new Date(`${raw}T12:00:00`);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    }
+
     function renderRows(rows) {
         const tbody = $('tx-search-tbody');
         if (!tbody) return;
@@ -200,9 +208,13 @@
                 const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : escapeHtml(tx.amount);
                 const dir = String(tx.direction || '');
                 const desc = escapeHtml(tx.description || '');
+                const shortDate = formatShortDate(tx.date);
+                const shortDateHtml = shortDate
+                    ? `<span class="search-tx-date-short"> | ${escapeHtml(shortDate)}</span>`
+                    : '';
                 return `<tr class="search-tx-row border-t${muted}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}" tabindex="0" aria-expanded="false">
                     <td class="search-tx-date px-3 py-2 whitespace-nowrap" data-label="Date">${escapeHtml(tx.date || '')}</td>
-                    <td class="search-tx-desc px-3 py-2" data-label="Description">${desc}</td>
+                    <td class="search-tx-desc px-3 py-2" data-label="Description"><span class="search-tx-ref">${desc}</span>${shortDateHtml}</td>
                     <td class="search-tx-source px-3 py-2 search-tx-detail" data-label="Source">${src}</td>
                     <td class="search-tx-dir px-3 py-2 whitespace-nowrap search-tx-detail" data-label="Direction">${escapeHtml(dir)}</td>
                     <td class="search-tx-amount px-3 py-2 whitespace-nowrap spending-insight-tx-amount" data-label="Amount (£)">${amtStr}</td>
