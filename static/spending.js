@@ -760,6 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const clearBtn = document.getElementById('spending-clear-btn');
     const previewWrap = document.getElementById('spending-preview-wrap');
     const previewTbody = document.getElementById('spending-preview-tbody');
+    const previewIncludeAll = document.getElementById('preview-include-all');
     const previewSummary = document.getElementById('spending-preview-summary');
     const monthSelect = document.getElementById('insight-month-select');
     const recategorizeMonthBtn = document.getElementById('recategorize-month-btn');
@@ -1195,6 +1196,20 @@ document.addEventListener('DOMContentLoaded', () => {
                 else include.checked = true;
             }
         });
+        syncPreviewIncludeAll();
+    }
+
+    function syncPreviewIncludeAll() {
+        if (!previewIncludeAll || !previewTbody) return;
+        const boxes = [...previewTbody.querySelectorAll('.preview-include')];
+        if (!boxes.length) {
+            previewIncludeAll.checked = false;
+            previewIncludeAll.indeterminate = false;
+            return;
+        }
+        const n = boxes.filter((c) => c.checked).length;
+        previewIncludeAll.checked = n === boxes.length;
+        previewIncludeAll.indeterminate = n > 0 && n < boxes.length;
     }
 
     function updateInsightSortIndicators() {
@@ -1289,6 +1304,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function clearPreview() {
         if (previewTbody) previewTbody.innerHTML = '';
+        if (previewIncludeAll) {
+            previewIncludeAll.checked = false;
+            previewIncludeAll.indeterminate = false;
+        }
         if (previewWrap) previewWrap.classList.add('hidden');
         if (previewSummary) {
             previewSummary.classList.add('hidden');
@@ -1539,6 +1558,7 @@ document.addEventListener('DOMContentLoaded', () => {
             previewSummary.textContent = `${head}Rows: ${summary.total_rows} | Incoming: ${formatMoney(summary.incoming_total)} | Outgoing: ${formatMoney(summary.outgoing_total)} | Net: ${formatMoney(summary.net)}${recSuffix}${exSuffix}${trPreviewSuffix}${dupSuffix}`;
         }
         if (importBtn) importBtn.disabled = transactions.length === 0;
+        syncPreviewIncludeAll();
         renderPipeline(pipeline);
     }
 
@@ -2420,6 +2440,20 @@ document.addEventListener('DOMContentLoaded', () => {
             clearPreview();
             setStatus('', false);
             if (fileInput) fileInput.value = '';
+        });
+    }
+
+    if (previewIncludeAll && previewTbody) {
+        previewIncludeAll.addEventListener('change', () => {
+            const checked = previewIncludeAll.checked;
+            previewTbody.querySelectorAll('.preview-include').forEach((cb) => {
+                cb.checked = checked;
+            });
+            previewIncludeAll.indeterminate = false;
+        });
+        previewTbody.addEventListener('change', (e) => {
+            if (!e.target.classList.contains('preview-include')) return;
+            syncPreviewIncludeAll();
         });
     }
 
