@@ -1,5 +1,6 @@
 """Internal transfer pairing and spending insight tests."""
 import unittest
+from unittest import mock
 
 import app as app_mod
 
@@ -532,7 +533,7 @@ class TestSpendingPairing(unittest.TestCase):
                 ['2024-01', '2024-02'],
             )
         )
-        # 7 vs 10: (10-7)/10 = 0.3 > 0.2
+        # 7 vs 10: (10-7)/10 = 0.3 > merge tol 0.25
         self.assertFalse(
             app_mod._subscription_pair_merge_amounts_ok(
                 {'2024-01': 7.0},
@@ -541,8 +542,191 @@ class TestSpendingPairing(unittest.TestCase):
             )
         )
 
+    def test_subscription_signals_amount_flexibility(self):
+        """Utility-style amount drift (~35%) should still count as recurring."""
+        spending = {
+            'transactions': [
+                {
+                    'id': 'a',
+                    'date': '2024-01-12',
+                    'report_month': '2024-01',
+                    'direction': 'outgoing',
+                    'amount': 70.0,
+                    'description': 'OCTOPUS ENERGY',
+                    'category': 'utilities',
+                },
+                {
+                    'id': 'b',
+                    'date': '2024-02-14',
+                    'report_month': '2024-02',
+                    'direction': 'outgoing',
+                    'amount': 95.0,
+                    'description': 'OCTOPUS ENERGY',
+                    'category': 'utilities',
+                },
+                {
+                    'id': 'c',
+                    'date': '2024-03-13',
+                    'report_month': '2024-03',
+                    'direction': 'outgoing',
+                    'amount': 100.0,
+                    'description': 'OCTOPUS ENERGY',
+                    'category': 'utilities',
+                },
+            ]
+        }
+        # Old spread cap 0.25 would reject: (100-70)/mean ≈ 0.34
+        sig = app_mod._subscription_signals_for_month(spending, '2024-03')
+        energy = next(s for s in sig if 'octopus' in s.get('label', ''))
+        self.assertGreaterEqual(energy['months_active'], 3)
+        self.assertEqual(energy.get('last_amount'), 100.0)
 
-class TestSpendingPreviewDuplicates(unittest.TestCase):
+    def test_subscription_signals_date_flexibility_month_boundary(self):
+        """Posting dates that drift across month boundaries still form a monthly bill."""
+        spending = {
+            'transactions': [
+                {
+                    'id': 'a',
+                    'date': '2024-01-30',
+                    'report_month': '2024-01',
+                    'direction': 'outgoing',
+                    'amount': 50.0,
+                    'description': 'COUNCIL TAX',
+                    'category': 'housing',
+                },
+                {
+                    # ~31 days later — lands in March calendar month; old month-streak missed this
+                    'id': 'b',
+                    'date': '2024-03-01',
+                    'report_month': '2024-03',
+                    'direction': 'outgoing',
+                    'amount': 52.0,
+                    'description': 'COUNCIL TAX',
+                    'category': 'housing',
+                },
+            ]
+        }
+        sig = app_mod._subscription_signals_for_month(spending, '2024-03')
+        labels = [s.get('label', '') for s in sig]
+        self.assertTrue(any('council' in lab for lab in labels))
+        row = next(s for s in sig if 'council' in s.get('label', ''))
+        self.assertEqual(row.get('last_amount'), 52.0)
+
+    def test_subscription_signals_day_of_month_drift(self):
+        """Same bill a few days earlier/later each month still qualifies."""
+        spending = {
+            'transactions': [
+                {
+                    'id': 'a',
+                    'date': '2024-01-28',
+                    'report_month': '2024-01',
+                    'direction': 'outgoing',
+                    'amount': 15.99,
+                    'description': 'DISNEY PLUS',
+                    'category': 'subscriptions',
+                },
+                {
+                    'id': 'b',
+                    'date': '2024-02-26',
+                    'report_month': '2024-02',
+                    'direction': 'outgoing',
+                    'amount': 15.99,
+                    'description': 'DISNEY PLUS',
+                    'category': 'subscriptions',
+                },
+                {
+                    'id': 'c',
+                    'date': '2024-03-29',
+                    'report_month': '2024-03',
+                    'direction': 'outgoing',
+                    'amount': 15.99,
+                    'description': 'DISNEY PLUS',
+                    'category': 'subscriptions',
+                },
+            ]
+        }
+        sig = app_mod._subscription_signals_for_month(spending, '2024-03')
+        disney = next(s for s in sig if 'disney' in s.get('label', ''))
+        self.assertGreaterEqual(disney['months_active'], 3)
+
+    def test_subscription_signals_rejects_noisy_shopping(self):
+        """Frequent variable merchant spend should not look like a 2-hit subscription."""
+        txs = []
+        # Many grocery-like charges across two months
+        for i, day in enumerate((3, 7, 12, 18, 22, 27)):
+            txs.append({
+                'id': f'j{i}',
+                'date': f'2024-01-{day:02d}',
+                'report_month': '2024-01',
+                'direction': 'outgoing',
+                'amount': 20.0 + i * 3,
+                'description': 'TESCO STORE',
+                'category': 'groceries',
+            })
+        for i, day in enumerate((4, 9, 15, 19, 24, 28)):
+            txs.append({
+                'id': f'f{i}',
+                'date': f'2024-02-{day:02d}',
+                'report_month': '2024-02',
+                'direction': 'outgoing',
+                'amount': 18.0 + i * 4,
+                'description': 'TESCO STORE',
+                'category': 'groceries',
+            })
+        spending = {'transactions': txs}
+        sig = app_mod._subscription_signals_for_month(spending, '2024-02')
+        tesco = [s for s in sig if 'tesco' in s.get('label', '')]
+        self.assertEqual(tesco, [])
+
+    def test_subscription_dom_distance_wraps_month_end(self):
+        self.assertEqual(app_mod._subscription_dom_distance(30, 1), 2)
+        self.assertEqual(app_mod._subscription_dom_distance(5, 8), 3)
+        self.assertLessEqual(app_mod._subscription_dom_distance(28, 2), 5)
+
+    def test_subscription_hybrid_bill_includes_flexible_signal(self):
+        """Daily-tab hybrid pull should surface interval-based subscription signals."""
+        spending = {
+            'transactions': [
+                {
+                    'id': 'a',
+                    'date': '2024-01-30',
+                    'report_month': '2024-01',
+                    'month': '2024-01',
+                    'direction': 'outgoing',
+                    'amount': 9.99,
+                    'description': 'SPOTIFY',
+                    'category': 'other',
+                },
+                {
+                    'id': 'b',
+                    'date': '2024-03-02',
+                    'report_month': '2024-03',
+                    'month': '2024-03',
+                    'direction': 'outgoing',
+                    'amount': 10.49,
+                    'description': 'SPOTIFY',
+                    'category': 'other',
+                },
+                {
+                    'id': 'c',
+                    'date': '2024-03-10',
+                    'report_month': '2024-03',
+                    'month': '2024-03',
+                    'direction': 'incoming',
+                    'amount': 2000.0,
+                    'description': 'SALARY',
+                    'category': None,
+                },
+            ],
+            'monthly_insights': {'2024-03': {'income_total': 2000.0}},
+        }
+        with mock.patch.object(app_mod, '_llm_flag_regular_bills', return_value=[]):
+            est = app_mod._build_hybrid_bill_estimate(spending, '2024-03', use_llm=False)
+        labels = {b['label'] for b in est['bill_items']}
+        self.assertTrue(any('SPOTIFY' in lab for lab in labels))
+        spot = next(b for b in est['bill_items'] if 'SPOTIFY' in b['label'])
+        self.assertEqual(spot['source'], 'subscription_signal')
+
     def test_ledger_and_upload_marks(self):
         fp = app_mod._spending_fingerprint(
             '2024-01', '2024-01-10', 25.5, 'outgoing', 'Coffee shop',
