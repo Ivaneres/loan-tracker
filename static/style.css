@@ -4333,6 +4333,10 @@ body.search-page {
     gap: 0.65rem;
 }
 
+.search-pager.hidden {
+    display: none;
+}
+
 @media (max-width: 640px) {
     .search-q-input {
         font-size: 1rem;
