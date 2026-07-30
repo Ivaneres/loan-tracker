@@ -2611,10 +2611,20 @@ def _month_next(month_key: str, delta: int = 1) -> str | None:
 
 
 SUBSCRIPTION_SIGNAL_WINDOW_MONTHS = 6
-SUBSCRIPTION_MAX_AMOUNT_SPREAD_RATIO = 0.25  # (max-min)/mean across months with spend
+# Monthly totals / selected-occurrence spread: utilities and insurance often move more than 25%.
+SUBSCRIPTION_MAX_AMOUNT_SPREAD_RATIO = 0.40  # (max-min)/mean across selected months
+# Pairwise charge comparison inside a monthly chain (relative vs the larger amount).
+SUBSCRIPTION_PAIR_AMOUNT_TOL = 0.35
+# Day-of-month may drift a few days; also used for month-end wrap (30 vs 2).
+SUBSCRIPTION_DAY_TOLERANCE = 5
+# Near-monthly spacing between successive selected charges (handles posting-date drift).
+SUBSCRIPTION_INTERVAL_MIN_DAYS = 24
+SUBSCRIPTION_INTERVAL_MAX_DAYS = 40
+# Allow one skipped month when day-of-month still lines up (e.g. late post after a gap).
+SUBSCRIPTION_SKIP_INTERVAL_MAX_DAYS = 70
 # Merging lookalike labels (e.g. "HALIFAX" / "HALIFAX DD", "SPOTIFY" / "SPOTIFY LDN")
 SUBSCRIPTION_FUZZY_MIN_PREFIX_LEN = 4
-SUBSCRIPTION_LABEL_MERGE_AMOUNT_TOL = 0.20  # (max-min)/max when two labels both have spend the same month
+SUBSCRIPTION_LABEL_MERGE_AMOUNT_TOL = 0.25  # (max-min)/max when two labels both have spend the same month
 
 # Strip from normalized labels so "VISA SPOTIFY LONDON" and "SPOTIFY" can align (prefix is often not the merchant).
 _SUBSCRIPTION_MERGE_STRIP_LEADING = frozenset({
@@ -2722,16 +2732,24 @@ def _merge_subscription_signal_label_groups(
     label_month_totals: dict,
     label_sample_desc: dict,
     months_seq: list[str],
-) -> tuple[dict, dict]:
+    label_charges: dict | None = None,
+) -> tuple[dict, dict, dict]:
     """
     Union labels that are fuzzy name matches and, when they overlap in a month,
-    have similar total amounts. Rebuilds total-by-month and sample descriptions
-    (longest original description is kept for display).
+    have similar total amounts. Rebuilds total-by-month, sample descriptions
+    (longest original description is kept for display), and optional charge lists.
     """
+    empty_charges: dict = {}
     labels = [k for k in label_month_totals.keys() if k]
     n = len(labels)
     if n <= 1:
-        return label_month_totals, label_sample_desc
+        if n == 1 and label_charges is not None:
+            only = labels[0]
+            empty_charges[only] = list(label_charges.get(only) or [])
+        elif label_charges:
+            for lab, rows in label_charges.items():
+                empty_charges[lab] = list(rows or [])
+        return label_month_totals, label_sample_desc, empty_charges if label_charges is not None else {}
     parent = list(range(n))
     rank = [0] * n
     for i in range(n):
@@ -2754,11 +2772,14 @@ def _merge_subscription_signal_label_groups(
 
     merged_totals: dict = {}
     merged_desc: dict = {}
+    merged_charges: dict = {}
     for g in groups.values():
         if len(g) == 1:
             only = next(iter(g))
             merged_totals[only] = dict(label_month_totals[only])
             merged_desc[only] = label_sample_desc.get(only, only)
+            if label_charges is not None:
+                merged_charges[only] = list(label_charges.get(only) or [])
             continue
         by_month: dict[str, float] = defaultdict(float)
         for lab in g:
@@ -2776,7 +2797,12 @@ def _merge_subscription_signal_label_groups(
             if len(s) > len(best):
                 best = s
         merged_desc[canonical] = best
-    return merged_totals, merged_desc
+        if label_charges is not None:
+            rows: list = []
+            for lab in g:
+                rows.extend(label_charges.get(lab) or [])
+            merged_charges[canonical] = rows
+    return merged_totals, merged_desc, merged_charges
 
 
 def _months_window_ending(month_key: str, n: int) -> list[str]:
@@ -2809,11 +2835,215 @@ def _longest_consecutive_month_streak(sorted_months: list[str]) -> int:
     return best
 
 
+def _subscription_amounts_compatible(
+    a: float,
+    b: float,
+    tol: float = SUBSCRIPTION_PAIR_AMOUNT_TOL,
+) -> bool:
+    """True when two charge amounts are within ``tol`` relative to the larger."""
+    try:
+        aa = float(a)
+        bb = float(b)
+    except (TypeError, ValueError):
+        return False
+    if aa <= 0.005 or bb <= 0.005:
+        return False
+    lo, hi = (aa, bb) if aa <= bb else (bb, aa)
+    return (hi - lo) / hi <= tol + 1e-9
+
+
+def _subscription_dom_distance(day_a: int, day_b: int) -> int:
+    """Min distance between day-of-month values on a 31-day circle (month-end wrap)."""
+    try:
+        a = int(day_a)
+        b = int(day_b)
+    except (TypeError, ValueError):
+        return 99
+    diff = abs(a - b)
+    return min(diff, 31 - diff)
+
+
+def _subscription_normalize_charges(raw_charges: list) -> list[dict]:
+    """Parse charge dicts to ``{date, amount, report_month}`` sorted by date."""
+    items: list[dict] = []
+    for c in raw_charges or []:
+        if not isinstance(c, dict):
+            continue
+        d = c.get('date')
+        if not isinstance(d, date):
+            d = _parse_iso_date(str(d or ''))
+        if d is None:
+            continue
+        try:
+            amt = float(c.get('amount') or 0)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0.005:
+            continue
+        rm = str(c.get('report_month') or '').strip()[:7]
+        if len(rm) != 7 or rm[4] != '-':
+            rm = d.strftime('%Y-%m')
+        items.append({'date': d, 'amount': amt, 'report_month': rm})
+    items.sort(key=lambda x: (x['date'], x['amount']))
+    return items
+
+
+def _subscription_longest_monthly_chain(charges: list[dict]) -> list[dict]:
+    """
+    Longest chain of similar-amount charges spaced like a monthly bill.
+
+    Successive links are preferably 24–40 days apart. One skipped month is allowed
+    (up to ~70 days) when the day-of-month still matches within
+    ``SUBSCRIPTION_DAY_TOLERANCE``. Amounts may vary within
+    ``SUBSCRIPTION_PAIR_AMOUNT_TOL``.
+    """
+    items = _subscription_normalize_charges(charges)
+    n = len(items)
+    if n < 2:
+        return list(items)
+
+    best: list[dict] = []
+
+    def _chain_dom_score(chain: list[dict]) -> float:
+        if len(chain) < 2:
+            return 0.0
+        days = [c['date'].day for c in chain]
+        med = sorted(days)[len(days) // 2]
+        return -sum(_subscription_dom_distance(d, med) for d in days) / len(days)
+
+    for i in range(n):
+        chain = [items[i]]
+        for j in range(i + 1, n):
+            tip = chain[-1]
+            gap = (items[j]['date'] - tip['date']).days
+            if gap < SUBSCRIPTION_INTERVAL_MIN_DAYS:
+                continue
+            if not _subscription_amounts_compatible(tip['amount'], items[j]['amount']):
+                continue
+            if gap <= SUBSCRIPTION_INTERVAL_MAX_DAYS:
+                chain.append(items[j])
+                continue
+            # One skipped calendar month: still OK if day-of-month lines up.
+            if (
+                gap <= SUBSCRIPTION_SKIP_INTERVAL_MAX_DAYS
+                and _subscription_dom_distance(tip['date'].day, items[j]['date'].day)
+                <= SUBSCRIPTION_DAY_TOLERANCE
+            ):
+                chain.append(items[j])
+                continue
+            if gap > SUBSCRIPTION_SKIP_INTERVAL_MAX_DAYS:
+                break
+        if len(chain) > len(best) or (
+            len(chain) == len(best) and _chain_dom_score(chain) > _chain_dom_score(best)
+        ):
+            best = chain
+    return best
+
+
+def _subscription_calendar_month_representatives(charges: list[dict]) -> list[dict]:
+    """
+    Fallback: one representative charge per calendar report month, preferring
+    day-of-month clustering around the median day among amount-stable picks.
+    """
+    items = _subscription_normalize_charges(charges)
+    if len(items) < 2:
+        return list(items)
+
+    by_month: dict[str, list[dict]] = defaultdict(list)
+    for c in items:
+        by_month[c['report_month']].append(c)
+
+    # Seed median day from months that look singly-charged.
+    seed_days: list[int] = []
+    for mk, rows in by_month.items():
+        if len(rows) == 1:
+            seed_days.append(rows[0]['date'].day)
+        else:
+            # Prefer the charge closest to mid-month cluster later; seed with all days.
+            seed_days.extend(r['date'].day for r in rows)
+    if not seed_days:
+        return []
+    median_day = sorted(seed_days)[len(seed_days) // 2]
+
+    selected: list[dict] = []
+    for mk in sorted(by_month.keys()):
+        rows = by_month[mk]
+        # Prefer rows near median day; break ties by closeness to median amount of prior picks.
+        def _score(r: dict) -> tuple:
+            dom = _subscription_dom_distance(r['date'].day, median_day)
+            return (dom, r['amount'])
+
+        rows_sorted = sorted(rows, key=_score)
+        pick = rows_sorted[0]
+        if selected and not _subscription_amounts_compatible(selected[-1]['amount'], pick['amount']):
+            # Try another row in the month with compatible amount
+            alt = next(
+                (
+                    r for r in rows_sorted
+                    if _subscription_amounts_compatible(selected[-1]['amount'], r['amount'])
+                ),
+                None,
+            )
+            if alt is None:
+                continue
+            pick = alt
+        # Soft day filter once we have a chain tip
+        if selected:
+            if _subscription_dom_distance(selected[-1]['date'].day, pick['date'].day) > SUBSCRIPTION_DAY_TOLERANCE:
+                # Still allow if interval is near-monthly
+                gap = (pick['date'] - selected[-1]['date']).days
+                if gap < SUBSCRIPTION_INTERVAL_MIN_DAYS or gap > SUBSCRIPTION_SKIP_INTERVAL_MAX_DAYS:
+                    continue
+        selected.append(pick)
+
+    # Require overall day clustering for weak lists
+    if len(selected) >= 2:
+        days = [c['date'].day for c in selected]
+        med = sorted(days)[len(days) // 2]
+        consistent = [
+            c for c in selected
+            if _subscription_dom_distance(c['date'].day, med) <= SUBSCRIPTION_DAY_TOLERANCE
+        ]
+        if len(consistent) >= 2:
+            return consistent
+    return selected if len(selected) >= 2 else []
+
+
+def _subscription_select_monthly_occurrences(charges: list[dict]) -> list[dict]:
+    """
+    Choose the best monthly-recurring subset for a merchant label.
+
+    Prefers interval-based chains (flexible posting dates); falls back to
+    calendar-month representatives with day-of-month clustering.
+    """
+    chain = _subscription_longest_monthly_chain(charges)
+    calendar = _subscription_calendar_month_representatives(charges)
+    if len(chain) >= len(calendar) and len(chain) >= 2:
+        return chain
+    if len(calendar) >= 2:
+        return calendar
+    return chain if len(chain) >= 2 else []
+
+
+def _subscription_pattern_too_noisy(all_charges: list[dict], selected: list[dict]) -> bool:
+    """
+    True when the merchant has lots of non-selected spend (typical shopping),
+    so a short similar-amount coincidence is unlikely to be a bill.
+    """
+    all_n = len(_subscription_normalize_charges(all_charges))
+    sel_n = len(selected)
+    if sel_n <= 0:
+        return True
+    # Many extra charges beyond the monthly picks → noisy merchant
+    return all_n >= sel_n * 2 + 2
+
+
 def _subscription_signals_for_month(spending: dict, month_key: str) -> list:
     """
     Cross-month recurring / subscription-style spend: similar normalized merchant labels
     (prefix / same first word) are merged when monthly amounts are compatible; then
-    stable multi-month totals qualify. Excludes internal-transfer legs.
+    near-monthly charge chains (flexible day-of-month + amount drift) qualify.
+    Excludes internal-transfer legs.
     """
     months_seq = _months_window_ending(month_key, SUBSCRIPTION_SIGNAL_WINDOW_MONTHS)
     if not months_seq:
@@ -2821,6 +3051,7 @@ def _subscription_signals_for_month(spending: dict, month_key: str) -> list:
     month_set = set(months_seq)
     label_month_totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     label_sample_desc: dict[str, str] = {}
+    label_charges: dict[str, list] = defaultdict(list)
 
     for t in spending.get('transactions') or []:
         if t.get('direction') != 'outgoing':
@@ -2837,38 +3068,125 @@ def _subscription_signals_for_month(spending: dict, month_key: str) -> list:
             amt = float(t.get('amount', 0))
         except (TypeError, ValueError):
             continue
+        if amt <= 0.005:
+            continue
         label_month_totals[label][rm] += amt
         if label not in label_sample_desc:
             label_sample_desc[label] = str(t.get('description', ''))[:120]
+        parsed = _spending_tx_parsed_date(t)
+        if parsed is not None:
+            label_charges[label].append({
+                'date': parsed,
+                'amount': amt,
+                'report_month': rm,
+            })
 
-    label_month_totals, label_sample_desc = _merge_subscription_signal_label_groups(
-        label_month_totals, label_sample_desc, months_seq
+    label_month_totals, label_sample_desc, label_charges = _merge_subscription_signal_label_groups(
+        label_month_totals, label_sample_desc, months_seq, label_charges
     )
 
     out: list = []
     for label, by_month in label_month_totals.items():
-        present = sorted(m for m, v in by_month.items() if v > 0.005)
-        if month_key not in present or len(present) < 2:
+        charges = label_charges.get(label) or []
+        selected = _subscription_select_monthly_occurrences(charges)
+
+        # Fall back to month-total presence when dates were missing entirely.
+        if len(selected) < 2:
+            present_months = sorted(m for m, v in by_month.items() if v > 0.005)
+            if month_key not in present_months or len(present_months) < 2:
+                continue
+            totals = [by_month[m] for m in present_months]
+            mean_t = sum(totals) / len(totals) if totals else 0.0
+            if mean_t <= 0:
+                continue
+            spread = (max(totals) - min(totals)) / mean_t if len(totals) > 1 else 0.0
+            streak = _longest_consecutive_month_streak(present_months)
+            qualifies = (
+                (streak >= 2 or len(present_months) >= 3)
+                and spread <= SUBSCRIPTION_MAX_AMOUNT_SPREAD_RATIO
+            )
+            if not qualifies:
+                continue
+            selected_months = present_months
+            selected_amounts = totals
+        else:
+            selected_months = sorted({
+                c['report_month'] for c in selected
+            } | {
+                c['date'].strftime('%Y-%m') for c in selected
+            })
+            if month_key not in selected_months:
+                continue
+            selected_amounts = [c['amount'] for c in selected]
+            mean_t = sum(selected_amounts) / len(selected_amounts)
+            if mean_t <= 0:
+                continue
+            spread = (
+                (max(selected_amounts) - min(selected_amounts)) / mean_t
+                if len(selected_amounts) > 1 else 0.0
+            )
+            streak = _longest_consecutive_month_streak(selected_months)
+            months_active = len(selected_months)
+            noisy = _subscription_pattern_too_noisy(charges, selected)
+
+            # Strong patterns: 3+ hits, or 2 consecutive with controlled spread.
+            # Day-flexible interval chains already encode date tolerance.
+            qualifies = spread <= SUBSCRIPTION_MAX_AMOUNT_SPREAD_RATIO
+            if not qualifies:
+                continue
+            if months_active >= 3 or streak >= 3:
+                ok = True
+            elif streak >= 2 or len(selected) >= 2:
+                # Weak (2-hit) pattern: require day-of-month agreement to cut random coincidences.
+                days = [c['date'].day for c in selected]
+                med = sorted(days)[len(days) // 2]
+                dom_ok = all(
+                    _subscription_dom_distance(d, med) <= SUBSCRIPTION_DAY_TOLERANCE
+                    for d in days
+                )
+                ok = dom_ok and not noisy
+            else:
+                ok = False
+            if not ok:
+                continue
+            present_months = selected_months
+
+        in_window = len([mm for mm in months_seq if mm in present_months])
+        # Prefer focal-month charge amount; else month total; else last selected.
+        last_amt = None
+        dated_selected = [c for c in selected if isinstance(c, dict) and isinstance(c.get('date'), date)]
+        focal_charges = [
+            c for c in dated_selected
+            if c.get('report_month') == month_key or c['date'].strftime('%Y-%m') == month_key
+        ]
+        if focal_charges:
+            last_amt = round(float(focal_charges[-1]['amount']), 2)
+        elif by_month.get(month_key, 0) > 0.005:
+            last_amt = round(float(by_month[month_key]), 2)
+        elif selected_amounts:
+            last_amt = round(float(selected_amounts[-1]), 2)
+        else:
             continue
-        totals = [by_month[m] for m in present]
-        mean_t = sum(totals) / len(totals)
-        if mean_t <= 0:
-            continue
-        spread = (max(totals) - min(totals)) / mean_t if len(totals) > 1 else 0.0
-        streak = _longest_consecutive_month_streak(present)
-        in_window = len([mm for mm in months_seq if mm in present])
-        qualifies = (streak >= 2 or len(present) >= 3) and spread <= SUBSCRIPTION_MAX_AMOUNT_SPREAD_RATIO
-        if not qualifies:
-            continue
-        last_amt = round(float(by_month.get(month_key, 0)), 2)
-        prev_m = None
-        try:
-            mi = present.index(month_key)
-            if mi > 0:
-                prev_m = present[mi - 1]
-        except ValueError:
-            prev_m = None
-        prev_amt = round(float(by_month.get(prev_m, 0)), 2) if prev_m else None
+
+        prev_amt = None
+        if month_key in present_months:
+            mi = present_months.index(month_key)
+            prev_m = present_months[mi - 1] if mi > 0 else None
+        else:
+            prev_m = present_months[-1] if present_months else None
+
+        if prev_m:
+            prev_rows = [
+                c for c in dated_selected
+                if c.get('report_month') == prev_m or c['date'].strftime('%Y-%m') == prev_m
+            ]
+            if prev_rows:
+                prev_amt = round(float(prev_rows[-1]['amount']), 2)
+            elif by_month.get(prev_m, 0) > 0.005:
+                prev_amt = round(float(by_month[prev_m]), 2)
+        elif len(dated_selected) >= 2:
+            prev_amt = round(float(dated_selected[-2]['amount']), 2)
+
         if prev_amt is not None and prev_amt > 0:
             if last_amt > prev_amt * 1.05:
                 trend = 'up'
@@ -2881,17 +3199,18 @@ def _subscription_signals_for_month(spending: dict, month_key: str) -> list:
         else:
             trend = 'insufficient_history'
 
+        streak_out = _longest_consecutive_month_streak(present_months)
         out.append({
             'label': label,
             'display_description': label_sample_desc.get(label, label),
-            'months_active': len(present),
+            'months_active': len(present_months),
             'months_in_window': in_window,
-            'consecutive_streak': streak,
+            'consecutive_streak': streak_out,
             'last_amount': last_amt,
             'total_last_month': last_amt,
             'amount_last_month': last_amt,
             'amount_avg_active_months': round(mean_t, 2),
-            'amount_variability': round(spread, 3) if len(totals) > 1 else 0.0,
+            'amount_variability': round(spread, 3) if len(selected_amounts) > 1 else 0.0,
             'trend': trend,
         })
     out.sort(key=lambda x: (-x['months_active'], -x['amount_last_month']))
