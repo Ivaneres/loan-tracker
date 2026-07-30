@@ -1728,6 +1728,10 @@ p.insight-tx-amount-rollup:not(.hidden):empty,
 }
 
 /* --- Monthly spending page (aligned with :root tokens) --- */
+html:has(body.spending-page),
+body.spending-page {
+    overflow-x: hidden;
+}
 body.spending-page {
     background-color: transparent;
     color: var(--ink);
@@ -2042,9 +2046,28 @@ body.spending-page {
     list-style: disc;
     padding-left: 1.1rem;
 }
+/* Wide month table: scroll inside this shell, never the whole page. */
+.spending-tx-scroll {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+}
 .spending-tx-table {
     border-collapse: collapse;
     width: 100%;
+}
+@media (max-width: 768px) {
+    /* Global `table { display: block }` lets thead/tbody expand the document.
+       Keep a real table inside the scroll shell so only the shell scrolls. */
+    .spending-tx-scroll > table.spending-tx-table {
+        display: table;
+        overflow: visible;
+        width: max-content;
+        min-width: 100%;
+    }
 }
 .spending-tx-tbody tr:nth-child(even) {
     background: rgba(241, 245, 249, 0.5);
