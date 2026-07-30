@@ -4403,24 +4403,22 @@ body.search-page {
     body.search-page .search-tx-tbody {
         display: flex;
         flex-direction: column;
-        gap: 0.4rem;
+        gap: 0.28rem;
     }
 
     body.search-page .search-tx-tbody tr.search-tx-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto auto;
-        grid-template-areas:
-            "desc amount toggle"
-            "date date date";
-        column-gap: 0.45rem;
-        row-gap: 0.1rem;
+        grid-template-areas: "desc amount toggle";
+        column-gap: 0.4rem;
+        row-gap: 0;
         align-items: center;
         margin: 0;
-        padding: 0.55rem 0.7rem;
+        padding: 0.42rem 0.55rem;
         border: 1px solid var(--line) !important;
-        border-radius: 0.8rem;
+        border-radius: 0.65rem;
         background: rgba(255, 255, 255, 0.84);
-        box-shadow: 0 4px 12px rgba(15, 40, 34, 0.035);
+        box-shadow: none;
         cursor: pointer;
         -webkit-tap-highlight-color: transparent;
         transition: background 0.15s ease, box-shadow 0.15s ease;
@@ -4449,9 +4447,9 @@ body.search-page {
             "cat cat cat"
             "source source source"
             "month month month";
-        row-gap: 0.35rem;
-        padding: 0.65rem 0.75rem 0.8rem;
-        box-shadow: 0 10px 24px rgba(15, 40, 34, 0.07);
+        row-gap: 0.28rem;
+        padding: 0.5rem 0.6rem 0.65rem;
+        box-shadow: 0 6px 16px rgba(15, 40, 34, 0.05);
     }
 
     body.search-page .search-tx-tbody td {
@@ -4459,26 +4457,29 @@ body.search-page {
         padding: 0;
         min-width: 0;
         white-space: normal;
-        font-size: 0.9rem;
-        line-height: 1.25;
+        font-size: 0.88rem;
+        line-height: 1.2;
         color: var(--ink);
     }
 
     body.search-page .search-tx-desc {
         grid-area: desc;
-        font-size: 0.95rem;
+        font-size: 0.9rem;
         font-weight: 600;
         letter-spacing: -0.01em;
         word-break: break-word;
         padding-right: 0.15rem;
         line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     body.search-page .search-tx-amount {
         grid-area: amount;
         justify-self: end;
         text-align: right;
-        font-size: 0.98rem;
+        font-size: 0.9rem;
         font-weight: 700;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -4492,12 +4493,37 @@ body.search-page {
         color: var(--muted);
     }
 
+    /* Date is a detail field on mobile until the row is expanded. */
     body.search-page .search-tx-date {
+        display: none;
         grid-area: date;
         color: var(--muted);
-        font-size: 0.75rem;
+        font-size: 0.72rem;
         font-variant-numeric: tabular-nums;
-        line-height: 1.2;
+        line-height: 1.15;
+    }
+
+    body.search-page .search-tx-row--open .search-tx-date {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 0.75rem;
+        width: 100%;
+        margin-top: 0.15rem;
+        padding-top: 0.4rem;
+        border-top: 1px solid rgba(15, 40, 34, 0.08);
+        font-size: 0.88rem;
+        color: var(--ink);
+    }
+
+    body.search-page .search-tx-row--open .search-tx-date::before {
+        content: attr(data-label);
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
     }
 
     body.search-page .search-tx-toggle {
@@ -4505,8 +4531,8 @@ body.search-page {
         grid-area: toggle;
         align-items: center;
         justify-content: center;
-        width: 1.4rem;
-        height: 1.4rem;
+        width: 1.2rem;
+        height: 1.2rem;
         border-radius: 999px;
         background: rgba(15, 40, 34, 0.05);
         color: var(--muted);
@@ -4547,26 +4573,28 @@ body.search-page {
     body.search-page .search-tx-row--open .search-tx-dir {
         grid-area: dir;
         text-transform: capitalize;
-        margin-top: 0.2rem;
+        margin-top: 0;
+        border-top: 0;
+        padding-top: 0.22rem;
     }
 
     body.search-page .search-tx-row--open .search-tx-cat {
         grid-area: cat;
         text-transform: capitalize;
         border-top: 0;
-        padding-top: 0.25rem;
+        padding-top: 0.22rem;
     }
 
     body.search-page .search-tx-row--open .search-tx-source {
         grid-area: source;
         border-top: 0;
-        padding-top: 0.25rem;
+        padding-top: 0.22rem;
     }
 
     body.search-page .search-tx-row--open .search-tx-month {
         grid-area: month;
         border-top: 0;
-        padding-top: 0.25rem;
+        padding-top: 0.22rem;
     }
 
     body.search-page .search-tx-row--open .search-tx-detail::before {

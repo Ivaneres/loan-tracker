@@ -31,7 +31,7 @@ Matching helpers: `_search_spending_transactions`, `_spending_tx_search_haystack
 - URL syncs query params for bookmarking/share
 - Result rows link to Monthly via `/spending?month=YYYY-MM`
 - Page amount rollup for the current result page; pager when `total > 100`
-- **Mobile (≤640px):** compact result rows (description, amount, date) that expand on tap/Enter for direction, category, source, and month link. One row open at a time. Desktop keeps the full wide table.
+- **Mobile (≤640px):** compact single-line result rows (description, amount, chevron). Tap expands date, direction, category, source, and month (one row open at a time). Desktop keeps the full wide table.
 
 ## Tests
 
