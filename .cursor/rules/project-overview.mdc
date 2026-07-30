@@ -10,8 +10,8 @@ Flask monolith finance tracker (loans + spending + daily budget). No separate fr
 ## Layout
 
 - `@app.py` — routes, domain logic, JSON persistence (large single module)
-- `templates/` — Jinja pages (`daily_budget.html`, `spending.html`, `loans.html`, …)
-- `static/` — vanilla JS/CSS (`daily_budget.js`, `spending.js`, `script.js`, `style.css`)
+- `templates/` — Jinja pages (`daily_budget.html`, `spending.html`, `spending_search.html`, `loans.html`, …)
+- `static/` — vanilla JS/CSS (`daily_budget.js`, `spending.js`, `spending_search.js`, `script.js`, `style.css`)
 - `tests/` — `unittest` modules (not pytest-first; run with `python -m unittest …`)
 - `data.json` — local persistence (gitignored); production has its own copy + `.env`
 - `.cursor/rules/` — agent context; keep learnings here for future agents
@@ -82,6 +82,10 @@ How to capture and embed:
    `https://raw.githubusercontent.com/Ivaneres/loan-tracker/<branch>/docs/screenshots/<feature>/<file>.png`
 4. Do **not** use Cursor artifact `/tmp/cursor/artifacts/…` paths or markdown links to `cursor.com/agents/…/artifacts` — those become click-through links, not inline images.
 5. Prefer tight crops of the changed control for each step, plus one full mobile/desktop frame when helpful.
+
+Primary nav (`app_nav.html`): Home `/` · Daily `/spending/daily` · Monthly `/spending` · Search `/spending/search` · Loans `/loans`
+
+Global transaction search (all months): `@.cursor/rules/transaction-search.mdc`.
 
 Daily Budget specifics: `@.cursor/rules/daily-budget.mdc`.
 
