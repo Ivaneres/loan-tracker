@@ -123,7 +123,8 @@
     function setRollup(rows) {
         const el = $('tx-search-rollup');
         if (!el) return;
-        if (!rows || !rows.length) {
+        const active = (rows || []).filter((tx) => !isMutedTx(tx));
+        if (!active.length) {
             el.textContent = '';
             el.classList.add('hidden');
             return;
@@ -132,7 +133,7 @@
         let inc = 0;
         let nOut = 0;
         let nInc = 0;
-        rows.forEach((tx) => {
+        active.forEach((tx) => {
             const n = Number(tx.amount);
             if (!Number.isFinite(n)) return;
             if (tx.direction === 'incoming') {
@@ -181,40 +182,42 @@
         return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
     }
 
-    function renderRows(rows) {
-        const tbody = $('tx-search-tbody');
-        if (!tbody) return;
-        if (!rows || !rows.length) {
-            tbody.innerHTML = '';
-            setExpandHint(false);
-            return;
-        }
-        tbody.innerHTML = rows
-            .map((tx) => {
-                const month = String(tx.report_month || tx.month || '').slice(0, 7);
-                const monthLink = month
-                    ? `<a class="spending-skip search-tx-month-link" href="/spending?month=${encodeURIComponent(month)}">${escapeHtml(month)}</a>`
-                    : '—';
-                const src = tx.bank_source ? escapeHtml(tx.bank_source) : '<span class="spending-muted">—</span>';
-                const cat =
-                    tx.direction === 'outgoing'
-                        ? escapeHtml(tx.category || 'unclassified')
-                        : '<span class="spending-muted">—</span>';
-                const muted =
-                    (tx.internal_transfer && tx.transfer_pair_id) || tx.insights_excluded === true
-                        ? ' search-tx-row--muted spending-insight-tx-muted'
-                        : '';
-                const amt = Number(tx.amount);
-                const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : escapeHtml(tx.amount);
-                const dir = String(tx.direction || '');
-                const desc = escapeHtml(tx.description || '');
-                const shortDate = formatShortDate(tx.date);
-                const shortDateHtml = shortDate
-                    ? `<span class="search-tx-date-short"> | ${escapeHtml(shortDate)}</span>`
-                    : '';
-                return `<tr class="search-tx-row border-t${muted}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}" tabindex="0" aria-expanded="false">
+    function isMutedTx(tx) {
+        return !!(tx && ((tx.internal_transfer && tx.transfer_pair_id) || tx.insights_excluded === true));
+    }
+
+    function mutedReasonLabel(tx) {
+        if (tx && tx.internal_transfer && tx.transfer_pair_id) return 'Paired transfer';
+        if (tx && tx.insights_excluded === true) return 'Excluded';
+        return '';
+    }
+
+    function rowHtml(tx, muted) {
+        const month = String(tx.report_month || tx.month || '').slice(0, 7);
+        const monthLink = month
+            ? `<a class="spending-skip search-tx-month-link" href="/spending?month=${encodeURIComponent(month)}">${escapeHtml(month)}</a>`
+            : '—';
+        const src = tx.bank_source ? escapeHtml(tx.bank_source) : '<span class="spending-muted">—</span>';
+        const cat =
+            tx.direction === 'outgoing'
+                ? escapeHtml(tx.category || 'unclassified')
+                : '<span class="spending-muted">—</span>';
+        const mutedClass = muted ? ' search-tx-row--muted spending-insight-tx-muted' : '';
+        const reason = muted ? mutedReasonLabel(tx) : '';
+        const reasonHtml = reason
+            ? `<span class="search-tx-muted-badge">${escapeHtml(reason)}</span>`
+            : '';
+        const amt = Number(tx.amount);
+        const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : escapeHtml(tx.amount);
+        const dir = String(tx.direction || '');
+        const desc = escapeHtml(tx.description || '');
+        const shortDate = formatShortDate(tx.date);
+        const shortDateHtml = shortDate
+            ? `<span class="search-tx-date-short"> | ${escapeHtml(shortDate)}</span>`
+            : '';
+        return `<tr class="search-tx-row border-t${mutedClass}" style="border-color: var(--border-color);" data-tx-id="${escapeHtml(tx.id || '')}" tabindex="0" aria-expanded="false">
                     <td class="search-tx-date px-3 py-2 whitespace-nowrap" data-label="Date">${escapeHtml(tx.date || '')}</td>
-                    <td class="search-tx-desc px-3 py-2" data-label="Description"><span class="search-tx-ref">${desc}</span>${shortDateHtml}</td>
+                    <td class="search-tx-desc px-3 py-2" data-label="Description"><span class="search-tx-ref">${desc}</span>${shortDateHtml}${reasonHtml}</td>
                     <td class="search-tx-source px-3 py-2 search-tx-detail" data-label="Source">${src}</td>
                     <td class="search-tx-dir px-3 py-2 whitespace-nowrap search-tx-detail" data-label="Direction">${escapeHtml(dir)}</td>
                     <td class="search-tx-amount px-3 py-2 whitespace-nowrap spending-insight-tx-amount" data-label="Amount (£)">${amtStr}</td>
@@ -225,9 +228,43 @@
                         <span class="sr-only">Show details</span>
                     </td>
                 </tr>`;
-            })
-            .join('');
-        setExpandHint(true);
+    }
+
+    function setMutedSectionVisible(visible) {
+        const section = $('tx-search-muted-section');
+        if (!section) return;
+        section.classList.toggle('hidden', !visible);
+        if (visible) {
+            section.removeAttribute('hidden');
+        } else {
+            section.setAttribute('hidden', '');
+        }
+    }
+
+    function renderRows(rows) {
+        const tbody = $('tx-search-tbody');
+        const mutedBody = $('tx-search-muted-tbody');
+        if (!tbody) return;
+        const list = Array.isArray(rows) ? rows : [];
+        const active = [];
+        const muted = [];
+        list.forEach((tx) => {
+            if (isMutedTx(tx)) muted.push(tx);
+            else active.push(tx);
+        });
+        tbody.innerHTML = active.map((tx) => rowHtml(tx, false)).join('');
+        if (mutedBody) {
+            mutedBody.innerHTML = muted.map((tx) => rowHtml(tx, true)).join('');
+        }
+        setMutedSectionVisible(muted.length > 0);
+        const heading = $('tx-search-muted-heading');
+        if (heading && muted.length > 0) {
+            heading.textContent =
+                muted.length === 1
+                    ? 'Excluded from totals (1)'
+                    : `Excluded from totals (${muted.length})`;
+        }
+        setExpandHint(active.length + muted.length > 0);
     }
 
     function isMobileSearchLayout() {
@@ -244,14 +281,26 @@
         }
     }
 
+    function searchResultBodies() {
+        return ['tx-search-tbody', 'tx-search-muted-tbody']
+            .map((id) => $(id))
+            .filter(Boolean);
+    }
+
+    function hasAnySearchRows() {
+        return searchResultBodies().some((body) => body.children.length > 0);
+    }
+
     function collapseAllRows(except) {
-        document.querySelectorAll('#tx-search-tbody tr.search-tx-row--open').forEach((row) => {
-            if (except && row === except) return;
-            row.classList.remove('search-tx-row--open');
-            row.setAttribute('aria-expanded', 'false');
-            const sr = row.querySelector('.search-tx-toggle .sr-only');
-            if (sr) sr.textContent = 'Show details';
-        });
+        document
+            .querySelectorAll('#tx-search-tbody tr.search-tx-row--open, #tx-search-muted-tbody tr.search-tx-row--open')
+            .forEach((row) => {
+                if (except && row === except) return;
+                row.classList.remove('search-tx-row--open');
+                row.setAttribute('aria-expanded', 'false');
+                const sr = row.querySelector('.search-tx-toggle .sr-only');
+                if (sr) sr.textContent = 'Show details';
+            });
     }
 
     function toggleRow(row) {
@@ -265,29 +314,33 @@
     }
 
     function bindRowExpand() {
-        const tbody = $('tx-search-tbody');
-        if (!tbody || tbody.dataset.expandBound === '1') return;
-        tbody.dataset.expandBound = '1';
-        tbody.addEventListener('click', (e) => {
-            if (e.target.closest('a.search-tx-month-link')) return;
-            const row = e.target.closest('tr.search-tx-row');
-            if (!row || !tbody.contains(row)) return;
-            toggleRow(row);
+        const bodies = searchResultBodies();
+        if (!bodies.length) return;
+        bodies.forEach((tbody) => {
+            if (tbody.dataset.expandBound === '1') return;
+            tbody.dataset.expandBound = '1';
+            tbody.addEventListener('click', (e) => {
+                if (e.target.closest('a.search-tx-month-link')) return;
+                const row = e.target.closest('tr.search-tx-row');
+                if (!row || !tbody.contains(row)) return;
+                toggleRow(row);
+            });
+            tbody.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                if (e.target.closest('a.search-tx-month-link')) return;
+                const row = e.target.closest('tr.search-tx-row');
+                if (!row || !tbody.contains(row)) return;
+                e.preventDefault();
+                toggleRow(row);
+            });
         });
-        tbody.addEventListener('keydown', (e) => {
-            if (e.key !== 'Enter' && e.key !== ' ') return;
-            if (e.target.closest('a.search-tx-month-link')) return;
-            const row = e.target.closest('tr.search-tx-row');
-            if (!row || !tbody.contains(row)) return;
-            e.preventDefault();
-            toggleRow(row);
-        });
-        if (window.matchMedia) {
+        if (window.matchMedia && !document.body.dataset.searchExpandMqBound) {
+            document.body.dataset.searchExpandMqBound = '1';
             window.matchMedia('(max-width: 640px)').addEventListener('change', () => {
                 if (!isMobileSearchLayout()) {
                     collapseAllRows();
                 }
-                setExpandHint(!!$('tx-search-tbody') && $('tx-search-tbody').children.length > 0);
+                setExpandHint(hasAnySearchRows());
             });
         }
     }
