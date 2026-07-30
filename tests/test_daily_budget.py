@@ -1133,6 +1133,78 @@ class TestHybridBillsEstimate(unittest.TestCase):
         self.assertIn('ACME LETTINGS', labels)
         self.assertIn('WATER CO', labels)
 
+    def test_representative_amount_skips_delayed_double_post(self):
+        """Two similar charges ~a month apart in one calendar month → one unit amount."""
+        from datetime import date as date_cls
+
+        amt = app_mod._representative_monthly_bill_amount([
+            {'date': date_cls(2024, 3, 2), 'amount': 120.0, 'report_month': '2024-03'},
+            {'date': date_cls(2024, 3, 28), 'amount': 120.0, 'report_month': '2024-03'},
+        ])
+        self.assertEqual(amt, 120.0)
+
+        # Close together (e.g. split payment) still sums
+        amt2 = app_mod._representative_monthly_bill_amount([
+            {'date': date_cls(2024, 3, 1), 'amount': 500.0, 'report_month': '2024-03'},
+            {'date': date_cls(2024, 3, 3), 'amount': 500.0, 'report_month': '2024-03'},
+        ])
+        self.assertEqual(amt2, 1000.0)
+
+    def test_hybrid_does_not_combine_delayed_same_month_bills(self):
+        """Delayed prior cycle + current cycle in one month must not double the bill line."""
+        spending = {
+            'transactions': [
+                _tx(
+                    id='a', date='2024-03-02', amount=145.0, category='housing',
+                    report_month='2024-03', month='2024-03', direction='outgoing',
+                    source='statement', description='COUNCIL TAX',
+                ),
+                _tx(
+                    id='b', date='2024-03-29', amount=145.0, category='housing',
+                    report_month='2024-03', month='2024-03', direction='outgoing',
+                    source='statement', description='COUNCIL TAX',
+                ),
+                _tx(
+                    id='c', date='2024-03-25', amount=2500, category=None,
+                    report_month='2024-03', month='2024-03', direction='incoming',
+                    source='statement', description='SALARY',
+                ),
+            ],
+            'monthly_insights': {'2024-03': {'income_total': 2500.0}},
+        }
+        with mock.patch.object(app_mod, '_llm_flag_regular_bills', return_value=[]):
+            est = app_mod._build_hybrid_bill_estimate(spending, '2024-03', use_llm=False)
+        items = [b for b in est['bill_items'] if 'council' in b['label'].lower()]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]['amount'], 145.0)
+        self.assertEqual(est['bills_monthly'], 145.0)
+
+    def test_subscription_signal_amount_not_doubled_same_month(self):
+        """Subscription signal last_amount uses one cycle when two land in the focal month."""
+        spending = {
+            'transactions': [
+                _tx(
+                    id='a', date='2024-01-28', amount=9.99, category='other',
+                    report_month='2024-01', month='2024-01', direction='outgoing',
+                    description='SPOTIFY',
+                ),
+                _tx(
+                    id='b', date='2024-03-02', amount=9.99, category='other',
+                    report_month='2024-03', month='2024-03', direction='outgoing',
+                    description='SPOTIFY',
+                ),
+                _tx(
+                    id='c', date='2024-03-30', amount=9.99, category='other',
+                    report_month='2024-03', month='2024-03', direction='outgoing',
+                    description='SPOTIFY',
+                ),
+            ],
+        }
+        sig = app_mod._subscription_signals_for_month(spending, '2024-03')
+        spot = next(s for s in sig if 'spotify' in s.get('label', ''))
+        self.assertEqual(spot.get('last_amount'), 9.99)
+        self.assertEqual(spot.get('total_last_month'), 9.99)
+
 
 if __name__ == '__main__':
     unittest.main()

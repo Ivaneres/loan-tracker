@@ -2888,6 +2888,43 @@ def _subscription_normalize_charges(raw_charges: list) -> list[dict]:
     return items
 
 
+def _representative_monthly_bill_amount(raw_charges: list) -> float:
+    """
+    Amount to reserve for a monthly bill from same-merchant charges in one month.
+
+    Normally sums (multiple distinct spends). When two+ similar unit charges are
+    spaced like separate monthly cycles (e.g. delayed prior bill + current, both
+    posting in the same calendar month), return one representative unit amount
+    instead of combining them.
+    """
+    items = _subscription_normalize_charges(raw_charges)
+    if not items:
+        # Allow amount-only rows (no parseable date) — sum what we can.
+        total = 0.0
+        for c in raw_charges or []:
+            if not isinstance(c, dict):
+                continue
+            try:
+                amt = float(c.get('amount') or 0)
+            except (TypeError, ValueError):
+                continue
+            if amt > 0.005:
+                total += amt
+        return round(total, 2)
+    if len(items) == 1:
+        return round(float(items[0]['amount']), 2)
+
+    amounts = [float(c['amount']) for c in items]
+    similar = all(
+        _subscription_amounts_compatible(amounts[0], a) for a in amounts[1:]
+    )
+    span_days = (items[-1]['date'] - items[0]['date']).days
+    if similar and span_days >= SUBSCRIPTION_INTERVAL_MIN_DAYS:
+        # Delayed double-post in one calendar month — keep a single cycle amount.
+        # Prefer the latest charge (usually the "on time" one for this month).
+        return round(float(items[-1]['amount']), 2)
+    return round(sum(amounts), 2)
+
 def _subscription_longest_monthly_chain(charges: list[dict]) -> list[dict]:
     """
     Longest chain of similar-amount charges spaced like a monthly bill.
@@ -3153,19 +3190,29 @@ def _subscription_signals_for_month(spending: dict, month_key: str) -> list:
 
         in_window = len([mm for mm in months_seq if mm in present_months])
         # Prefer focal-month charge amount; else month total; else last selected.
+        # When two similar charges land in the same month (delayed prior + current),
+        # use one representative unit amount — not the combined total.
         last_amt = None
         dated_selected = [c for c in selected if isinstance(c, dict) and isinstance(c.get('date'), date)]
         focal_charges = [
             c for c in dated_selected
             if c.get('report_month') == month_key or c['date'].strftime('%Y-%m') == month_key
         ]
+        if not focal_charges:
+            # All raw charges for this label in the focal month (may include non-chain rows)
+            focal_charges = [
+                c for c in _subscription_normalize_charges(charges)
+                if c.get('report_month') == month_key or c['date'].strftime('%Y-%m') == month_key
+            ]
         if focal_charges:
-            last_amt = round(float(focal_charges[-1]['amount']), 2)
+            last_amt = _representative_monthly_bill_amount(focal_charges)
         elif by_month.get(month_key, 0) > 0.005:
             last_amt = round(float(by_month[month_key]), 2)
         elif selected_amounts:
             last_amt = round(float(selected_amounts[-1]), 2)
         else:
+            continue
+        if last_amt is None or last_amt < 0.01:
             continue
 
         prev_amt = None
@@ -4812,6 +4859,8 @@ def _build_hybrid_bill_estimate(spending: dict, month_key: str, *, use_llm: bool
             amt = float(t.get('amount') or 0)
         except (TypeError, ValueError):
             continue
+        if amt <= 0.005:
+            continue
         cat = str(t.get('category') or 'other').strip().lower()
         if cat not in SPENDING_CATEGORY_SET:
             cat = 'other'
@@ -4823,10 +4872,17 @@ def _build_hybrid_bill_estimate(spending: dict, month_key: str, *, use_llm: bool
         slot = merchant_totals.setdefault(label, {
             'label': str(t.get('description') or '')[:120],
             'amount': 0.0,
+            'charges': [],
             'category': cat,
             'norm': label,
         })
         slot['amount'] += amt
+        parsed = _spending_tx_parsed_date(t)
+        slot['charges'].append({
+            'date': parsed,
+            'amount': amt,
+            'report_month': mk,
+        })
         # Prefer bill-like category if any tx in the group has one
         if cat in DAILY_BUDGET_BILL_CATEGORIES:
             slot['category'] = cat
@@ -4838,7 +4894,10 @@ def _build_hybrid_bill_estimate(spending: dict, month_key: str, *, use_llm: bool
         cat = slot['category']
         if cat not in DAILY_BUDGET_BILL_CATEGORIES:
             continue
-        amt = round(float(slot['amount'] or 0), 2)
+        # Avoid combining a delayed prior cycle with this month's charge into one total.
+        amt = _representative_monthly_bill_amount(slot.get('charges') or [])
+        if amt < 0.01:
+            amt = round(float(slot['amount'] or 0), 2)
         if amt < 0.01:
             continue
         bill_items.append({
