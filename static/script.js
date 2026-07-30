@@ -523,6 +523,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const statementImportResults = document.getElementById('statement-import-results');
     const statementTruncatedHint = document.getElementById('statement-truncated-hint');
     const statementImportTbody = document.getElementById('statement-import-tbody');
+    const statementIncludeAll = document.getElementById('statement-include-all');
     const statementImportBtn = document.getElementById('statement-import-btn');
     const statementClearBtn = document.getElementById('statement-clear-btn');
 
@@ -537,8 +538,25 @@ document.addEventListener('DOMContentLoaded', function() {
         statementPreviewStatus.className = 'text-sm mb-2 ' + (isError ? 'text-red-600' : 'text-gray-600');
     }
 
+    function syncStatementIncludeAll() {
+        if (!statementIncludeAll || !statementImportTbody) return;
+        const boxes = [...statementImportTbody.querySelectorAll('.statement-row-check')];
+        if (!boxes.length) {
+            statementIncludeAll.checked = false;
+            statementIncludeAll.indeterminate = false;
+            return;
+        }
+        const n = boxes.filter((c) => c.checked).length;
+        statementIncludeAll.checked = n === boxes.length;
+        statementIncludeAll.indeterminate = n > 0 && n < boxes.length;
+    }
+
     function clearStatementRows() {
         if (statementImportTbody) statementImportTbody.innerHTML = '';
+        if (statementIncludeAll) {
+            statementIncludeAll.checked = false;
+            statementIncludeAll.indeterminate = false;
+        }
         if (statementImportResults) statementImportResults.style.display = 'none';
         renderBaselineDiff(null);
     }
@@ -627,6 +645,21 @@ document.addEventListener('DOMContentLoaded', function() {
             statementImportTbody.appendChild(tr);
         });
         statementImportResults.style.display = 'block';
+        syncStatementIncludeAll();
+    }
+
+    if (statementIncludeAll && statementImportTbody) {
+        statementIncludeAll.addEventListener('change', () => {
+            const checked = statementIncludeAll.checked;
+            statementImportTbody.querySelectorAll('.statement-row-check').forEach((cb) => {
+                cb.checked = checked;
+            });
+            statementIncludeAll.indeterminate = false;
+        });
+        statementImportTbody.addEventListener('change', (e) => {
+            if (!e.target.classList.contains('statement-row-check')) return;
+            syncStatementIncludeAll();
+        });
     }
 
     if (statementPreviewBtn && statementFile) {

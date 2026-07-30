@@ -131,7 +131,12 @@
                 <table class="min-w-full text-sm" style="border-color: var(--border-color);">
                     <thead style="background: var(--background-color);">
                         <tr>
-                            <th class="px-3 py-2 text-left">Include</th>
+                            <th class="px-3 py-2 text-left">
+                                <label class="inline-flex items-center gap-1.5 cursor-pointer">
+                                    <input type="checkbox" id="preview-include-all" title="Select or deselect all rows" aria-label="Select or deselect all rows" />
+                                    <span>Include</span>
+                                </label>
+                            </th>
                             <th class="px-3 py-2 text-left">Duplicate <span class="text-gray-400 font-normal text-xs">(import)</span></th>
                             <th class="px-3 py-2 text-left">Date</th>
                             <th class="px-3 py-2 text-left">Description</th>
