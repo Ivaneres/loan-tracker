@@ -30,7 +30,8 @@ Matching helpers: `_search_spending_transactions`, `_spending_tx_search_haystack
 - Debounced search as the user types; filters trigger immediately on change
 - URL syncs query params for bookmarking/share
 - Result rows link to Monthly via `/spending?month=YYYY-MM`
-- Page amount rollup for the current result page; pager when `total > 100`
+- Page amount rollup for the current result page (active rows only — excludes paired transfers and `insights_excluded`); pager when `total > 100`
+- Paired internal transfers and excluded lines render in a separate **Excluded from totals** table below the main results, with gray styling and a Paired/Excluded badge
 - **Mobile (≤640px):** compact single-line result rows (`Description | 25 Jun`, amount, chevron). Tap expands full date, direction, category, source, and month (one row open at a time). Desktop keeps the full wide table.
 
 ## Tests

@@ -593,41 +593,56 @@ document.addEventListener('DOMContentLoaded', function() {
         statementImportTbody.innerHTML = '';
         candidates.forEach((c) => {
             const tr = document.createElement('tr');
+            tr.className = 'loan-import-row';
+            tr.tabIndex = 0;
+            tr.setAttribute('aria-expanded', 'false');
             if (c.possible_duplicate) tr.classList.add('bg-amber-50');
             tr.dataset.date = c.statement_date;
             tr.dataset.description = c.description;
 
             const tdCheck = document.createElement('td');
-            tdCheck.className = 'px-4 py-2';
+            tdCheck.className = 'px-4 py-2 loan-import-include';
             const cb = document.createElement('input');
             cb.type = 'checkbox';
             cb.className = 'statement-row-check';
             cb.checked = true;
+            cb.setAttribute('aria-label', 'Include in import');
             tdCheck.appendChild(cb);
 
             const tdDate = document.createElement('td');
-            tdDate.className = 'px-4 py-2 whitespace-nowrap';
+            tdDate.className = 'px-4 py-2 whitespace-nowrap loan-import-date loan-import-detail';
+            tdDate.dataset.label = 'Date';
             tdDate.textContent = c.statement_date;
 
             const tdDesc = document.createElement('td');
-            tdDesc.className = 'px-4 py-2';
-            const wrap = document.createElement('div');
+            tdDesc.className = 'px-4 py-2 loan-import-desc';
+            tdDesc.dataset.label = 'Description';
+            const wrap = document.createElement('span');
+            wrap.className = 'loan-import-ref';
             wrap.textContent = c.description;
             tdDesc.appendChild(wrap);
             if (c.possible_duplicate) {
-                const badge = document.createElement('span');
-                badge.className = 'ml-2 text-xs text-amber-800 font-semibold';
-                badge.textContent = 'Matches existing transaction';
-                tdDesc.appendChild(badge);
+                const inlineBadge = document.createElement('span');
+                inlineBadge.className = 'loan-import-inline-badge ml-2 text-xs text-amber-800 font-semibold';
+                inlineBadge.textContent = 'Matches existing transaction';
+                tdDesc.appendChild(inlineBadge);
+            }
+
+            const tdBadge = document.createElement('td');
+            tdBadge.className = 'px-4 py-2 loan-import-badge';
+            if (c.possible_duplicate) {
+                tdBadge.textContent = 'Matches existing transaction';
             }
 
             const tdBank = document.createElement('td');
-            tdBank.className = 'px-4 py-2 whitespace-nowrap';
+            tdBank.className = 'px-4 py-2 whitespace-nowrap loan-import-bank';
+            tdBank.dataset.label = 'Bank (£)';
             const bankVal = typeof c.amount_bank === 'number' ? c.amount_bank : parseFloat(c.amount_bank);
             tdBank.textContent = Number.isFinite(bankVal) ? bankVal.toFixed(2) : String(c.amount_bank);
 
             const tdShare = document.createElement('td');
-            tdShare.className = 'px-4 py-2';
+            tdShare.className = 'px-4 py-2 loan-import-share loan-import-detail';
+            tdShare.dataset.label = 'Your share (£)';
             const inp = document.createElement('input');
             inp.type = 'number';
             inp.step = '0.01';
@@ -637,15 +652,37 @@ document.addEventListener('DOMContentLoaded', function() {
             inp.value = Number(defShare).toFixed(2);
             tdShare.appendChild(inp);
 
+            const tdToggle = document.createElement('td');
+            tdToggle.className = 'px-2 py-2 loan-import-toggle';
+            tdToggle.innerHTML = '<span class="loan-import-chevron" aria-hidden="true"></span><span class="sr-only">Show details</span>';
+
             tr.appendChild(tdCheck);
             tr.appendChild(tdDate);
             tr.appendChild(tdDesc);
+            tr.appendChild(tdBadge);
             tr.appendChild(tdBank);
             tr.appendChild(tdShare);
+            tr.appendChild(tdToggle);
             statementImportTbody.appendChild(tr);
         });
         statementImportResults.style.display = 'block';
         syncStatementIncludeAll();
+    }
+
+    function collapseLoanImportRows() {
+        if (!statementImportTbody) return;
+        statementImportTbody.querySelectorAll('tr.loan-import-row--open').forEach((row) => {
+            row.classList.remove('loan-import-row--open');
+            row.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function toggleLoanImportRow(row) {
+        if (!row) return;
+        const willOpen = !row.classList.contains('loan-import-row--open');
+        collapseLoanImportRows();
+        row.classList.toggle('loan-import-row--open', willOpen);
+        row.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
     }
 
     if (statementIncludeAll && statementImportTbody) {
@@ -659,6 +696,20 @@ document.addEventListener('DOMContentLoaded', function() {
         statementImportTbody.addEventListener('change', (e) => {
             if (!e.target.classList.contains('statement-row-check')) return;
             syncStatementIncludeAll();
+        });
+        statementImportTbody.addEventListener('click', (e) => {
+            if (e.target.closest('input, select, label, a, button')) return;
+            const row = e.target.closest('tr.loan-import-row');
+            if (!row) return;
+            toggleLoanImportRow(row);
+        });
+        statementImportTbody.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.target.closest('input, select, label, a, button')) return;
+            const row = e.target.closest('tr.loan-import-row');
+            if (!row) return;
+            e.preventDefault();
+            toggleLoanImportRow(row);
         });
     }
 

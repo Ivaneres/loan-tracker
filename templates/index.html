@@ -251,27 +251,34 @@
                     <div id="baseline-diff-changed" class="text-sm"></div>
                 </div>
                 <div id="statement-import-results" style="display:none;">
-                    <div class="overflow-x-auto mb-4">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="loan-thead">
+                    <div class="loan-import-toolbar">
+                        <label class="inline-flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="statement-include-all" title="Select or deselect all rows" aria-label="Select or deselect all rows" />
+                            <span>Select all</span>
+                        </label>
+                        <p class="loan-import-expand-hint">Tap a row to edit your share</p>
+                    </div>
+                    <div class="overflow-x-auto mb-4 loan-import-scroll">
+                        <table class="min-w-full divide-y divide-gray-200 loan-import-table">
+                            <thead class="loan-thead loan-import-thead">
                                 <tr>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                        <label class="inline-flex items-center gap-1.5 cursor-pointer normal-case tracking-normal">
-                                            <input type="checkbox" id="statement-include-all" title="Select or deselect all rows" aria-label="Select or deselect all rows" />
-                                            <span class="uppercase tracking-wider">Include</span>
-                                        </label>
+                                        <span class="loan-import-thead-include">Include</span>
                                     </th>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Bank (£)</th>
                                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Your share (£)</th>
+                                    <th class="px-2 py-2 loan-import-toggle-th"><span class="sr-only">Details</span></th>
                                 </tr>
                             </thead>
-                            <tbody id="statement-import-tbody" class="bg-white divide-y divide-gray-200"></tbody>
+                            <tbody id="statement-import-tbody" class="bg-white divide-y divide-gray-200 loan-import-tbody"></tbody>
                         </table>
                     </div>
-                    <button type="button" id="statement-import-btn" class="app-btn app-btn--primary mr-2">Import selected</button>
-                    <button type="button" id="statement-clear-btn" class="app-btn app-btn--muted">Clear</button>
+                    <div class="loan-import-actions">
+                        <button type="button" id="statement-import-btn" class="app-btn app-btn--primary mr-2">Import selected</button>
+                        <button type="button" id="statement-clear-btn" class="app-btn app-btn--muted">Clear</button>
+                    </div>
                 </div>
                 {% else %}
                 <p class="text-gray-500">Import is disabled for deleted loans.</p>

@@ -1152,6 +1152,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function spendingPreviewMatchCell(isDup, dupReason, reviewReason) {
+        if (isDup) {
+            let label = 'Same as row in file';
+            if (dupReason === 'ledger') label = 'Already in ledger';
+            else if (dupReason === 'manual') label = 'Matches manual entry';
+            return `<span class="preview-duplicate-pill" data-reason="${escapeHtml(dupReason)}">${escapeHtml(label)}</span>`;
+        }
+        if (reviewReason === 'missed') {
+            return '<span class="preview-review-pill" data-reason="missed" title="On the statement but not in your manual spends — review">Not in manual</span>';
+        }
+        if (reviewReason === 'expected_bill') {
+            return '<span class="preview-review-pill" data-reason="expected_bill" title="Matches an expected monthly bill">Expected bill</span>';
+        }
+        return '<span class="preview-match-empty text-gray-300">—</span>';
+    }
+
+    function formatPreviewShortDate(iso) {
+        const raw = String(iso || '').trim().slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+        const d = new Date(`${raw}T12:00:00`);
+        if (Number.isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    }
+
+    function collapsePreviewRows() {
+        if (!previewTbody) return;
+        previewTbody.querySelectorAll('tr.preview-tx-row--open').forEach((row) => {
+            row.classList.remove('preview-tx-row--open');
+            row.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function togglePreviewRow(row) {
+        if (!row) return;
+        const willOpen = !row.classList.contains('preview-tx-row--open');
+        collapsePreviewRows();
+        row.classList.toggle('preview-tx-row--open', willOpen);
+        row.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    }
+
     function recomputeSpendingPreviewDuplicates() {
         if (!previewTbody) return;
         const period = getSpendingPeriodPayload();
@@ -1169,26 +1209,36 @@ document.addEventListener('DOMContentLoaded', () => {
             const amount = parseFloat(tr.dataset.amount || '0');
             const desc = tr.dataset.description || '';
             const fp = spendingFingerprintForPreview(rm, dStr, amount, direction, desc);
+            const origDir = tr.dataset.origDirection || direction;
+            const serverDupReason = tr.dataset.serverDupReason || '';
+            const serverReview = tr.dataset.serverReviewReason || '';
             let isDup = false;
             let reason = '';
+            let reviewReason = '';
             if (ledger.has(fp)) {
                 isDup = true;
                 reason = 'ledger';
             } else if (seen.has(fp)) {
                 isDup = true;
                 reason = 'upload';
+            } else if (direction === origDir && serverDupReason === 'manual') {
+                // Client cannot re-run fuzzy manual match; preserve server mark when direction unchanged.
+                isDup = true;
+                reason = 'manual';
+                seen.add(fp);
             } else {
                 seen.add(fp);
+                if (direction === origDir) {
+                    reviewReason = serverReview;
+                } else if (direction === 'outgoing') {
+                    reviewReason = 'missed';
+                }
             }
             tr.classList.toggle('spending-preview-row-duplicate', isDup);
+            tr.classList.toggle('spending-preview-row-missed', !isDup && reviewReason === 'missed');
             const badgeCell = tr.querySelector('.preview-duplicate-cell');
             if (badgeCell) {
-                if (isDup) {
-                    const label = reason === 'ledger' ? 'Already in ledger' : 'Same as row in file';
-                    badgeCell.innerHTML = `<span class="preview-duplicate-pill" data-reason="${escapeHtml(reason)}">${escapeHtml(label)}</span>`;
-                } else {
-                    badgeCell.innerHTML = '<span class="text-gray-300">—</span>';
-                }
+                badgeCell.innerHTML = spendingPreviewMatchCell(isDup, reason, reviewReason);
             }
             const include = tr.querySelector('.preview-include');
             if (include) {
@@ -1312,6 +1362,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (previewSummary) {
             previewSummary.classList.add('hidden');
             previewSummary.textContent = '';
+            previewSummary.innerHTML = '';
         }
         const pipePanel = document.getElementById('spending-pipeline-panel');
         if (pipePanel) {
@@ -1420,6 +1471,9 @@ document.addEventListener('DOMContentLoaded', () => {
         previewTbody.innerHTML = '';
         transactions.forEach((tx) => {
             const tr = document.createElement('tr');
+            tr.className = 'preview-tx-row';
+            tr.tabIndex = 0;
+            tr.setAttribute('aria-expanded', 'false');
             tr.dataset.id = tx.id;
             tr.dataset.date = tx.date;
             tr.dataset.description = tx.description;
@@ -1432,22 +1486,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tx.completed_date) tr.dataset.completedDate = tx.completed_date;
             const isDup = tx.preview_duplicate === true;
             const isBoundary = tx.date_boundary === true;
+            const reviewReason = (tx.preview_review_reason && String(tx.preview_review_reason)) || '';
             if (isDup) tr.classList.add('spending-preview-row-duplicate');
+            if (!isDup && reviewReason === 'missed') tr.classList.add('spending-preview-row-missed');
             if (isBoundary) tr.classList.add('spending-preview-row-boundary');
             const dupReason = (tx.preview_duplicate_reason && String(tx.preview_duplicate_reason)) || '';
-            const dupCell = isDup
-                ? `<span class="preview-duplicate-pill" data-reason="${escapeHtml(dupReason)}">${
-                      dupReason === 'ledger' ? 'Already in ledger' : 'Same as row in file'
-                  }</span>`
-                : '<span class="text-gray-300">—</span>';
+            tr.dataset.origDirection = String(tx.direction || 'outgoing');
+            tr.dataset.serverDupReason = dupReason;
+            tr.dataset.serverReviewReason = reviewReason;
+            const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason);
 
             const startedLabel = tx.started_date ? String(tx.started_date) : '';
             const boundaryCell = isBoundary
                 ? `<span class="preview-boundary-pill" title="Started outside the selected range; ledger date uses completed/settled date">Started ${escapeHtml(startedLabel || 'outside range')}</span>`
                 : '';
-            const dateCell = boundaryCell
+            const dateInner = boundaryCell
                 ? `<div class="preview-date-stack"><span class="preview-date-primary">${escapeHtml(String(tx.date || ''))}</span>${boundaryCell}</div>`
-                : escapeHtml(String(tx.date || ''));
+                : `<span class="preview-date-primary">${escapeHtml(String(tx.date || ''))}</span>`;
+            const shortDate = formatPreviewShortDate(tx.date);
+            const shortDateHtml = shortDate
+                ? `<span class="preview-tx-date-short"> · ${escapeHtml(shortDate)}</span>`
+                : '';
 
             const rec = tx.reconciliation || {};
             const transferCell =
@@ -1462,23 +1521,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     : '<span class="text-gray-500">Unpaired</span>';
             // Duplicates stay unchecked; boundary rows are included by default.
             const includeChecked = !isDup;
+            const amt = Number(tx.amount);
+            const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : escapeHtml(tx.amount);
             tr.innerHTML = `
-                <td class="px-3 py-2"><input type="checkbox" class="preview-include" ${includeChecked ? 'checked' : ''}></td>
-                <td class="px-3 py-2 align-top preview-duplicate-cell text-sm">${dupCell}</td>
-                <td class="px-3 py-2 align-top whitespace-nowrap">${dateCell}</td>
-                <td class="px-3 py-2">${escapeHtml(String(tx.description || ''))}</td>
-                <td class="px-3 py-2 whitespace-nowrap">
+                <td class="px-3 py-2 preview-tx-include">
+                    <input type="checkbox" class="preview-include" ${includeChecked ? 'checked' : ''} aria-label="Include in import">
+                </td>
+                <td class="px-3 py-2 align-top preview-duplicate-cell preview-tx-match text-sm" data-label="Match">${dupCell}</td>
+                <td class="px-3 py-2 align-top whitespace-nowrap preview-tx-date preview-tx-detail" data-label="Date">${dateInner}</td>
+                <td class="px-3 py-2 preview-tx-desc" data-label="Description">
+                    <span class="preview-tx-ref">${escapeHtml(String(tx.description || ''))}</span>${shortDateHtml}
+                </td>
+                <td class="px-3 py-2 whitespace-nowrap preview-tx-dir preview-tx-detail" data-label="Direction">
                     <select class="preview-direction border border-gray-300 rounded px-2 py-1 bg-white text-sm">
                         <option value="outgoing" ${tx.direction === 'outgoing' ? 'selected' : ''}>Outgoing</option>
                         <option value="incoming" ${tx.direction === 'incoming' ? 'selected' : ''}>Incoming</option>
                     </select>
                 </td>
-                <td class="px-3 py-2 whitespace-nowrap">${Number(tx.amount).toFixed(2)}</td>
-                <td class="px-3 py-2 text-sm align-top max-w-xs">${transferCell}</td>
-                <td class="px-3 py-2 preview-category-cell">
+                <td class="px-3 py-2 whitespace-nowrap preview-tx-amount" data-label="Amount (£)">${amtStr}</td>
+                <td class="px-3 py-2 text-sm align-top max-w-xs preview-tx-transfer preview-tx-detail" data-label="Transfer">${transferCell}</td>
+                <td class="px-3 py-2 preview-category-cell preview-tx-cat preview-tx-detail" data-label="Category">
                     ${tx.direction === 'outgoing'
                         ? `<select class="preview-category border border-gray-300 rounded px-2 py-1 bg-white text-sm">${categoryOptions(tx.category || 'other')}</select>`
                         : '<span class="text-gray-400">—</span>'}
+                </td>
+                <td class="px-2 py-2 preview-tx-toggle">
+                    <span class="preview-tx-chevron" aria-hidden="true"></span>
+                    <span class="sr-only">Show details</span>
                 </td>
             `;
             previewTbody.appendChild(tr);
@@ -1504,58 +1573,104 @@ document.addEventListener('DOMContentLoaded', () => {
         previewWrap.classList.remove('hidden');
         if (previewSummary && summary) {
             previewSummary.classList.remove('hidden');
-            const extra = [];
-            if (summary.report_month) extra.push(`Stats month: ${summary.report_month}`);
+            const metaBits = [];
+            if (summary.report_month) metaBits.push(`Stats month: ${summary.report_month}`);
             if (summary.period_start && summary.period_end) {
-                extra.push(`Range: ${summary.period_start} → ${summary.period_end}`);
+                metaBits.push(`Range: ${summary.period_start} → ${summary.period_end}`);
             }
             if (summary.filtered_out_count != null && summary.filtered_out_count > 0) {
-                extra.push(`Dropped outside range: ${summary.filtered_out_count}`);
+                metaBits.push(`Dropped outside range: ${summary.filtered_out_count}`);
             }
             if (summary.date_boundary_count != null && summary.date_boundary_count > 0) {
-                extra.push(
+                metaBits.push(
                     `Boundary dates: ${summary.date_boundary_count} (started outside range; included — uncheck to skip)`
                 );
             }
             if (summary.raw_extraction_count != null && summary.total_rows != null) {
-                extra.push(`Kept ${summary.total_rows} / ${summary.raw_extraction_count} extracted`);
+                metaBits.push(`Kept ${summary.total_rows} / ${summary.raw_extraction_count} extracted`);
             }
-            const head = extra.length ? `${extra.join(' · ')} — ` : '';
             const rec = summary.direction_reconciliation;
-            const recSuffix = rec && rec.hints_seen
-                ? ` · Layout-corrected directions: ${rec.overridden}/${rec.overridden + rec.confirmed} (${rec.unmatched_rows} rows unmatched)`
-                : '';
-            let exSuffix = '';
+            if (rec && rec.hints_seen) {
+                metaBits.push(
+                    `Layout-corrected directions: ${rec.overridden}/${rec.overridden + rec.confirmed} (${rec.unmatched_rows} rows unmatched)`
+                );
+            }
             const ex = summary.extraction;
             if (ex && ex.mode === 'layout_hints') {
-                exSuffix = ` · Extraction: layout hints (${ex.raw_row_count ?? 0} raw row(s) from ${ex.hint_row_count ?? 0} hint line(s); compact filter model)`;
-            } else             if (ex && ex.mode === 'llm_full') {
+                metaBits.push(
+                    `Extraction: layout hints (${ex.raw_row_count ?? 0} raw row(s) from ${ex.hint_row_count ?? 0} hint line(s); compact filter model)`
+                );
+            } else if (ex && ex.mode === 'llm_full') {
                 const r = ex.reason === 'layout_low_yield' ? 'layout parse thin; used full model' : 'used full model';
-                exSuffix = ` · Extraction: ${r}`;
+                metaBits.push(`Extraction: ${r}`);
             }
             const trP = summary.transfer_reconciliation_preview;
-            let trPreviewSuffix = '';
             if (trP && trP.reconciliation) {
                 const trec = trP.reconciliation;
                 const ledgerN = trP.ledger_row_count_in_month;
-                trPreviewSuffix = ` · Transfer match preview: ${trec.pair_count || 0} pair(s) in full-month simulation`;
+                let trLine = `Transfer match preview: ${trec.pair_count || 0} pair(s) in full-month simulation`;
                 if (ledgerN > 0) {
-                    trPreviewSuffix += ` (${ledgerN} row(s) already in ledger for this month + this file)`;
+                    trLine += ` (${ledgerN} row(s) already in ledger for this month + this file)`;
                 } else {
-                    trPreviewSuffix += ' (this file only)';
+                    trLine += ' (this file only)';
                 }
-                trPreviewSuffix += `, ${trP.auto_applied_pairs_in_simulation ?? 0} new auto-pair(s) in sim`;
+                trLine += `, ${trP.auto_applied_pairs_in_simulation ?? 0} new auto-pair(s) in sim`;
+                metaBits.push(trLine);
             }
-            let dupSuffix = '';
+            const flags = [];
             const dl = Number(summary.preview_duplicate_ledger) || 0;
             const du = Number(summary.preview_duplicate_upload) || 0;
+            const missedN = Number(summary.preview_missed_manual) || 0;
+            const billN = Number(summary.preview_expected_bill) || 0;
             if (dl > 0 || du > 0) {
                 const parts = [];
-                if (dl) parts.push(`matches ledger: ${dl}`);
+                if (dl) parts.push(`matches ledger/manual: ${dl}`);
                 if (du) parts.push(`repeated in file: ${du}`);
-                dupSuffix = ` · Duplicates: ${parts.join(', ')} (unchecked; include if not a dupe)`;
+                flags.push({
+                    kind: 'dup',
+                    text: `Duplicates: ${parts.join(', ')} (unchecked; include if not a dupe)`,
+                });
             }
-            previewSummary.textContent = `${head}Rows: ${summary.total_rows} | Incoming: ${formatMoney(summary.incoming_total)} | Outgoing: ${formatMoney(summary.outgoing_total)} | Net: ${formatMoney(summary.net)}${recSuffix}${exSuffix}${trPreviewSuffix}${dupSuffix}`;
+            if (missedN > 0) {
+                flags.push({
+                    kind: 'missed',
+                    text: `Not in manual: ${missedN} (highlighted — review missed spends)`,
+                });
+            }
+            if (billN > 0) {
+                flags.push({ kind: 'bill', text: `Expected bills: ${billN}` });
+            }
+            const totals = [
+                { label: 'Rows', value: String(summary.total_rows ?? 0) },
+                { label: 'In', value: formatMoney(summary.incoming_total) },
+                { label: 'Out', value: formatMoney(summary.outgoing_total) },
+                { label: 'Net', value: formatMoney(summary.net) },
+            ];
+            previewSummary.innerHTML = `
+                <div class="preview-summary-totals">
+                    ${totals
+                        .map(
+                            (t) =>
+                                `<div class="preview-summary-stat"><span class="preview-summary-stat-label">${escapeHtml(t.label)}</span><span class="preview-summary-stat-value">${escapeHtml(t.value)}</span></div>`
+                        )
+                        .join('')}
+                </div>
+                ${
+                    metaBits.length
+                        ? `<p class="preview-summary-meta">${escapeHtml(metaBits.join(' · '))}</p>`
+                        : ''
+                }
+                ${
+                    flags.length
+                        ? `<ul class="preview-summary-flags">${flags
+                              .map(
+                                  (f) =>
+                                      `<li class="preview-summary-flag preview-summary-flag--${escapeHtml(f.kind)}">${escapeHtml(f.text)}</li>`
+                              )
+                              .join('')}</ul>`
+                        : ''
+                }
+            `;
         }
         if (importBtn) importBtn.disabled = transactions.length === 0;
         syncPreviewIncludeAll();
@@ -2454,6 +2569,20 @@ document.addEventListener('DOMContentLoaded', () => {
         previewTbody.addEventListener('change', (e) => {
             if (!e.target.classList.contains('preview-include')) return;
             syncPreviewIncludeAll();
+        });
+        previewTbody.addEventListener('click', (e) => {
+            if (e.target.closest('input, select, label, a, button')) return;
+            const row = e.target.closest('tr.preview-tx-row');
+            if (!row) return;
+            togglePreviewRow(row);
+        });
+        previewTbody.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            if (e.target.closest('input, select, label, a, button')) return;
+            const row = e.target.closest('tr.preview-tx-row');
+            if (!row) return;
+            e.preventDefault();
+            togglePreviewRow(row);
         });
     }
 

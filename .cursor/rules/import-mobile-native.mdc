@@ -1,0 +1,28 @@
+---
+description: Native mobile cards for Home and loan statement import previews
+globs: templates/home.html,templates/index.html,static/spending.js,static/script.js,static/style.css,tests/test_statement_include_all.py
+alwaysApply: false
+---
+
+# Import preview — mobile native cards
+
+At `max-width: 640px`, statement import previews use the same expandable-card approach as Search (keep table DOM; CSS grid cards).
+
+## Home (`body.home-page`)
+
+- Toolbar above list: `#preview-include-all` + `#spending-preview-expand-hint`
+- Collapsed card: include · description (+ short date) · amount · chevron; match pill on second line
+- Expanded (`preview-tx-row--open`): date, direction, category, transfer (labeled via `data-label`)
+- Summary: `.preview-summary-totals` + flags (not one long text line)
+- Toggle / short date / expand hint hidden on desktop
+
+## Loan (`#statement-import-results`)
+
+- Toolbar select-all + “Tap a row to edit your share”
+- Collapsed: include · desc · bank £ · chevron; dupe badge on second line
+- Expanded: date + your-share input
+- Desktop keeps wide table; badge/toggle columns `display: none`
+
+## Tokens
+
+Reuse Search mint/ink (`--ink`, `--muted`, `--line`, accent ring). Do not introduce a new palette.

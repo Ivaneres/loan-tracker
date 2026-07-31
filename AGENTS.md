@@ -7,6 +7,9 @@ Project-specific guidance for coding agents lives in **`.cursor/rules/`** (check
 | `project-overview.mdc` | Always — stack, layout, auth, tests; **every feature**: full unit-test run + step-by-step UI playthrough with inline PR screenshots |
 | `production-deployment.mdc` | Always — only follow when user asks to deploy |
 | `daily-budget.mdc` | Daily budget / spending-daily files (incl. required PR screenshots) |
+| `statement-manual-reconcile.mdc` | Home statement import preview — manual fuzzy match, missed spends, expected bills |
+| `import-mobile-native.mdc` | Home + loan import preview mobile expandable cards |
+| `transaction-search.mdc` | Global transaction search |
 
 ## Standard feature routine
 

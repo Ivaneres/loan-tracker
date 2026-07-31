@@ -107,6 +107,28 @@
                 </table>
             </div>
 
+            <div id="tx-search-muted-section" class="search-muted-section mt-6 hidden" hidden>
+                <h3 class="search-muted-heading" id="tx-search-muted-heading">Excluded from totals</h3>
+                <p class="spending-hint text-xs mt-1">Paired internal transfers and lines marked Exclude from totals.</p>
+                <div class="spending-tx-scroll mt-3 search-tx-scroll">
+                    <table class="spending-tx-table search-tx-table search-tx-table--muted min-w-full text-sm" id="tx-search-muted-table" aria-labelledby="tx-search-muted-heading">
+                        <thead class="search-tx-thead">
+                            <tr class="text-left text-xs uppercase tracking-wide" style="color: var(--muted);">
+                                <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Date</th>
+                                <th scope="col" class="px-3 py-2.5 min-w-[8rem]">Description</th>
+                                <th scope="col" class="px-3 py-2.5 min-w-[6rem]">Source</th>
+                                <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Direction</th>
+                                <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Amount (£)</th>
+                                <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Category</th>
+                                <th scope="col" class="px-3 py-2.5 whitespace-nowrap">Month</th>
+                                <th scope="col" class="search-tx-toggle-col"><span class="sr-only">Details</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="tx-search-muted-tbody" class="spending-tx-tbody search-tx-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="search-pager mt-3 hidden" id="tx-search-pager">
                 <button type="button" class="spending-btn spending-btn--muted text-sm" id="tx-search-prev" disabled>Previous</button>
                 <span id="tx-search-page-label" class="spending-hint text-sm"></span>
