@@ -1574,7 +1574,7 @@ span.preview-boundary-pill {
 }
 
 /* Home import preview chrome (desktop defaults; mobile cards in @media below) */
-.import-preview-wrap {
+.import-preview-wrap:not(.hidden) {
     display: flex;
     flex-direction: column;
     gap: 0.65rem;
