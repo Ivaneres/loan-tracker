@@ -463,6 +463,69 @@ class TestManualImportDedup(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match['id'], 'm1')
 
+    def test_fuzzy_match_ignores_different_payment_ref_when_unique(self):
+        """Unique date+amount match even when titles/refs look unrelated."""
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-03-12',
+                    amount=18.4,
+                    description='Lunch with Sam',
+                    source='manual',
+                    category='dining',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-03-12',
+            amount=18.4,
+            description='PRET A MANGER LONDON BRIDGE REF 88421',
+            direction='outgoing',
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match['id'], 'm1')
+
+    def test_fuzzy_match_allows_slight_amount_and_date_drift(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-03-11',
+                    amount=9.97,
+                    description='Uber',
+                    source='manual',
+                    category='transport',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-03-12',
+            amount=10.2,
+            description='UBER *TRIP HELP.UBER.COM',
+            direction='outgoing',
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match['id'], 'm1')
+
+    def test_fuzzy_match_ambiguous_same_amount_needs_label(self):
+        spending = {
+            'transactions': [
+                _tx(id='m1', date='2024-04-01', amount=5.0, description='Coffee A', source='manual'),
+                _tx(id='m2', date='2024-04-01', amount=5.0, description='Coffee B', source='manual'),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-04-01',
+            amount=5.0,
+            description='TOTALLY DIFFERENT MERCHANT',
+            direction='outgoing',
+        )
+        self.assertIsNone(match)
+
     def test_import_skips_and_claims_manual(self):
         spending = {
             'transactions': [
@@ -493,6 +556,70 @@ class TestManualImportDedup(unittest.TestCase):
         self.assertTrue(manual['bank_matched'])
         self.assertEqual(manual['fingerprint'], fp)
         self.assertEqual(manual['source_statement_id'], 'stmt-1')
+
+    def test_claim_updates_amount_when_bank_differs_slightly(self):
+        manual = _tx(id='m1', date='2024-02-05', amount=10.0, description='Taxi', source='manual')
+        row = {'date': '2024-02-05', 'amount': 10.35, 'description': 'UBER TRIP', 'direction': 'outgoing'}
+        fp = 'fp'
+        app_mod._daily_budget_claim_manual_match(manual, row, 'stmt-1', fp)
+        self.assertEqual(manual['amount'], 10.35)
+        self.assertEqual(manual['manual_amount'], 10.0)
+
+    def test_preview_marks_manual_missed_and_expected_bill(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-01-10',
+                    amount=12.0,
+                    description='My coffee note',
+                    source='manual',
+                    category='dining',
+                ),
+            ],
+            'daily_budget': {
+                'plan': {
+                    'bill_items': [
+                        {'label': 'Spotify', 'amount': 10.99, 'included': True, 'category': 'subscriptions'},
+                    ],
+                },
+            },
+        }
+        rows = [
+            {
+                'date': '2024-01-10',
+                'amount': 12.15,
+                'direction': 'outgoing',
+                'description': 'COSTA COFFEE #991',
+            },
+            {
+                'date': '2024-01-15',
+                'amount': 10.99,
+                'direction': 'outgoing',
+                'description': 'SPOTIFY P0ABC',
+            },
+            {
+                'date': '2024-01-16',
+                'amount': 45.0,
+                'direction': 'outgoing',
+                'description': 'UNKNOWN SHOP',
+            },
+            {
+                'date': '2024-01-17',
+                'amount': 100.0,
+                'direction': 'incoming',
+                'description': 'SALARY',
+            },
+        ]
+        led, dup_u, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
+        self.assertEqual(led, 1)
+        self.assertEqual(dup_u, 0)
+        self.assertTrue(rows[0]['preview_duplicate'])
+        self.assertEqual(rows[0]['preview_duplicate_reason'], 'manual')
+        self.assertEqual(rows[1]['preview_review_reason'], 'expected_bill')
+        self.assertFalse(rows[1]['preview_duplicate'])
+        self.assertEqual(rows[2]['preview_review_reason'], 'missed')
+        self.assertIsNone(rows[3].get('preview_review_reason'))
 
 
 class TestDailyCommonTitles(unittest.TestCase):

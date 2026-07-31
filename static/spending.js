@@ -1152,6 +1152,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function spendingPreviewMatchCell(isDup, dupReason, reviewReason) {
+        if (isDup) {
+            let label = 'Same as row in file';
+            if (dupReason === 'ledger') label = 'Already in ledger';
+            else if (dupReason === 'manual') label = 'Matches manual entry';
+            return `<span class="preview-duplicate-pill" data-reason="${escapeHtml(dupReason)}">${escapeHtml(label)}</span>`;
+        }
+        if (reviewReason === 'missed') {
+            return '<span class="preview-review-pill" data-reason="missed" title="On the statement but not in your manual spends — review">Not in manual</span>';
+        }
+        if (reviewReason === 'expected_bill') {
+            return '<span class="preview-review-pill" data-reason="expected_bill" title="Matches an expected monthly bill">Expected bill</span>';
+        }
+        return '<span class="text-gray-300">—</span>';
+    }
+
     function recomputeSpendingPreviewDuplicates() {
         if (!previewTbody) return;
         const period = getSpendingPeriodPayload();
@@ -1169,26 +1185,36 @@ document.addEventListener('DOMContentLoaded', () => {
             const amount = parseFloat(tr.dataset.amount || '0');
             const desc = tr.dataset.description || '';
             const fp = spendingFingerprintForPreview(rm, dStr, amount, direction, desc);
+            const origDir = tr.dataset.origDirection || direction;
+            const serverDupReason = tr.dataset.serverDupReason || '';
+            const serverReview = tr.dataset.serverReviewReason || '';
             let isDup = false;
             let reason = '';
+            let reviewReason = '';
             if (ledger.has(fp)) {
                 isDup = true;
                 reason = 'ledger';
             } else if (seen.has(fp)) {
                 isDup = true;
                 reason = 'upload';
+            } else if (direction === origDir && serverDupReason === 'manual') {
+                // Client cannot re-run fuzzy manual match; preserve server mark when direction unchanged.
+                isDup = true;
+                reason = 'manual';
+                seen.add(fp);
             } else {
                 seen.add(fp);
+                if (direction === origDir) {
+                    reviewReason = serverReview;
+                } else if (direction === 'outgoing') {
+                    reviewReason = 'missed';
+                }
             }
             tr.classList.toggle('spending-preview-row-duplicate', isDup);
+            tr.classList.toggle('spending-preview-row-missed', !isDup && reviewReason === 'missed');
             const badgeCell = tr.querySelector('.preview-duplicate-cell');
             if (badgeCell) {
-                if (isDup) {
-                    const label = reason === 'ledger' ? 'Already in ledger' : 'Same as row in file';
-                    badgeCell.innerHTML = `<span class="preview-duplicate-pill" data-reason="${escapeHtml(reason)}">${escapeHtml(label)}</span>`;
-                } else {
-                    badgeCell.innerHTML = '<span class="text-gray-300">—</span>';
-                }
+                badgeCell.innerHTML = spendingPreviewMatchCell(isDup, reason, reviewReason);
             }
             const include = tr.querySelector('.preview-include');
             if (include) {
@@ -1432,14 +1458,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tx.completed_date) tr.dataset.completedDate = tx.completed_date;
             const isDup = tx.preview_duplicate === true;
             const isBoundary = tx.date_boundary === true;
+            const reviewReason = (tx.preview_review_reason && String(tx.preview_review_reason)) || '';
             if (isDup) tr.classList.add('spending-preview-row-duplicate');
+            if (!isDup && reviewReason === 'missed') tr.classList.add('spending-preview-row-missed');
             if (isBoundary) tr.classList.add('spending-preview-row-boundary');
             const dupReason = (tx.preview_duplicate_reason && String(tx.preview_duplicate_reason)) || '';
-            const dupCell = isDup
-                ? `<span class="preview-duplicate-pill" data-reason="${escapeHtml(dupReason)}">${
-                      dupReason === 'ledger' ? 'Already in ledger' : 'Same as row in file'
-                  }</span>`
-                : '<span class="text-gray-300">—</span>';
+            tr.dataset.origDirection = String(tx.direction || 'outgoing');
+            tr.dataset.serverDupReason = dupReason;
+            tr.dataset.serverReviewReason = reviewReason;
+            const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason);
 
             const startedLabel = tx.started_date ? String(tx.started_date) : '';
             const boundaryCell = isBoundary
@@ -1549,11 +1576,19 @@ document.addEventListener('DOMContentLoaded', () => {
             let dupSuffix = '';
             const dl = Number(summary.preview_duplicate_ledger) || 0;
             const du = Number(summary.preview_duplicate_upload) || 0;
+            const missedN = Number(summary.preview_missed_manual) || 0;
+            const billN = Number(summary.preview_expected_bill) || 0;
             if (dl > 0 || du > 0) {
                 const parts = [];
-                if (dl) parts.push(`matches ledger: ${dl}`);
+                if (dl) parts.push(`matches ledger/manual: ${dl}`);
                 if (du) parts.push(`repeated in file: ${du}`);
                 dupSuffix = ` · Duplicates: ${parts.join(', ')} (unchecked; include if not a dupe)`;
+            }
+            if (missedN > 0) {
+                dupSuffix += ` · Not in manual: ${missedN} (highlighted — review missed spends)`;
+            }
+            if (billN > 0) {
+                dupSuffix += ` · Expected bills: ${billN}`;
             }
             previewSummary.textContent = `${head}Rows: ${summary.total_rows} | Incoming: ${formatMoney(summary.incoming_total)} | Outgoing: ${formatMoney(summary.outgoing_total)} | Net: ${formatMoney(summary.net)}${recSuffix}${exSuffix}${trPreviewSuffix}${dupSuffix}`;
         }

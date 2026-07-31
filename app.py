@@ -140,6 +140,11 @@ DAILY_BUDGET_IGNORE_CATEGORIES = frozenset({'savings'})
 DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
 DAILY_BUDGET_UNDERSPEND_PRIORITIES = frozenset({'debt_first', 'goals_first'})
 DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
+# Manual vs statement: allow slight amount drift (rounding / tips) and near-day posting.
+DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.50
+DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 1
+# Statement row vs expected monthly bill_items (label + amount).
+SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
     c for c in SPENDING_ALLOWED_CATEGORIES if c not in ('unclassified',)
 ]
@@ -657,6 +662,10 @@ def _apply_spending_preview_duplicate_marks(
     same fingerprint scheme as import. First occurrence in the upload is kept; later
     matching rows in the file, or any row matching the ledger, are marked duplicate.
 
+    Also sets preview_review_reason for non-duplicate outgoing rows:
+    - expected_bill — matches an included daily-budget bill_item (not “missed”)
+    - missed — on statement but not in the unmatched manual list (review these)
+
     Returns (ledger_duplicate_count, upload_duplicate_count, ledger_fingerprints_for_ui).
     The fingerprint list is restricted to the current report month for a smaller JSON payload.
     """
@@ -664,9 +673,13 @@ def _apply_spending_preview_duplicate_marks(
     ledger_fps = {str(t.get('fingerprint')) for t in tx_store if t.get('fingerprint')}
     rm = (report_month or '').strip()[:7]
     seen: set[str] = set()
+    claimed_manual_ids: set[str] = set()
+    used_bill_idxs: set[int] = set()
+    bill_items = _spending_included_bill_items(spending)
     led = 0
     dup_upload = 0
     for r in rows:
+        r['preview_review_reason'] = None
         fp = _spending_fingerprint(
             rm,
             str(r.get('date') or ''),
@@ -683,14 +696,19 @@ def _apply_spending_preview_duplicate_marks(
             r['preview_duplicate_reason'] = 'upload'
             dup_upload += 1
         else:
+            direction = str(r.get('direction') or 'outgoing')
             manual = _daily_budget_fuzzy_match_manual(
                 spending,
                 date_str=str(r.get('date') or '')[:10],
                 amount=float(r.get('amount') or 0),
                 description=str(r.get('description') or ''),
-                direction=str(r.get('direction') or 'outgoing'),
+                direction=direction,
+                exclude_ids=claimed_manual_ids,
             )
             if manual is not None:
+                mid = str(manual.get('id') or '')
+                if mid:
+                    claimed_manual_ids.add(mid)
                 r['preview_duplicate'] = True
                 r['preview_duplicate_reason'] = 'manual'
                 led += 1
@@ -698,6 +716,18 @@ def _apply_spending_preview_duplicate_marks(
                 r['preview_duplicate'] = False
                 r['preview_duplicate_reason'] = None
                 seen.add(fp)
+                if direction == 'outgoing':
+                    bill_j = _match_expected_bill_item(
+                        str(r.get('description') or ''),
+                        float(r.get('amount') or 0),
+                        bill_items,
+                        used_idxs=used_bill_idxs,
+                    )
+                    if bill_j is not None:
+                        used_bill_idxs.add(bill_j)
+                        r['preview_review_reason'] = 'expected_bill'
+                    else:
+                        r['preview_review_reason'] = 'missed'
     month_prefix = f'{rm}|' if len(rm) == 7 else None
     client_fps = sorted(fp for fp in ledger_fps if month_prefix and fp.startswith(month_prefix))
     return led, dup_upload, client_fps
@@ -4836,6 +4866,91 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     }
 
 
+def _manual_match_amounts_close(a: float, b: float) -> bool:
+    """Slight amount differences allowed when reconciling manual vs statement."""
+    try:
+        aa = float(a)
+        bb = float(b)
+    except (TypeError, ValueError):
+        return False
+    if abs(aa - bb) <= DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL:
+        return True
+    return _amounts_close_for_compare(aa, bb)
+
+
+def _manual_match_dates_close(a: str, b: str) -> bool:
+    da = _parse_iso_date(str(a or '')[:10])
+    db = _parse_iso_date(str(b or '')[:10])
+    if da is None or db is None:
+        return str(a or '')[:10] == str(b or '')[:10]
+    return abs((da - db).days) <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
+
+
+def _manual_description_match_ratio(man_n: str, desc_n: str) -> float:
+    if not man_n and not desc_n:
+        return 1.0
+    if not man_n or not desc_n:
+        return 0.55
+    ratio = SequenceMatcher(None, man_n, desc_n).ratio()
+    # Token overlap: manual "costa" inside bank "costa coffee cambridge ref 99"
+    if man_n in desc_n or desc_n in man_n:
+        ratio = max(ratio, 0.85)
+    man_toks = set(man_n.split())
+    desc_toks = set(desc_n.split())
+    if man_toks and man_toks <= desc_toks:
+        ratio = max(ratio, 0.88)
+    return ratio
+
+
+def _spending_included_bill_items(spending: dict) -> list:
+    db = spending.get('daily_budget') if isinstance(spending.get('daily_budget'), dict) else {}
+    plan = db.get('plan') if isinstance(db.get('plan'), dict) else {}
+    raw = plan.get('bill_items') if isinstance(plan.get('bill_items'), list) else []
+    out = []
+    for b in raw:
+        if not isinstance(b, dict):
+            continue
+        if b.get('included', True) is False:
+            continue
+        out.append(b)
+    return out
+
+
+def _match_expected_bill_item(
+    description: str,
+    amount: float,
+    bill_items: list,
+    *,
+    used_idxs: set[int] | None = None,
+) -> int | None:
+    """Return index into bill_items when statement line looks like a monthly expected bill."""
+    used = used_idxs if used_idxs is not None else set()
+    desc_n = _normalize_label(description)
+    try:
+        amt = float(amount)
+    except (TypeError, ValueError):
+        return None
+    best_j = None
+    best_sim = -1.0
+    for j, b in enumerate(bill_items):
+        if j in used:
+            continue
+        label = str(b.get('label') or b.get('description') or '')
+        try:
+            b_amt = float(b.get('amount') or 0)
+        except (TypeError, ValueError):
+            continue
+        if not _amounts_close_for_compare(amt, b_amt):
+            continue
+        sim = _manual_description_match_ratio(_normalize_label(label), desc_n)
+        if sim > best_sim:
+            best_sim = sim
+            best_j = j
+    if best_j is None or best_sim < SPENDING_EXPECTED_BILL_SIM_THRESHOLD:
+        return None
+    return best_j
+
+
 def _daily_budget_fuzzy_match_manual(
     spending: dict,
     *,
@@ -4843,44 +4958,64 @@ def _daily_budget_fuzzy_match_manual(
     amount: float,
     description: str,
     direction: str,
+    exclude_ids: set[str] | None = None,
 ) -> dict | None:
-    """Find a manual ledger row that likely duplicates an incoming statement line."""
+    """Find a manual ledger row that likely duplicates an incoming statement line.
+
+    Matching prioritises date (±1 day) and amount (slight tolerance). When that pair
+    uniquely identifies one unmatched manual entry, different payment references /
+    titles are ignored. Description similarity is used to break ties when several
+    manuals share a near date and amount.
+    """
     amount = round(float(amount), 2)
     desc_n = _normalize_label(description)
+    exclude = exclude_ids if exclude_ids is not None else set()
     candidates = []
     for t in spending.get('transactions') or []:
+        tid = str(t.get('id') or '')
+        if tid and tid in exclude:
+            continue
         if str(t.get('source') or '') != 'manual':
             continue
         if t.get('bank_matched'):
             continue
         if str(t.get('direction') or '') != direction:
             continue
-        if str(t.get('date') or '')[:10] != date_str:
+        if not _manual_match_dates_close(str(t.get('date') or '')[:10], date_str):
             continue
         try:
-            if round(float(t.get('amount') or 0), 2) != amount:
-                continue
+            man_amt = round(float(t.get('amount') or 0), 2)
         except (TypeError, ValueError):
             continue
+        if not _manual_match_amounts_close(man_amt, amount):
+            continue
         man_n = _normalize_label(str(t.get('description') or ''))
-        if not man_n and not desc_n:
-            ratio = 1.0
-        elif not man_n or not desc_n:
-            ratio = 0.55
-        else:
-            ratio = SequenceMatcher(None, man_n, desc_n).ratio()
-            if man_n in desc_n or desc_n in man_n:
-                ratio = max(ratio, 0.85)
-        if ratio >= DAILY_BUDGET_MANUAL_MATCH_RATIO or (ratio >= 0.55 and not man_n):
-            candidates.append((ratio, t))
+        ratio = _manual_description_match_ratio(man_n, desc_n)
+        amount_delta = abs(man_amt - amount)
+        candidates.append((ratio, amount_delta, t))
     if not candidates:
         return None
-    candidates.sort(key=lambda x: -x[0])
-    # Only auto-match when the best candidate is clearly unique enough
-    if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 0.05:
-        if candidates[0][0] < 0.9:
+    # Unique on date+amount window → accept even when payment refs differ.
+    if len(candidates) == 1:
+        return candidates[0][2]
+    candidates.sort(key=lambda x: (-x[0], x[1]))
+    # Prefer description when several manuals collide on date/amount.
+    labeled = [
+        c for c in candidates
+        if c[0] >= DAILY_BUDGET_MANUAL_MATCH_RATIO
+        or (c[0] >= 0.55 and not _normalize_label(str(c[2].get('description') or '')))
+    ]
+    pool = labeled if labeled else []
+    if not pool:
+        # No usable labels: only auto-match if one candidate is clearly closer in amount.
+        candidates.sort(key=lambda x: (x[1], -x[0]))
+        if len(candidates) >= 2 and abs(candidates[0][1] - candidates[1][1]) < 0.01:
             return None
-    return candidates[0][1]
+        return candidates[0][2]
+    if len(pool) > 1 and abs(pool[0][0] - pool[1][0]) < 0.05:
+        if pool[0][0] < 0.9:
+            return None
+    return pool[0][2]
 
 
 def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: str, fingerprint: str) -> None:
@@ -4894,6 +5029,21 @@ def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: s
         man = str(manual_tx.get('description') or '').strip()
         if not man or man.lower() in ('spend', 'expense', 'purchase'):
             manual_tx['description'] = bank_desc[:500]
+    # Bank amount is ground truth when reconciling slight differences.
+    try:
+        bank_amt = round(float(row.get('amount') or 0), 2)
+        man_amt = round(float(manual_tx.get('amount') or 0), 2)
+        if bank_amt > 0 and abs(bank_amt - man_amt) > 0.001:
+            manual_tx['manual_amount'] = man_amt
+            manual_tx['amount'] = bank_amt
+    except (TypeError, ValueError):
+        pass
+    bank_date = str(row.get('date') or '')[:10]
+    man_date = str(manual_tx.get('date') or '')[:10]
+    if bank_date and man_date and bank_date != man_date:
+        manual_tx['manual_date'] = man_date
+        manual_tx['date'] = bank_date
+        manual_tx['month'] = bank_date[:7]
     if manual_tx.get('category') in (None, '', 'unclassified') and row.get('category'):
         cat = str(row.get('category')).strip().lower()
         if cat in SPENDING_CATEGORY_SET:
@@ -6690,6 +6840,8 @@ def _spending_statement_preview_finalize(
         }
 
     d_led, d_up, dup_ledger_fps = _apply_spending_preview_duplicate_marks(rm, rows, spending)
+    missed_n = sum(1 for r in rows if r.get('preview_review_reason') == 'missed')
+    expected_bill_n = sum(1 for r in rows if r.get('preview_review_reason') == 'expected_bill')
 
     incoming_total = round(sum(r['amount'] for r in rows if r.get('direction') == 'incoming'), 2)
     outgoing_total = round(sum(r['amount'] for r in rows if r.get('direction') == 'outgoing'), 2)
@@ -6714,6 +6866,8 @@ def _spending_statement_preview_finalize(
         },
         'preview_duplicate_ledger': d_led,
         'preview_duplicate_upload': d_up,
+        'preview_missed_manual': missed_n,
+        'preview_expected_bill': expected_bill_n,
         'duplicate_ledger_fingerprints': dup_ledger_fps,
     }
     if extraction_meta:

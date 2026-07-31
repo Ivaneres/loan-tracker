@@ -1,0 +1,34 @@
+---
+description: Spending statement import — manual fuzzy match, missed spends, expected bills
+globs: app.py,static/spending.js,templates/home.html,static/style.css,tests/test_daily_budget.py,tests/test_spending_transfer.py
+alwaysApply: false
+---
+
+# Statement ↔ manual reconciliation (Home import preview)
+
+## Manual fuzzy match (`_daily_budget_fuzzy_match_manual`)
+
+Used on preview (`_apply_spending_preview_duplicate_marks`) and import (`spending_statement_import`).
+
+- Same `direction`; skip `bank_matched` and `exclude_ids`
+- **Date** within ±`DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS` (1)
+- **Amount** within `DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL` (£0.50) or `_amounts_close_for_compare`
+- If **one** candidate matches date+amount → accept even when payment refs / titles differ
+- If several collide → require description ratio ≥ `DAILY_BUDGET_MANUAL_MATCH_RATIO` (0.72) to disambiguate
+- Claim via `_daily_budget_claim_manual_match` (may store `manual_amount` / `manual_date` when bank differs)
+
+## Preview flags
+
+| Field | Values | UI |
+|---|---|---|
+| `preview_duplicate` + `preview_duplicate_reason` | `ledger` / `upload` / `manual` | Amber/blue/green pills; unchecked by default |
+| `preview_review_reason` | `missed` / `expected_bill` | Red “Not in manual” / gray “Expected bill”; still included |
+
+- **missed** — outgoing statement row not matching ledger fingerprint, upload dupe, manual, or included `daily_budget.plan.bill_items`
+- **expected_bill** — `_match_expected_bill_item` (label sim ≥ `SPENDING_EXPECTED_BILL_SIM_THRESHOLD`, amount close); one bill claimed per row
+- Summary: `preview_missed_manual`, `preview_expected_bill`
+- Client `recomputeSpendingPreviewDuplicates` preserves server `manual` / review marks when direction unchanged (`data-server-*`)
+
+## Tests
+
+`@tests/test_daily_budget.py` (`TestManualImportDedup`), UI strings in `@tests/test_spending_transfer.py`.

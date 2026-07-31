@@ -1513,9 +1513,39 @@ span.preview-duplicate-pill[data-reason="ledger"] {
     background: #dbeafe;
     border-color: #93c5fd;
 }
+span.preview-duplicate-pill[data-reason="manual"] {
+    color: #14532d;
+    background: #dcfce7;
+    border-color: #86efac;
+}
+
+/* Statement outgoing not found in manual list — review these */
+tr.spending-preview-row-missed:not(.spending-preview-row-duplicate) td {
+    background-color: #fef2f2;
+}
+span.preview-review-pill {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-radius: 0.25rem;
+    padding: 0.15rem 0.4rem;
+    white-space: nowrap;
+}
+span.preview-review-pill[data-reason="missed"] {
+    color: #7f1d1d;
+    background: #fecaca;
+    border: 1px solid #f87171;
+}
+span.preview-review-pill[data-reason="expected_bill"] {
+    color: #334155;
+    background: #e2e8f0;
+    border: 1px solid #94a3b8;
+}
 
 /* Started outside period, completed/settled date inside (e.g. Revolut) */
-tr.spending-preview-row-boundary:not(.spending-preview-row-duplicate) td {
+tr.spending-preview-row-boundary:not(.spending-preview-row-duplicate):not(.spending-preview-row-missed) td {
     background-color: #f0fdfa;
 }
 .preview-date-stack {

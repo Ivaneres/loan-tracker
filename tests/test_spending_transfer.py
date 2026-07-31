@@ -1,5 +1,6 @@
 """Internal transfer pairing and spending insight tests."""
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import app as app_mod
@@ -775,8 +776,20 @@ class TestSpendingPairing(unittest.TestCase):
         self.assertEqual(led, 0)
         self.assertEqual(dup_u, 1)
         self.assertFalse(rows[0]['preview_duplicate'])
+        self.assertEqual(rows[0].get('preview_review_reason'), 'missed')
         self.assertTrue(rows[1]['preview_duplicate'])
         self.assertEqual(rows[1]['preview_duplicate_reason'], 'upload')
+
+    def test_preview_match_ui_strings(self):
+        home = (Path(__file__).resolve().parents[1] / 'templates' / 'home.html').read_text(encoding='utf-8')
+        js = (Path(__file__).resolve().parents[1] / 'static' / 'spending.js').read_text(encoding='utf-8')
+        css = (Path(__file__).resolve().parents[1] / 'static' / 'style.css').read_text(encoding='utf-8')
+        self.assertIn('Match', home)
+        self.assertIn('Matches manual entry', js)
+        self.assertIn('Not in manual', js)
+        self.assertIn('Expected bill', js)
+        self.assertIn('spending-preview-row-missed', css)
+        self.assertIn('preview-review-pill', css)
 
     def test_insight_extended_fields_with_prior_month(self):
         """MoM deltas, trailing averages, category_trends, budget_action_items shape."""
