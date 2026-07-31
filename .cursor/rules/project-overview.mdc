@@ -89,6 +89,8 @@ Global transaction search (all months): `@.cursor/rules/transaction-search.mdc`.
 
 Daily Budget specifics: `@.cursor/rules/daily-budget.mdc`.
 
+Statement import ↔ manual reconciliation (fuzzy match, missed spends, expected bills): `@.cursor/rules/statement-manual-reconcile.mdc`.
+
 ## Production
 
 Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`.
