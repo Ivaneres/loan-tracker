@@ -107,7 +107,7 @@
 
             <p id="spending-status" class="text-sm mt-3 hidden"></p>
             <div id="home-import-next" class="home-import-next hidden" role="status"></div>
-            <div id="spending-preview-summary" class="text-sm mt-2 hidden" style="color: var(--text-color);"></div>
+            <div id="spending-preview-summary" class="text-sm mt-2 hidden preview-summary" style="color: var(--text-color);"></div>
             <details id="spending-pipeline-panel" class="mt-4 border rounded-lg p-3 text-sm hidden" style="border-color: var(--border-color); background: var(--background-color);">
                 <summary class="cursor-pointer font-medium select-none" style="color: var(--text-color);">How this file was read (intermediate representations)</summary>
                 <p id="spending-pipeline-summary" class="mt-2 text-xs leading-relaxed spending-muted"></p>
@@ -127,27 +127,34 @@
                     <pre id="spending-pipeline-direction" class="text-xs p-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
                 </div>
             </details>
-            <div id="spending-preview-wrap" class="overflow-x-auto mt-4 hidden import-preview-wrap">
-                <table class="min-w-full text-sm" style="border-color: var(--border-color);">
-                    <thead style="background: var(--background-color);">
-                        <tr>
-                            <th class="px-3 py-2 text-left">
-                                <label class="inline-flex items-center gap-1.5 cursor-pointer">
-                                    <input type="checkbox" id="preview-include-all" title="Select or deselect all rows" aria-label="Select or deselect all rows" />
-                                    <span>Include</span>
-                                </label>
-                            </th>
-                            <th class="px-3 py-2 text-left">Match <span class="text-gray-400 font-normal text-xs">(import)</span></th>
-                            <th class="px-3 py-2 text-left">Date</th>
-                            <th class="px-3 py-2 text-left">Description</th>
-                            <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
-                            <th class="px-3 py-2 text-left">Amount (£)</th>
-                            <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
-                            <th class="px-3 py-2 text-left">Category</th>
-                        </tr>
-                    </thead>
-                    <tbody id="spending-preview-tbody" class="bg-white"></tbody>
-                </table>
+            <div id="spending-preview-wrap" class="mt-4 hidden import-preview-wrap">
+                <div class="preview-toolbar">
+                    <label class="preview-toolbar-include inline-flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="preview-include-all" title="Select or deselect all rows" aria-label="Select or deselect all rows" />
+                        <span>Select all</span>
+                    </label>
+                    <p id="spending-preview-expand-hint" class="preview-expand-hint">Tap a row for match, direction &amp; category</p>
+                </div>
+                <div class="import-preview-scroll">
+                    <table class="min-w-full text-sm preview-tx-table" style="border-color: var(--border-color);">
+                        <thead class="preview-tx-thead" style="background: var(--background-color);">
+                            <tr>
+                                <th class="px-3 py-2 text-left">
+                                    <span class="preview-thead-include-label">Include</span>
+                                </th>
+                                <th class="px-3 py-2 text-left">Match <span class="text-gray-400 font-normal text-xs">(import)</span></th>
+                                <th class="px-3 py-2 text-left">Date</th>
+                                <th class="px-3 py-2 text-left">Description</th>
+                                <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
+                                <th class="px-3 py-2 text-left">Amount (£)</th>
+                                <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
+                                <th class="px-3 py-2 text-left">Category</th>
+                                <th class="px-2 py-2 preview-tx-toggle-th"><span class="sr-only">Details</span></th>
+                            </tr>
+                        </thead>
+                        <tbody id="spending-preview-tbody" class="bg-white preview-tx-tbody"></tbody>
+                    </table>
+                </div>
             </div>
         </section>
 

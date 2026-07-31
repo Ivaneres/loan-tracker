@@ -790,6 +790,11 @@ class TestSpendingPairing(unittest.TestCase):
         self.assertIn('Expected bill', js)
         self.assertIn('spending-preview-row-missed', css)
         self.assertIn('preview-review-pill', css)
+        self.assertIn('preview-tx-row', js)
+        self.assertIn('preview-toolbar', home)
+        self.assertIn('spending-preview-expand-hint', home)
+        self.assertIn('preview-tx-row--open', css)
+        self.assertIn('body.home-page .preview-tx-tbody tr.preview-tx-row', css)
 
     def test_insight_extended_fields_with_prior_month(self):
         """MoM deltas, trailing averages, category_trends, budget_action_items shape."""
