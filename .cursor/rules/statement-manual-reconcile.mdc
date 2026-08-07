@@ -16,6 +16,7 @@ Used on preview (`_apply_spending_preview_duplicate_marks`) and import (`spendin
 - If **one** candidate matches date+amount → accept even when payment refs / titles differ
 - If several collide → require description ratio ≥ `DAILY_BUDGET_MANUAL_MATCH_RATIO` (0.72) to disambiguate
 - Claim via `_daily_budget_claim_manual_match` (may store `manual_amount` / `manual_date` when bank differs)
+- **User override:** preview rows can send `manual_match_id` on import to claim a specific unmatched manual (no fuzzy rules); options come from `summary.unmatched_manuals`
 
 ## Preview flags
 

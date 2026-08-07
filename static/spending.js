@@ -773,6 +773,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let insightTransactionsSnapshot = [];
     /** Set of existing ledger fingerprint strings (same import scheme); used when reconciling dups after direction edit. */
     let spendingPreviewLedgerFps = null;
+    /** Unmatched manual ledger rows for user-selected reconciliation in import preview. */
+    let spendingPreviewUnmatchedManuals = [];
     let spendingMetricsChart = null;
     let spendingCategoryStackChart = null;
     /** @type {string|null} */
@@ -1152,7 +1154,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function spendingPreviewMatchCell(isDup, dupReason, reviewReason) {
+    function spendingPreviewMatchCell(isDup, dupReason, reviewReason, manualLinked) {
+        if (manualLinked) {
+            return '<span class="preview-duplicate-pill" data-reason="manual" title="You linked this statement line to a manual entry">Linked to manual</span>';
+        }
         if (isDup) {
             let label = 'Same as row in file';
             if (dupReason === 'ledger') label = 'Already in ledger';
@@ -1166,6 +1171,89 @@ document.addEventListener('DOMContentLoaded', () => {
             return '<span class="preview-review-pill" data-reason="expected_bill" title="Matches an expected monthly bill">Expected bill</span>';
         }
         return '<span class="preview-match-empty text-gray-300">—</span>';
+    }
+
+    function formatManualLinkOptionLabel(manual) {
+        const date = String(manual.date || '').slice(0, 10);
+        const amt = Number(manual.amount);
+        const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : '0.00';
+        const desc = String(manual.description || 'Manual spend').trim() || 'Manual spend';
+        return `${date} · £${amtStr} · ${desc}`;
+    }
+
+    function getPreviewClaimedManualIds() {
+        const claimed = new Set();
+        if (!previewTbody) return claimed;
+        previewTbody.querySelectorAll('tr').forEach((tr) => {
+            const mid = tr.dataset.manualMatchId || '';
+            if (mid) claimed.add(mid);
+        });
+        return claimed;
+    }
+
+    function manualLinkCandidatesForRow(tr) {
+        const direction = tr.dataset.direction || 'outgoing';
+        const claimed = getPreviewClaimedManualIds();
+        const selected = tr.dataset.manualMatchId || '';
+        return (spendingPreviewUnmatchedManuals || []).filter((m) => {
+            if (String(m.direction || 'outgoing') !== direction) return false;
+            const id = String(m.id || '');
+            if (!id) return false;
+            if (claimed.has(id) && id !== selected) return false;
+            return true;
+        });
+    }
+
+    function buildManualLinkSelectHtml(tr) {
+        const candidates = manualLinkCandidatesForRow(tr);
+        if (!candidates.length) return '';
+        const selected = tr.dataset.manualMatchId || '';
+        const opts = candidates
+            .map((m) => {
+                const id = String(m.id || '');
+                const label = formatManualLinkOptionLabel(m);
+                const sel = id === selected ? ' selected' : '';
+                return `<option value="${escapeHtml(id)}"${sel}>${escapeHtml(label)}</option>`;
+            })
+            .join('');
+        return `<select class="preview-manual-match-select border border-gray-300 rounded px-1 py-0.5 bg-white text-xs mt-1 max-w-full" aria-label="Link to manual entry"><option value="">Link to manual…</option>${opts}</select>`;
+    }
+
+    function refreshPreviewManualLinkUi(tr) {
+        if (!tr) return;
+        const manualLinked = Boolean(tr.dataset.manualMatchId);
+        const isDup = tr.classList.contains('spending-preview-row-duplicate');
+        const reviewReason = manualLinked ? '' : tr.dataset.serverReviewReason || '';
+        tr.classList.toggle('spending-preview-row-missed', !isDup && !manualLinked && reviewReason === 'missed');
+        tr.classList.toggle('spending-preview-row-manual-linked', manualLinked);
+        const badgeCell = tr.querySelector('.preview-duplicate-cell');
+        if (!badgeCell) return;
+        const dupReason = tr.dataset.serverDupReason || '';
+        const linkable =
+            !isDup &&
+            (tr.dataset.direction || 'outgoing') === 'outgoing' &&
+            tr.dataset.serverReviewReason !== 'expected_bill' &&
+            (spendingPreviewUnmatchedManuals || []).length > 0;
+        const badge = spendingPreviewMatchCell(isDup, dupReason, reviewReason, manualLinked);
+        const selectHtml = linkable ? buildManualLinkSelectHtml(tr) : '';
+        badgeCell.innerHTML = selectHtml
+            ? `<div class="preview-manual-link-stack">${badge}${selectHtml}</div>`
+            : badge;
+        const select = badgeCell.querySelector('.preview-manual-match-select');
+        if (select && !select.dataset.bound) {
+            select.dataset.bound = '1';
+            select.addEventListener('change', () => {
+                const val = select.value || '';
+                if (val) tr.dataset.manualMatchId = val;
+                else delete tr.dataset.manualMatchId;
+                previewTbody.querySelectorAll('tr').forEach((row) => refreshPreviewManualLinkUi(row));
+            });
+        }
+    }
+
+    function refreshAllPreviewManualLinkUi() {
+        if (!previewTbody) return;
+        previewTbody.querySelectorAll('tr').forEach((tr) => refreshPreviewManualLinkUi(tr));
     }
 
     function formatPreviewShortDate(iso) {
@@ -1212,10 +1300,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const origDir = tr.dataset.origDirection || direction;
             const serverDupReason = tr.dataset.serverDupReason || '';
             const serverReview = tr.dataset.serverReviewReason || '';
+            const manualLinked = Boolean(tr.dataset.manualMatchId);
             let isDup = false;
             let reason = '';
             let reviewReason = '';
-            if (ledger.has(fp)) {
+            if (manualLinked) {
+                isDup = false;
+            } else if (ledger.has(fp)) {
                 isDup = true;
                 reason = 'ledger';
             } else if (seen.has(fp)) {
@@ -1235,10 +1326,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             tr.classList.toggle('spending-preview-row-duplicate', isDup);
-            tr.classList.toggle('spending-preview-row-missed', !isDup && reviewReason === 'missed');
+            tr.classList.toggle('spending-preview-row-missed', !isDup && !manualLinked && reviewReason === 'missed');
+            tr.classList.toggle('spending-preview-row-manual-linked', manualLinked);
             const badgeCell = tr.querySelector('.preview-duplicate-cell');
             if (badgeCell) {
-                badgeCell.innerHTML = spendingPreviewMatchCell(isDup, reason, reviewReason);
+                const manualLinked = Boolean(tr.dataset.manualMatchId);
+                const badge = spendingPreviewMatchCell(isDup, reason, reviewReason, manualLinked);
+                const linkable =
+                    !isDup &&
+                    direction === 'outgoing' &&
+                    tr.dataset.serverReviewReason !== 'expected_bill' &&
+                    (spendingPreviewUnmatchedManuals || []).length > 0;
+                const selectHtml = linkable ? buildManualLinkSelectHtml(tr) : '';
+                badgeCell.innerHTML = selectHtml
+                    ? `<div class="preview-manual-link-stack">${badge}${selectHtml}</div>`
+                    : badge;
             }
             const include = tr.querySelector('.preview-include');
             if (include) {
@@ -1382,6 +1484,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (importBtn) importBtn.disabled = true;
         spendingPreviewLedgerFps = null;
+        spendingPreviewUnmatchedManuals = [];
         const homeNext = document.getElementById('home-import-next');
         if (homeNext) {
             homeNext.classList.add('hidden');
@@ -1468,6 +1571,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!previewTbody || !previewWrap) return;
         const dupLedgerList = (summary && summary.duplicate_ledger_fingerprints) || [];
         spendingPreviewLedgerFps = new Set(Array.isArray(dupLedgerList) ? dupLedgerList : []);
+        spendingPreviewUnmatchedManuals = Array.isArray(summary && summary.unmatched_manuals)
+            ? summary.unmatched_manuals
+            : [];
         previewTbody.innerHTML = '';
         transactions.forEach((tx) => {
             const tr = document.createElement('tr');
@@ -1494,7 +1600,20 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.dataset.origDirection = String(tx.direction || 'outgoing');
             tr.dataset.serverDupReason = dupReason;
             tr.dataset.serverReviewReason = reviewReason;
-            const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason);
+            const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason, false);
+            const linkable =
+                !isDup &&
+                tx.direction === 'outgoing' &&
+                reviewReason !== 'expected_bill' &&
+                spendingPreviewUnmatchedManuals.length > 0;
+            const matchCellInner = linkable
+                ? `<div class="preview-manual-link-stack">${dupCell}<select class="preview-manual-match-select border border-gray-300 rounded px-1 py-0.5 bg-white text-xs mt-1 max-w-full" aria-label="Link to manual entry"><option value="">Link to manual…</option>${manualLinkCandidatesForRow(tr)
+                      .map((m) => {
+                          const id = String(m.id || '');
+                          return `<option value="${escapeHtml(id)}">${escapeHtml(formatManualLinkOptionLabel(m))}</option>`;
+                      })
+                      .join('')}</select></div>`
+                : dupCell;
 
             const startedLabel = tx.started_date ? String(tx.started_date) : '';
             const boundaryCell = isBoundary
@@ -1527,7 +1646,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="px-3 py-2 preview-tx-include">
                     <input type="checkbox" class="preview-include" ${includeChecked ? 'checked' : ''} aria-label="Include in import">
                 </td>
-                <td class="px-3 py-2 align-top preview-duplicate-cell preview-tx-match text-sm" data-label="Match">${dupCell}</td>
+                <td class="px-3 py-2 align-top preview-duplicate-cell preview-tx-match text-sm" data-label="Match">${matchCellInner}</td>
                 <td class="px-3 py-2 align-top whitespace-nowrap preview-tx-date preview-tx-detail" data-label="Date">${dateInner}</td>
                 <td class="px-3 py-2 preview-tx-desc" data-label="Description">
                     <span class="preview-tx-ref">${escapeHtml(String(tx.description || ''))}</span>${shortDateHtml}
@@ -1558,6 +1677,7 @@ document.addEventListener('DOMContentLoaded', () => {
             directionSelect.addEventListener('change', () => {
                 const newDir = directionSelect.value;
                 tr.dataset.direction = newDir;
+                delete tr.dataset.manualMatchId;
                 const cell = tr.querySelector('.preview-category-cell');
                 if (cell) {
                     if (newDir === 'outgoing') {
@@ -1568,8 +1688,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 recomputeSpendingPreviewDuplicates();
+                refreshAllPreviewManualLinkUi();
             });
         });
+        refreshAllPreviewManualLinkUi();
         previewWrap.classList.remove('hidden');
         if (previewSummary && summary) {
             previewSummary.classList.remove('hidden');
@@ -2655,7 +2777,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const categorySelect = tr.querySelector('.preview-category');
                 const amount = parseFloat(tr.dataset.amount || '0');
                 if (!Number.isFinite(amount) || amount <= 0) return;
-                selected.push({
+                const item = {
                     date: tr.dataset.date,
                     description: tr.dataset.description || '',
                     direction: tr.dataset.direction || 'outgoing',
@@ -2663,7 +2785,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     category: categorySelect ? categorySelect.value : null,
                     confidence: tr.dataset.confidence ? parseFloat(tr.dataset.confidence) : null,
                     rationale: tr.dataset.rationale || '',
-                });
+                };
+                const manualMatchId = tr.dataset.manualMatchId || '';
+                if (manualMatchId) item.manual_match_id = manualMatchId;
+                selected.push(item);
             });
             if (!selected.length) {
                 setStatus('Select at least one transaction to import.', true);

@@ -5057,6 +5057,66 @@ def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: s
             manual_tx['category'] = cat
 
 
+def _spending_unmatched_manuals(spending: dict, report_month: str | None = None) -> list[dict]:
+    """Manual ledger rows available for user-selected statement reconciliation."""
+    rm = (report_month or '').strip()[:7]
+    out = []
+    for t in spending.get('transactions') or []:
+        if str(t.get('source') or '') != 'manual':
+            continue
+        if t.get('bank_matched'):
+            continue
+        tid = str(t.get('id') or '')
+        if not tid:
+            continue
+        if rm:
+            tx_month = str(t.get('report_month') or t.get('month') or '')[:7]
+            tx_date_month = str(t.get('date') or '')[:7]
+            if tx_month != rm and tx_date_month != rm:
+                continue
+        try:
+            amount = round(float(t.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+        out.append({
+            'id': tid,
+            'date': str(t.get('date') or '')[:10],
+            'amount': amount,
+            'description': str(t.get('description') or '')[:200],
+            'direction': str(t.get('direction') or 'outgoing'),
+            'category': str(t.get('category') or '') or None,
+        })
+    out.sort(key=lambda x: (x['date'], x['description'].lower()))
+    return out
+
+
+def _spending_manual_for_user_claim(
+    spending: dict,
+    manual_id: str,
+    *,
+    direction: str,
+    exclude_ids: set[str] | None = None,
+) -> dict | None:
+    """Resolve a user-picked manual row for import-time reconciliation."""
+    mid = str(manual_id or '').strip()
+    if not mid:
+        return None
+    exclude = exclude_ids if exclude_ids is not None else set()
+    if mid in exclude:
+        return None
+    for t in spending.get('transactions') or []:
+        if str(t.get('id') or '') != mid:
+            continue
+        if str(t.get('source') or '') != 'manual':
+            return None
+        if t.get('bank_matched'):
+            return None
+        if str(t.get('direction') or '') != str(direction or ''):
+            return None
+        return t
+    return None
+
+
 def _normalize_daily_bill_items(raw_items) -> list:
     out = []
     if not isinstance(raw_items, list):
@@ -6876,6 +6936,7 @@ def _spending_statement_preview_finalize(
         'preview_missed_manual': missed_n,
         'preview_expected_bill': expected_bill_n,
         'duplicate_ledger_fingerprints': dup_ledger_fps,
+        'unmatched_manuals': _spending_unmatched_manuals(spending, rm),
     }
     if extraction_meta:
         summary['extraction'] = extraction_meta
@@ -8556,6 +8617,7 @@ def spending_statement_import():
             'category': category,
             'confidence': confidence,
             'rationale': rationale,
+            'manual_match_id': str(row.get('manual_match_id') or '').strip() or None,
         })
 
     tx_store = spending.setdefault('transactions', [])
@@ -8570,6 +8632,7 @@ def spending_statement_import():
     inserted = 0
     skipped = 0
     affected_months = set()
+    claimed_manual_ids: set[str] = set()
 
     for row in validated:
         fp = _spending_fingerprint(
@@ -8578,15 +8641,31 @@ def spending_statement_import():
         if fp in existing_fingerprints:
             skipped += 1
             continue
-        manual_match = _daily_budget_fuzzy_match_manual(
-            spending,
-            date_str=row['date'],
-            amount=row['amount'],
-            description=row['description'],
-            direction=row['direction'],
-        )
+        manual_match = None
+        user_manual_id = row.get('manual_match_id')
+        if user_manual_id:
+            manual_match = _spending_manual_for_user_claim(
+                spending,
+                user_manual_id,
+                direction=row['direction'],
+                exclude_ids=claimed_manual_ids,
+            )
+            if manual_match is None:
+                return jsonify({'error': f'Invalid or unavailable manual_match_id: {user_manual_id}'}), 400
+        else:
+            manual_match = _daily_budget_fuzzy_match_manual(
+                spending,
+                date_str=row['date'],
+                amount=row['amount'],
+                description=row['description'],
+                direction=row['direction'],
+                exclude_ids=claimed_manual_ids,
+            )
         if manual_match is not None:
             _daily_budget_claim_manual_match(manual_match, row, statement_id, fp)
+            mid = str(manual_match.get('id') or '')
+            if mid:
+                claimed_manual_ids.add(mid)
             existing_fingerprints.add(fp)
             skipped += 1
             affected_months.add(report_month)

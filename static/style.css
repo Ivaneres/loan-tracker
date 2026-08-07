@@ -1605,6 +1605,22 @@ span.preview-review-pill[data-reason="expected_bill"] {
     border: 1px solid #94a3b8;
 }
 
+/* User-linked statement row → manual entry */
+tr.spending-preview-row-manual-linked:not(.spending-preview-row-duplicate) td {
+    background-color: #f0fdf4;
+}
+.preview-manual-link-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+    max-width: 14rem;
+}
+select.preview-manual-match-select {
+    width: 100%;
+    max-width: 14rem;
+}
+
 /* Started outside period, completed/settled date inside (e.g. Revolut) */
 tr.spending-preview-row-boundary:not(.spending-preview-row-duplicate):not(.spending-preview-row-missed) td {
     background-color: #f0fdfa;
