@@ -1853,11 +1853,12 @@ span.preview-boundary-pill {
 @media (min-width: 1640px) {
     .import-unclaimed-manuals:not(.hidden) {
         position: fixed;
-        top: 5.5rem;
+        /* top/max-height set in JS to track .import-preview-scroll */
+        top: 0;
         left: calc(50% + 560px + 0.75rem);
         width: 15.5rem;
         max-width: calc(50vw - 560px - 1.5rem);
-        max-height: calc(100vh - 6.5rem);
+        max-height: calc(100vh - 2rem);
         margin: 0;
         z-index: 30;
         overflow: hidden;
@@ -1868,11 +1869,16 @@ span.preview-boundary-pill {
         background: rgba(255, 255, 255, 0.94);
     }
 
+    .import-unclaimed-manuals--offscreen {
+        visibility: hidden;
+        pointer-events: none;
+    }
+
     .import-unclaimed-manuals-details {
         display: flex;
         flex-direction: column;
         min-height: 0;
-        max-height: calc(100vh - 7rem);
+        max-height: inherit;
         overflow: hidden;
     }
 

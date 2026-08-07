@@ -235,3 +235,4 @@ class TestUnmatchedManualsSidebar(unittest.TestCase):
         self.assertIn('import-unclaimed-manuals', css)
         self.assertIn('position: fixed', css)
         self.assertIn('50% + 560px', css)
+        self.assertIn('syncUnclaimedManualsGutterPosition', js)
