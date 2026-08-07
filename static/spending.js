@@ -2530,8 +2530,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (activeIndex >= filtered.length) activeIndex = filtered.length ? 0 : -1;
         };
 
-        const openList = () => {
-            filterOptions();
+        const openList = ({ filter = true } = {}) => {
+            if (filter) {
+                filterOptions();
+            } else {
+                filtered = options.slice();
+                activeIndex = -1;
+            }
             if (!options.length) {
                 setExpanded(false);
                 return;
@@ -2547,13 +2552,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectValue = (label) => {
             input.value = String(label || '').slice(0, 80);
             closeList();
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.focus();
         };
 
         const moveActive = (delta) => {
             if (!open) {
-                openList();
+                openList({ filter: false });
                 if (!filtered.length) return;
             }
             if (!filtered.length) return;
@@ -2566,12 +2569,14 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         input.addEventListener('focus', () => {
-            openList();
+            // Show the full known-source list on focus so users can switch
+            // without clearing first; typing still filters via `input`.
+            openList({ filter: false });
         });
 
         input.addEventListener('input', () => {
             activeIndex = -1;
-            openList();
+            openList({ filter: true });
         });
 
         input.addEventListener('keydown', (e) => {
@@ -2624,11 +2629,12 @@ document.addEventListener('DOMContentLoaded', () => {
         return {
             refresh(sources) {
                 options = normalizeKnownBankSources(sources);
-                filterOptions();
                 if (open) {
                     if (!options.length) {
                         closeList();
                     } else {
+                        // Keep whatever filter the user currently has while typing.
+                        filterOptions();
                         renderList();
                     }
                 }
