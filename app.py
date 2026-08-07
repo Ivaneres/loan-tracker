@@ -140,8 +140,7 @@ DAILY_BUDGET_IGNORE_CATEGORIES = frozenset({'savings'})
 DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
 DAILY_BUDGET_UNDERSPEND_PRIORITIES = frozenset({'debt_first', 'goals_first'})
 DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
-# Manual vs statement: allow slight amount drift (rounding / tips).
-DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.15
+# Auto-match requires exact amounts (2dp); near-misses go to preview suggestions.
 # Statement date may post up to N days after manual (banks often lag); not the reverse.
 DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 3
 # Preview suggestions for near-misses (looser than auto-match; UI-only exclude).
@@ -4884,19 +4883,13 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
 
 
 def _manual_match_amounts_close(a: float, b: float) -> bool:
-    """Slight amount differences allowed when reconciling manual vs statement."""
+    """Auto-match requires exact amounts at 2dp; amount drift uses preview suggestions."""
     try:
-        aa = float(a)
-        bb = float(b)
+        aa = round(float(a), 2)
+        bb = round(float(b), 2)
     except (TypeError, ValueError):
         return False
-    if round(abs(aa - bb), 2) <= DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL:
-        return True
-    # Penny-level rounding only — no broad percentage slack for manual reconciliation.
-    if round(abs(aa - bb), 2) <= 0.02:
-        return True
-    m = max(abs(aa), abs(bb), 1e-9)
-    return abs(aa - bb) / m <= 0.01
+    return aa == bb
 
 
 def _manual_match_dates_close(manual_date: str, statement_date: str) -> bool:

@@ -12,11 +12,11 @@ Used on preview (`_apply_spending_preview_duplicate_marks`) and import (`spendin
 
 - Same `direction`; skip `bank_matched` and `exclude_ids`
 - **Date** statement on or up to `DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS` (3) after manual — not before
-- **Amount** within `DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL` (£0.15), £0.02 absolute, or 1% relative
+- **Amount** must match **exactly** (2dp); slight differences are not auto-matched
 - If **one** candidate matches date+amount → accept even when payment refs / titles differ
 - If several collide → require description ratio ≥ `DAILY_BUDGET_MANUAL_MATCH_RATIO` (0.72) to disambiguate
 - Claim via `_daily_budget_claim_manual_match` (may store `manual_amount` / `manual_date` when bank differs)
-- **Preview suggestions:** missed rows get up to `DAILY_BUDGET_MANUAL_SUGGEST_LIMIT` near-miss manuals (`preview_manual_suggestions`) with looser date/amount windows — native select in the Match column; choosing one marks **Skip — matched** and unchecks the row (UI-only, no ledger claim)
+- **Preview suggestions:** missed rows get up to `DAILY_BUDGET_MANUAL_SUGGEST_LIMIT` near-miss manuals (`preview_manual_suggestions`) with looser date/amount windows (`DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL`) — native select in the Match column; choosing one marks **Skip — matched** and unchecks the row (UI-only, no ledger claim)
 - **Netted suggestions:** when 2–`DAILY_BUDGET_MANUAL_SUGGEST_NET_MAX_PARTS` manuals in the date window sum **exactly** to the statement amount, offer a `kind: netted` option (preferred over singles)
 
 ## Preview flags
