@@ -93,15 +93,14 @@ BOUNDARY_CASES = [
     ('date', '+4 days (over slack)', {'date': '2024-01-10'}, {'date': '2024-01-14'}, False, 'Δ+4 rejected'),
     ('date', '−1 day (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-09'}, False, 'backward rejected'),
     ('date', '−3 days (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-07'}, False, 'backward rejected'),
-    # Amount boundaries (same date)
+    # Amount boundaries (same date) — auto-match is exact only; near-misses are suggestions
     ('amount', 'exact', {'amount': 10.0}, {'amount': 10.0}, True, '£0.00'),
-    ('amount', '£0.15 drift (max tol)', {'amount': 10.0}, {'amount': 10.15}, True, 'primary tol boundary'),
-    ('amount', '£0.16 drift (over tol)', {'amount': 10.0}, {'amount': 10.16}, False, 'over £0.15'),
-    ('amount', '£0.02 penny rounding', {'amount': 10.0}, {'amount': 10.02}, True, 'penny slack'),
-    ('amount', '£0.03 (within primary tol)', {'amount': 9.97}, {'amount': 10.0}, True, 'within £0.15'),
-    ('amount', '1% relative (at limit)', {'amount': 100.0}, {'amount': 101.01}, True, '1.00% of max amount'),
-    ('amount', '1% relative (over limit)', {'amount': 100.0}, {'amount': 101.02}, False, '1.01% of max amount'),
-    ('amount', 'old loose tol (£0.35)', {'amount': 10.0}, {'amount': 10.35}, False, 'would match old £0.50 rule'),
+    ('amount', '£0.15 drift (was old tol)', {'amount': 10.0}, {'amount': 10.15}, False, 'not exact — use dropdown'),
+    ('amount', '£0.16 drift', {'amount': 10.0}, {'amount': 10.16}, False, 'not exact'),
+    ('amount', '£0.02 penny drift', {'amount': 10.0}, {'amount': 10.02}, False, 'not exact — use dropdown'),
+    ('amount', '£0.03 drift', {'amount': 9.97}, {'amount': 10.0}, False, 'not exact — use dropdown'),
+    ('amount', '1% relative', {'amount': 100.0}, {'amount': 101.01}, False, 'not exact'),
+    ('amount', 'old loose tol (£0.35)', {'amount': 10.0}, {'amount': 10.35}, False, 'not exact'),
     ('amount', 'large drift (£5)', {'amount': 10.0}, {'amount': 15.0}, False, 'clear mismatch'),
     # Guards
     ('guard', 'direction mismatch', {'direction': 'outgoing'}, {'direction': 'incoming'}, False, 'incoming stmt'),
@@ -110,7 +109,8 @@ BOUNDARY_CASES = [
         'extra_manuals': [_tx(id='m2', date='2024-01-10', amount=10.0, description='Other shop', source='manual')],
     }, {}, False, 'two manuals, no label tie-break'),
     # Combined realistic
-    ('combo', 'HSBC-style +3d + tip', {'date': '2024-03-11', 'amount': 9.97}, {'date': '2024-03-14', 'amount': 10.05}, True, 'late post + small tip'),
+    ('combo', 'HSBC-style +3d exact amount', {'date': '2024-03-11', 'amount': 10.05}, {'date': '2024-03-14', 'amount': 10.05}, True, 'late post, exact £'),
+    ('combo', 'HSBC-style +3d + tip', {'date': '2024-03-11', 'amount': 9.97}, {'date': '2024-03-14', 'amount': 10.05}, False, 'late post + tip → suggest'),
     ('combo', 'HSBC-style +3d + large tip', {'date': '2024-03-11', 'amount': 9.97}, {'date': '2024-03-14', 'amount': 10.35}, False, 'late post but amount too far'),
     ('combo', 'early manual log, on-time stmt', {'date': '2024-06-01', 'amount': 25.0}, {'date': '2024-06-01', 'amount': 25.0}, True, 'same-day grocery'),
 ]
@@ -216,7 +216,8 @@ class TestManualMatchBoundaryIntegration(unittest.TestCase):
 
     def test_date_helper_slack_constants(self):
         self.assertEqual(app_mod.DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS, 3)
-        self.assertEqual(app_mod.DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL, 0.15)
+        self.assertEqual(app_mod.DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL, 5.0)
+        self.assertFalse(hasattr(app_mod, 'DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL'))
 
     def test_manual_match_dates_close_boundaries(self):
         base = '2024-01-10'
@@ -228,13 +229,38 @@ class TestManualMatchBoundaryIntegration(unittest.TestCase):
         self.assertFalse(app_mod._manual_match_dates_close(base, _shift_date(base, 4)))
         self.assertFalse(app_mod._manual_match_dates_close(base, _shift_date(base, -1)))
 
-    def test_manual_match_amounts_close_boundaries(self):
-        self.assertTrue(app_mod._manual_match_amounts_close(10.0, 10.15))
-        self.assertFalse(app_mod._manual_match_amounts_close(10.0, 10.16))
-        self.assertTrue(app_mod._manual_match_amounts_close(10.0, 10.02))
-        self.assertTrue(app_mod._manual_match_amounts_close(100.0, 101.01))
-        self.assertFalse(app_mod._manual_match_amounts_close(100.0, 101.02))
+    def test_manual_match_amounts_close_exact_only(self):
+        self.assertTrue(app_mod._manual_match_amounts_close(10.0, 10.0))
+        self.assertTrue(app_mod._manual_match_amounts_close(10.001, 10.0))  # rounds to 2dp
+        self.assertFalse(app_mod._manual_match_amounts_close(10.0, 10.01))
+        self.assertFalse(app_mod._manual_match_amounts_close(10.0, 10.15))
+        self.assertFalse(app_mod._manual_match_amounts_close(10.0, 10.02))
+        self.assertFalse(app_mod._manual_match_amounts_close(100.0, 101.01))
         self.assertFalse(app_mod._manual_match_amounts_close(10.0, 10.35))
+
+    def test_slight_amount_drift_appears_in_suggestions(self):
+        spending = {
+            'transactions': [
+                _tx(id='m1', date='2024-03-11', amount=9.97, description='Uber', source='manual'),
+            ],
+        }
+        suggestions = app_mod._daily_budget_suggest_manual_matches(
+            spending,
+            date_str='2024-03-12',
+            amount=10.05,
+            description='UBER *TRIP',
+            direction='outgoing',
+        )
+        self.assertTrue(any(s['id'] == 'm1' for s in suggestions))
+        self.assertIsNone(
+            app_mod._daily_budget_fuzzy_match_manual(
+                spending,
+                date_str='2024-03-12',
+                amount=10.05,
+                description='UBER *TRIP',
+                direction='outgoing',
+            )
+        )
 
 
 if __name__ == '__main__':

@@ -487,7 +487,30 @@ class TestManualImportDedup(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match['id'], 'm1')
 
-    def test_fuzzy_match_allows_slight_amount_and_date_drift(self):
+    def test_fuzzy_match_allows_date_drift_with_exact_amount(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-03-11',
+                    amount=10.05,
+                    description='Uber',
+                    source='manual',
+                    category='transport',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-03-12',
+            amount=10.05,
+            description='UBER *TRIP HELP.UBER.COM',
+            direction='outgoing',
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match['id'], 'm1')
+
+    def test_fuzzy_match_rejects_slight_amount_drift(self):
         spending = {
             'transactions': [
                 _tx(
@@ -507,8 +530,15 @@ class TestManualImportDedup(unittest.TestCase):
             description='UBER *TRIP HELP.UBER.COM',
             direction='outgoing',
         )
-        self.assertIsNotNone(match)
-        self.assertEqual(match['id'], 'm1')
+        self.assertIsNone(match)
+        suggestions = app_mod._daily_budget_suggest_manual_matches(
+            spending,
+            date_str='2024-03-12',
+            amount=10.05,
+            description='UBER *TRIP HELP.UBER.COM',
+            direction='outgoing',
+        )
+        self.assertTrue(any(s['id'] == 'm1' for s in suggestions))
 
     def test_fuzzy_match_statement_up_to_three_days_after_manual(self):
         spending = {
@@ -701,10 +731,11 @@ class TestManualImportDedup(unittest.TestCase):
             },
         ]
         led, dup_u, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
-        self.assertEqual(led, 1)
+        self.assertEqual(led, 0)
         self.assertEqual(dup_u, 0)
-        self.assertTrue(rows[0]['preview_duplicate'])
-        self.assertEqual(rows[0]['preview_duplicate_reason'], 'manual')
+        self.assertFalse(rows[0]['preview_duplicate'])
+        self.assertEqual(rows[0]['preview_review_reason'], 'missed')
+        self.assertTrue(any(s.get('id') == 'm1' for s in (rows[0].get('preview_manual_suggestions') or [])))
         self.assertEqual(rows[1]['preview_review_reason'], 'expected_bill')
         self.assertFalse(rows[1]['preview_duplicate'])
         self.assertEqual(rows[2]['preview_review_reason'], 'missed')
