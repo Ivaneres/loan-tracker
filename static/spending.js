@@ -1154,7 +1154,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function spendingPreviewMatchCell(isDup, dupReason, reviewReason, userDismissed) {
         if (userDismissed) {
-            return '<span class="preview-duplicate-pill" data-reason="manual" title="You marked this as already covered by a manual entry — excluded from import">Already logged</span>';
+            return '<span class="preview-duplicate-pill" data-reason="manual" title="Matched to a manual entry — excluded from this import">Skip — matched</span>';
         }
         if (isDup) {
             let label = 'Same as row in file';
@@ -1177,7 +1177,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const amt = Number(manual.amount);
         const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : '0.00';
         const desc = String(manual.description || 'Manual spend').trim() || 'Manual spend';
-        const shortDesc = desc.length > 28 ? `${desc.slice(0, 26)}…` : desc;
+        const shortDesc = desc.length > 36 ? `${desc.slice(0, 34)}…` : desc;
         return `${shortDate} · £${amtStr} · ${shortDesc}`;
     }
 
@@ -1195,21 +1195,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const suggestions = parsePreviewSuggestions(tr);
         if (!suggestions.length) return '';
         const selected = tr.dataset.manualSuggestId || '';
-        const chips = suggestions
+        const opts = suggestions
             .map((m) => {
                 const id = String(m.id || '');
                 if (!id) return '';
-                const active = id === selected ? ' is-selected' : '';
-                const title = formatManualSuggestLabel(m);
-                return `<button type="button" class="preview-manual-suggest-chip${active}" data-manual-id="${escapeHtml(id)}" title="Mark as already logged — exclude from import">${escapeHtml(title)}</button>`;
+                const label = formatManualSuggestLabel(m);
+                const sel = id === selected ? ' selected' : '';
+                return `<option value="${escapeHtml(id)}"${sel}>${escapeHtml(label)}</option>`;
             })
             .filter(Boolean)
             .join('');
-        if (!chips) return '';
-        const clear = selected
-            ? '<button type="button" class="preview-manual-suggest-clear" title="Include this row again">Undo</button>'
-            : '';
-        return `<div class="preview-manual-suggest-list" role="group" aria-label="Possible manual matches">${chips}${clear}</div>`;
+        if (!opts) return '';
+        return (
+            `<select class="preview-manual-suggest-select" aria-label="Possible manual matches">` +
+            `<option value="">Possible matches…</option>${opts}</select>`
+        );
     }
 
     function refreshPreviewManualSuggestUi(tr) {
@@ -1237,23 +1237,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (userDismissed || isDup) include.checked = false;
             else if (!isDup) include.checked = true;
         }
-        badgeCell.querySelectorAll('.preview-manual-suggest-chip').forEach((btn) => {
-            btn.addEventListener('click', (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                const id = btn.getAttribute('data-manual-id') || '';
-                if (tr.dataset.manualSuggestId === id) delete tr.dataset.manualSuggestId;
-                else tr.dataset.manualSuggestId = id;
-                refreshPreviewManualSuggestUi(tr);
-                syncPreviewIncludeAll();
-            });
-        });
-        const clearBtn = badgeCell.querySelector('.preview-manual-suggest-clear');
-        if (clearBtn) {
-            clearBtn.addEventListener('click', (ev) => {
-                ev.preventDefault();
-                ev.stopPropagation();
-                delete tr.dataset.manualSuggestId;
+        const select = badgeCell.querySelector('.preview-manual-suggest-select');
+        if (select && !select.dataset.bound) {
+            select.dataset.bound = '1';
+            select.addEventListener('click', (ev) => ev.stopPropagation());
+            select.addEventListener('mousedown', (ev) => ev.stopPropagation());
+            select.addEventListener('change', () => {
+                const val = select.value || '';
+                if (val) tr.dataset.manualSuggestId = val;
+                else delete tr.dataset.manualSuggestId;
                 refreshPreviewManualSuggestUi(tr);
                 syncPreviewIncludeAll();
             });

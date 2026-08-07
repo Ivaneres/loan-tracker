@@ -1605,7 +1605,7 @@ span.preview-review-pill[data-reason="expected_bill"] {
     border: 1px solid #94a3b8;
 }
 
-/* User dismissed a missed row via a suggested manual match (exclude from import) */
+/* User matched a missed row to a suggested manual (exclude from import) */
 tr.spending-preview-row-manual-dismissed:not(.spending-preview-row-duplicate) td {
     background-color: #f0fdf4;
 }
@@ -1613,50 +1613,29 @@ tr.spending-preview-row-manual-dismissed:not(.spending-preview-row-duplicate) td
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.35rem;
-    max-width: 16rem;
+    gap: 0.3rem;
+    max-width: 15rem;
 }
-.preview-manual-suggest-list {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0.2rem;
+select.preview-manual-suggest-select {
     width: 100%;
-}
-button.preview-manual-suggest-chip {
-    display: block;
-    width: 100%;
-    text-align: left;
-    font-size: 0.68rem;
-    line-height: 1.25;
-    padding: 0.2rem 0.4rem;
+    max-width: 15rem;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    padding: 0.2rem 0.35rem;
+    border: 1px solid #d1d5db;
     border-radius: 0.25rem;
-    border: 1px solid #bbf7d0;
     background: #fff;
-    color: #14532d;
-    cursor: pointer;
-}
-button.preview-manual-suggest-chip:hover {
-    background: #ecfdf5;
-    border-color: #86efac;
-}
-button.preview-manual-suggest-chip.is-selected {
-    background: #dcfce7;
-    border-color: #4ade80;
-    font-weight: 600;
-}
-button.preview-manual-suggest-clear {
-    align-self: flex-start;
-    font-size: 0.65rem;
-    color: #64748b;
-    background: transparent;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    text-decoration: underline;
-}
-button.preview-manual-suggest-clear:hover {
     color: #334155;
+    cursor: pointer;
+}
+select.preview-manual-suggest-select:focus {
+    outline: none;
+    border-color: #86efac;
+    box-shadow: 0 0 0 2px rgba(134, 239, 172, 0.35);
+}
+tr.spending-preview-row-manual-dismissed select.preview-manual-suggest-select {
+    border-color: #86efac;
+    background: #f0fdf4;
 }
 
 /* Started outside period, completed/settled date inside (e.g. Revolut) */
