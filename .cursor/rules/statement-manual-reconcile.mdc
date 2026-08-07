@@ -17,6 +17,7 @@ Used on preview (`_apply_spending_preview_duplicate_marks`) and import (`spendin
 - If several collide → require description ratio ≥ `DAILY_BUDGET_MANUAL_MATCH_RATIO` (0.72) to disambiguate
 - Claim via `_daily_budget_claim_manual_match` (may store `manual_amount` / `manual_date` when bank differs)
 - **Preview suggestions:** missed rows get up to `DAILY_BUDGET_MANUAL_SUGGEST_LIMIT` near-miss manuals (`preview_manual_suggestions`) with looser date/amount windows — native select in the Match column; choosing one marks **Skip — matched** and unchecks the row (UI-only, no ledger claim)
+- **Netted suggestions:** when 2–`DAILY_BUDGET_MANUAL_SUGGEST_NET_MAX_PARTS` manuals in the date window sum **exactly** to the statement amount, offer a `kind: netted` option (preferred over singles)
 
 ## Preview flags
 

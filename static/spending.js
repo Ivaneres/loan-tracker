@@ -1172,6 +1172,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function formatManualSuggestLabel(manual) {
+        const kind = String(manual.kind || 'single');
+        if (kind === 'netted' || (Array.isArray(manual.ids) && manual.ids.length > 1)) {
+            const parts = Array.isArray(manual.parts) ? manual.parts : [];
+            const n = parts.length || (manual.ids && manual.ids.length) || 2;
+            const amts = parts.length
+                ? parts.map((p) => {
+                      const a = Number(p.amount);
+                      return `£${Number.isFinite(a) ? a.toFixed(2) : '0.00'}`;
+                  }).join('+')
+                : `£${Number(manual.amount || 0).toFixed(2)}`;
+            const descs = parts.length
+                ? parts.map((p) => {
+                      const d = String(p.description || 'Manual').trim() || 'Manual';
+                      return d.length > 16 ? `${d.slice(0, 14)}…` : d;
+                  }).join(' + ')
+                : String(manual.description || 'Manual spends').trim();
+            return `Netted (${n}) · ${amts} · ${descs}`;
+        }
         const date = String(manual.date || '').slice(0, 10);
         const shortDate = formatPreviewShortDate(date) || date;
         const amt = Number(manual.amount);

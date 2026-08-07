@@ -112,3 +112,63 @@ class TestManualMatchSuggestions(unittest.TestCase):
             direction='outgoing',
         )
         self.assertEqual(suggestions, [])
+
+    def test_suggests_exact_netted_multi_manual(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-03-10', amount=9.5, description='Lunch with Sam'),
+                _manual_tx(id='m2', date='2024-03-10', amount=15.5, description='Coffee run'),
+                _manual_tx(id='m3', date='2024-03-09', amount=8.0, description='Snack'),
+            ],
+        }
+        # Statement £25.00 = £9.50 + £15.50 exactly; no single near £25
+        suggestions = app_mod._daily_budget_suggest_manual_matches(
+            spending,
+            date_str='2024-03-12',
+            amount=25.0,
+            description='CARD PAYMENT MERCHANT',
+            direction='outgoing',
+        )
+        netted = [s for s in suggestions if s.get('kind') == 'netted']
+        self.assertTrue(netted, suggestions)
+        top = netted[0]
+        self.assertEqual(sorted(top['ids']), ['m1', 'm2'])
+        self.assertEqual(top['amount'], 25.0)
+        self.assertEqual(top['amount_delta'], 0.0)
+        self.assertEqual(len(top['parts']), 2)
+
+    def test_netted_requires_exact_sum(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-03-10', amount=9.5, description='A'),
+                _manual_tx(id='m2', date='2024-03-10', amount=15.4, description='B'),
+            ],
+        }
+        # £9.50 + £15.40 = £24.90 ≠ £25.00
+        suggestions = app_mod._daily_budget_suggest_manual_matches(
+            spending,
+            date_str='2024-03-12',
+            amount=25.0,
+            description='CARD PAYMENT',
+            direction='outgoing',
+        )
+        self.assertFalse(any(s.get('kind') == 'netted' for s in suggestions), suggestions)
+
+    def test_netted_three_parts(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='a', date='2024-04-01', amount=5.0, description='A'),
+                _manual_tx(id='b', date='2024-04-01', amount=7.0, description='B'),
+                _manual_tx(id='c', date='2024-04-02', amount=8.0, description='C'),
+            ],
+        }
+        suggestions = app_mod._daily_budget_suggest_manual_matches(
+            spending,
+            date_str='2024-04-03',
+            amount=20.0,
+            description='SHOP',
+            direction='outgoing',
+        )
+        netted = [s for s in suggestions if s.get('kind') == 'netted']
+        self.assertTrue(netted)
+        self.assertEqual(sorted(netted[0]['ids']), ['a', 'b', 'c'])
