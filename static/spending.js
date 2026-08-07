@@ -773,6 +773,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let insightTransactionsSnapshot = [];
     /** Set of existing ledger fingerprint strings (same import scheme); used when reconciling dups after direction edit. */
     let spendingPreviewLedgerFps = null;
+    /** Unclaimed manuals for the current preview month (sidebar comparison list). */
+    let spendingPreviewUnmatchedManuals = [];
     let spendingMetricsChart = null;
     let spendingCategoryStackChart = null;
     /** @type {string|null} */
@@ -1266,6 +1268,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 else delete tr.dataset.manualSuggestId;
                 refreshPreviewManualSuggestUi(tr);
                 syncPreviewIncludeAll();
+                syncUnclaimedManualsLinkedState();
             });
         }
     }
@@ -1274,6 +1277,102 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!previewTbody) return;
         previewTbody.querySelectorAll('tr').forEach((tr) => refreshPreviewManualSuggestUi(tr));
         syncPreviewIncludeAll();
+        syncUnclaimedManualsLinkedState();
+    }
+
+    function manualIdsFromSuggestValue(raw) {
+        const s = String(raw || '').trim();
+        if (!s) return [];
+        return s.split('+').map((p) => p.trim()).filter(Boolean);
+    }
+
+    function collectPreviewLinkedManualIds() {
+        const linked = new Set();
+        if (!previewTbody) return linked;
+        previewTbody.querySelectorAll('tr[data-manual-suggest-id]').forEach((tr) => {
+            manualIdsFromSuggestValue(tr.dataset.manualSuggestId).forEach((id) => linked.add(id));
+        });
+        return linked;
+    }
+
+    function syncUnclaimedManualsLinkedState() {
+        const list = document.getElementById('import-unclaimed-manuals-list');
+        if (!list) return;
+        const linked = collectPreviewLinkedManualIds();
+        list.querySelectorAll('.import-unclaimed-manuals-item').forEach((li) => {
+            const id = li.dataset.manualId || '';
+            li.classList.toggle('is-preview-linked', Boolean(id && linked.has(id)));
+        });
+        const openCount = spendingPreviewUnmatchedManuals.filter((m) => !linked.has(String(m.id || ''))).length;
+        const countEl = document.getElementById('import-unclaimed-manuals-count');
+        if (countEl) {
+            const n = spendingPreviewUnmatchedManuals.length;
+            if (!n) countEl.textContent = '';
+            else if (openCount === n) countEl.textContent = `${n}`;
+            else countEl.textContent = `${openCount} open · ${n}`;
+        }
+    }
+
+    function clearUnclaimedManualsSuggestHighlight() {
+        const list = document.getElementById('import-unclaimed-manuals-list');
+        if (!list) return;
+        list.querySelectorAll('.import-unclaimed-manuals-item.is-row-suggest').forEach((li) => {
+            li.classList.remove('is-row-suggest');
+        });
+    }
+
+    function highlightUnclaimedManualsForRow(tr) {
+        clearUnclaimedManualsSuggestHighlight();
+        if (!tr) return;
+        const list = document.getElementById('import-unclaimed-manuals-list');
+        if (!list) return;
+        const ids = new Set();
+        parsePreviewSuggestions(tr).forEach((s) => {
+            if (Array.isArray(s.ids) && s.ids.length) {
+                s.ids.forEach((id) => ids.add(String(id)));
+            } else if (s.id) {
+                manualIdsFromSuggestValue(s.id).forEach((id) => ids.add(id));
+            }
+        });
+        if (!ids.size) return;
+        list.querySelectorAll('.import-unclaimed-manuals-item').forEach((li) => {
+            if (ids.has(li.dataset.manualId || '')) li.classList.add('is-row-suggest');
+        });
+    }
+
+    function renderUnclaimedManuals(manuals) {
+        const panel = document.getElementById('import-unclaimed-manuals');
+        const list = document.getElementById('import-unclaimed-manuals-list');
+        const empty = document.getElementById('import-unclaimed-manuals-empty');
+        const countEl = document.getElementById('import-unclaimed-manuals-count');
+        spendingPreviewUnmatchedManuals = Array.isArray(manuals) ? manuals : [];
+        if (!panel || !list) return;
+        list.innerHTML = '';
+        if (!spendingPreviewUnmatchedManuals.length) {
+            panel.classList.add('hidden');
+            if (empty) empty.classList.remove('hidden');
+            if (countEl) countEl.textContent = '';
+            return;
+        }
+        panel.classList.remove('hidden');
+        if (empty) empty.classList.add('hidden');
+        spendingPreviewUnmatchedManuals.forEach((m) => {
+            const li = document.createElement('li');
+            li.className = 'import-unclaimed-manuals-item';
+            li.dataset.manualId = String(m.id || '');
+            li.dataset.direction = String(m.direction || 'outgoing');
+            const amt = Number(m.amount);
+            const amtStr = Number.isFinite(amt) ? `£${amt.toFixed(2)}` : '£0.00';
+            const shortDate = formatPreviewShortDate(m.date) || String(m.date || '').slice(0, 10);
+            const desc = String(m.description || 'Manual spend').trim() || 'Manual spend';
+            li.innerHTML =
+                `<span class="import-unclaimed-manuals-amt">${escapeHtml(amtStr)}</span>` +
+                `<span class="import-unclaimed-manuals-date">${escapeHtml(shortDate)}</span>` +
+                `<span class="import-unclaimed-manuals-desc">${escapeHtml(desc)}</span>`;
+            list.appendChild(li);
+        });
+        if (countEl) countEl.textContent = String(spendingPreviewUnmatchedManuals.length);
+        syncUnclaimedManualsLinkedState();
     }
 
     function formatPreviewShortDate(iso) {
@@ -1491,6 +1590,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (importBtn) importBtn.disabled = true;
         spendingPreviewLedgerFps = null;
+        spendingPreviewUnmatchedManuals = [];
+        const unclaimedPanel = document.getElementById('import-unclaimed-manuals');
+        if (unclaimedPanel) unclaimedPanel.classList.add('hidden');
+        const unclaimedList = document.getElementById('import-unclaimed-manuals-list');
+        if (unclaimedList) unclaimedList.innerHTML = '';
+        const unclaimedCount = document.getElementById('import-unclaimed-manuals-count');
+        if (unclaimedCount) unclaimedCount.textContent = '';
         const homeNext = document.getElementById('home-import-next');
         if (homeNext) {
             homeNext.classList.add('hidden');
@@ -1683,6 +1789,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         refreshAllPreviewManualSuggestUi();
+        renderUnclaimedManuals((summary && summary.unmatched_manuals) || []);
         previewWrap.classList.remove('hidden');
         if (previewSummary && summary) {
             previewSummary.classList.remove('hidden');
@@ -2878,6 +2985,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!row) return;
             e.preventDefault();
             togglePreviewRow(row);
+        });
+        previewTbody.addEventListener('mouseover', (e) => {
+            const row = e.target.closest('tr.preview-tx-row');
+            if (!row || row === previewTbody._unclaimedHoverRow) return;
+            previewTbody._unclaimedHoverRow = row;
+            highlightUnclaimedManualsForRow(row);
+        });
+        previewTbody.addEventListener('mouseleave', () => {
+            previewTbody._unclaimedHoverRow = null;
+            clearUnclaimedManualsSuggestHighlight();
         });
     }
 

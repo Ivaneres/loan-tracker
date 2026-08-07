@@ -142,25 +142,38 @@
                     </label>
                     <p id="spending-preview-expand-hint" class="preview-expand-hint">Tap a row for match, direction &amp; category. Possible matches appear under “Not in manual” — pick one to skip.</p>
                 </div>
-                <div class="import-preview-scroll">
-                    <table class="min-w-full text-sm preview-tx-table" style="border-color: var(--border-color);">
-                        <thead class="preview-tx-thead" style="background: var(--background-color);">
-                            <tr>
-                                <th class="px-3 py-2 text-left">
-                                    <span class="preview-thead-include-label">Include</span>
-                                </th>
-                                <th class="px-3 py-2 text-left">Match <span class="text-gray-400 font-normal text-xs">(import)</span></th>
-                                <th class="px-3 py-2 text-left">Date</th>
-                                <th class="px-3 py-2 text-left">Description</th>
-                                <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
-                                <th class="px-3 py-2 text-left">Amount (£)</th>
-                                <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
-                                <th class="px-3 py-2 text-left">Category</th>
-                                <th class="px-2 py-2 preview-tx-toggle-th"><span class="sr-only">Details</span></th>
-                            </tr>
-                        </thead>
-                        <tbody id="spending-preview-tbody" class="bg-white preview-tx-tbody"></tbody>
-                    </table>
+                <div class="import-preview-body">
+                    <div class="import-preview-scroll">
+                        <table class="min-w-full text-sm preview-tx-table" style="border-color: var(--border-color);">
+                            <thead class="preview-tx-thead" style="background: var(--background-color);">
+                                <tr>
+                                    <th class="px-3 py-2 text-left">
+                                        <span class="preview-thead-include-label">Include</span>
+                                    </th>
+                                    <th class="px-3 py-2 text-left">Match <span class="text-gray-400 font-normal text-xs">(import)</span></th>
+                                    <th class="px-3 py-2 text-left">Date</th>
+                                    <th class="px-3 py-2 text-left">Description</th>
+                                    <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
+                                    <th class="px-3 py-2 text-left">Amount (£)</th>
+                                    <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
+                                    <th class="px-3 py-2 text-left">Category</th>
+                                    <th class="px-2 py-2 preview-tx-toggle-th"><span class="sr-only">Details</span></th>
+                                </tr>
+                            </thead>
+                            <tbody id="spending-preview-tbody" class="bg-white preview-tx-tbody"></tbody>
+                        </table>
+                    </div>
+                    <aside id="import-unclaimed-manuals" class="import-unclaimed-manuals hidden" aria-label="Unclaimed manual transactions">
+                        <details class="import-unclaimed-manuals-details" open>
+                            <summary class="import-unclaimed-manuals-summary">
+                                <span class="import-unclaimed-manuals-title">Unclaimed manuals</span>
+                                <span id="import-unclaimed-manuals-count" class="import-unclaimed-manuals-count"></span>
+                            </summary>
+                            <p class="import-unclaimed-manuals-hint">Manual spends not yet matched to the bank. Compare with statement rows on the left.</p>
+                            <ul id="import-unclaimed-manuals-list" class="import-unclaimed-manuals-list"></ul>
+                            <p id="import-unclaimed-manuals-empty" class="import-unclaimed-manuals-empty hidden">None left for this month.</p>
+                        </details>
+                    </aside>
                 </div>
             </div>
         </section>

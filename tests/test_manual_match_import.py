@@ -1,5 +1,6 @@
 """Preview near-miss suggestions for missed statement rows (UI dismiss only)."""
 import unittest
+from datetime import date
 
 import app as app_mod
 
@@ -90,7 +91,7 @@ class TestManualMatchSuggestions(unittest.TestCase):
                 'description': 'TESCO STORES',
             },
         ]
-        led, _, _ = app_mod._apply_spending_preview_duplicate_marks('2024-02', rows, spending)
+        led, _, _, _ = app_mod._apply_spending_preview_duplicate_marks('2024-02', rows, spending)
         self.assertEqual(led, 1)
         self.assertEqual(rows[1]['preview_duplicate_reason'], 'manual')
         self.assertEqual(rows[0]['preview_review_reason'], 'missed')
@@ -172,3 +173,64 @@ class TestManualMatchSuggestions(unittest.TestCase):
         netted = [s for s in suggestions if s.get('kind') == 'netted']
         self.assertTrue(netted)
         self.assertEqual(sorted(netted[0]['ids']), ['a', 'b', 'c'])
+
+
+class TestUnmatchedManualsSidebar(unittest.TestCase):
+    def test_lists_month_manuals_excluding_bank_matched(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-02-08', amount=10.0, description='Keep'),
+                _manual_tx(id='m2', date='2024-02-09', amount=5.0, description='Done', bank_matched=True),
+                _manual_tx(id='m3', date='2024-01-15', amount=3.0, description='Other month'),
+            ],
+        }
+        rows = app_mod._spending_unmatched_manuals(spending, '2024-02')
+        self.assertEqual([r['id'] for r in rows], ['m1'])
+
+    def test_preview_summary_excludes_auto_claimed(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-02-10', amount=12.0, description='Exact match'),
+                _manual_tx(id='m2', date='2024-02-11', amount=7.5, description='Still open'),
+            ],
+            'outgoing_classification_cache': {},
+        }
+        data = {'users': {}}
+        period = {
+            'report_month': '2024-02',
+            'period_start': '2024-02-01',
+            'period_end': '2024-02-29',
+            'period_start_date': date(2024, 2, 1),
+            'period_end_date': date(2024, 2, 29),
+        }
+        raw = [
+            {
+                'date': '2024-02-11',
+                'description': 'BANK REF EXACT',
+                'amount': 12.0,
+                'direction': 'outgoing',
+            },
+            {
+                'date': '2024-02-12',
+                'description': 'UNKNOWN SHOP',
+                'amount': 20.0,
+                'direction': 'outgoing',
+            },
+        ]
+        result = app_mod._spending_statement_preview_finalize(
+            data, spending, period, [], {'format': 'csv'}, False, raw, None,
+        )
+        ids = [m['id'] for m in result['summary']['unmatched_manuals']]
+        self.assertEqual(ids, ['m2'])
+        self.assertEqual(result['transactions'][0]['preview_duplicate_reason'], 'manual')
+
+    def test_home_assets_mention_unclaimed_sidebar(self):
+        root = __import__('pathlib').Path(__file__).resolve().parents[1]
+        home = (root / 'templates' / 'home.html').read_text(encoding='utf-8')
+        js = (root / 'static' / 'spending.js').read_text(encoding='utf-8')
+        css = (root / 'static' / 'style.css').read_text(encoding='utf-8')
+        self.assertIn('import-unclaimed-manuals', home)
+        self.assertIn('unmatched_manuals', js)
+        self.assertIn('renderUnclaimedManuals', js)
+        self.assertIn('import-unclaimed-manuals', css)
+        self.assertIn('position: sticky', css)
