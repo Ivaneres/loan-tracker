@@ -1152,7 +1152,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function spendingPreviewMatchCell(isDup, dupReason, reviewReason) {
+    function spendingPreviewMatchCell(isDup, dupReason, reviewReason, userDismissed) {
+        if (userDismissed) {
+            return '<span class="preview-duplicate-pill" data-reason="manual" title="Matched to a manual entry — excluded from this import">Skip — matched</span>';
+        }
         if (isDup) {
             let label = 'Same as row in file';
             if (dupReason === 'ledger') label = 'Already in ledger';
@@ -1166,6 +1169,111 @@ document.addEventListener('DOMContentLoaded', () => {
             return '<span class="preview-review-pill" data-reason="expected_bill" title="Matches an expected monthly bill">Expected bill</span>';
         }
         return '<span class="preview-match-empty text-gray-300">—</span>';
+    }
+
+    function formatManualSuggestLabel(manual) {
+        const kind = String(manual.kind || 'single');
+        if (kind === 'netted' || (Array.isArray(manual.ids) && manual.ids.length > 1)) {
+            const parts = Array.isArray(manual.parts) ? manual.parts : [];
+            const n = parts.length || (manual.ids && manual.ids.length) || 2;
+            const amts = parts.length
+                ? parts.map((p) => {
+                      const a = Number(p.amount);
+                      return `£${Number.isFinite(a) ? a.toFixed(2) : '0.00'}`;
+                  }).join('+')
+                : `£${Number(manual.amount || 0).toFixed(2)}`;
+            const descs = parts.length
+                ? parts.map((p) => {
+                      const d = String(p.description || 'Manual').trim() || 'Manual';
+                      return d.length > 16 ? `${d.slice(0, 14)}…` : d;
+                  }).join(' + ')
+                : String(manual.description || 'Manual spends').trim();
+            return `Netted (${n}) · ${amts} · ${descs}`;
+        }
+        const date = String(manual.date || '').slice(0, 10);
+        const shortDate = formatPreviewShortDate(date) || date;
+        const amt = Number(manual.amount);
+        const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : '0.00';
+        const desc = String(manual.description || 'Manual spend').trim() || 'Manual spend';
+        const shortDesc = desc.length > 36 ? `${desc.slice(0, 34)}…` : desc;
+        return `${shortDate} · £${amtStr} · ${shortDesc}`;
+    }
+
+    function parsePreviewSuggestions(tr) {
+        try {
+            const raw = tr.dataset.manualSuggestions || '[]';
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function buildManualSuggestHtml(tr) {
+        const suggestions = parsePreviewSuggestions(tr);
+        if (!suggestions.length) return '';
+        const selected = tr.dataset.manualSuggestId || '';
+        const opts = suggestions
+            .map((m) => {
+                const id = String(m.id || '');
+                if (!id) return '';
+                const label = formatManualSuggestLabel(m);
+                const sel = id === selected ? ' selected' : '';
+                return `<option value="${escapeHtml(id)}"${sel}>${escapeHtml(label)}</option>`;
+            })
+            .filter(Boolean)
+            .join('');
+        if (!opts) return '';
+        return (
+            `<select class="preview-manual-suggest-select" aria-label="Possible manual matches">` +
+            `<option value="">Possible matches…</option>${opts}</select>`
+        );
+    }
+
+    function refreshPreviewManualSuggestUi(tr) {
+        if (!tr) return;
+        const userDismissed = Boolean(tr.dataset.manualSuggestId);
+        const isDup = tr.classList.contains('spending-preview-row-duplicate');
+        const reviewReason = userDismissed ? '' : tr.dataset.serverReviewReason || '';
+        tr.classList.toggle('spending-preview-row-missed', !isDup && !userDismissed && reviewReason === 'missed');
+        tr.classList.toggle('spending-preview-row-manual-dismissed', userDismissed);
+        const badgeCell = tr.querySelector('.preview-duplicate-cell');
+        if (!badgeCell) return;
+        const dupReason = tr.dataset.serverDupReason || '';
+        const showSuggest =
+            !isDup &&
+            (tr.dataset.direction || 'outgoing') === 'outgoing' &&
+            tr.dataset.serverReviewReason === 'missed' &&
+            parsePreviewSuggestions(tr).length > 0;
+        const badge = spendingPreviewMatchCell(isDup, dupReason, reviewReason, userDismissed);
+        const suggestHtml = showSuggest ? buildManualSuggestHtml(tr) : '';
+        badgeCell.innerHTML = suggestHtml
+            ? `<div class="preview-manual-suggest-stack">${badge}${suggestHtml}</div>`
+            : badge;
+        const include = tr.querySelector('.preview-include');
+        if (include) {
+            if (userDismissed || isDup) include.checked = false;
+            else if (!isDup) include.checked = true;
+        }
+        const select = badgeCell.querySelector('.preview-manual-suggest-select');
+        if (select && !select.dataset.bound) {
+            select.dataset.bound = '1';
+            select.addEventListener('click', (ev) => ev.stopPropagation());
+            select.addEventListener('mousedown', (ev) => ev.stopPropagation());
+            select.addEventListener('change', () => {
+                const val = select.value || '';
+                if (val) tr.dataset.manualSuggestId = val;
+                else delete tr.dataset.manualSuggestId;
+                refreshPreviewManualSuggestUi(tr);
+                syncPreviewIncludeAll();
+            });
+        }
+    }
+
+    function refreshAllPreviewManualSuggestUi() {
+        if (!previewTbody) return;
+        previewTbody.querySelectorAll('tr').forEach((tr) => refreshPreviewManualSuggestUi(tr));
+        syncPreviewIncludeAll();
     }
 
     function formatPreviewShortDate(iso) {
@@ -1212,10 +1320,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const origDir = tr.dataset.origDirection || direction;
             const serverDupReason = tr.dataset.serverDupReason || '';
             const serverReview = tr.dataset.serverReviewReason || '';
+            const userDismissed = Boolean(tr.dataset.manualSuggestId);
             let isDup = false;
             let reason = '';
             let reviewReason = '';
-            if (ledger.has(fp)) {
+            if (userDismissed) {
+                isDup = false;
+            } else if (ledger.has(fp)) {
                 isDup = true;
                 reason = 'ledger';
             } else if (seen.has(fp)) {
@@ -1235,14 +1346,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             tr.classList.toggle('spending-preview-row-duplicate', isDup);
-            tr.classList.toggle('spending-preview-row-missed', !isDup && reviewReason === 'missed');
-            const badgeCell = tr.querySelector('.preview-duplicate-cell');
-            if (badgeCell) {
-                badgeCell.innerHTML = spendingPreviewMatchCell(isDup, reason, reviewReason);
-            }
+            tr.classList.toggle('spending-preview-row-missed', !isDup && !userDismissed && reviewReason === 'missed');
+            tr.classList.toggle('spending-preview-row-manual-dismissed', userDismissed);
+            refreshPreviewManualSuggestUi(tr);
             const include = tr.querySelector('.preview-include');
             if (include) {
-                if (isDup) include.checked = false;
+                if (isDup || userDismissed) include.checked = false;
                 else include.checked = true;
             }
         });
@@ -1487,6 +1596,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const isDup = tx.preview_duplicate === true;
             const isBoundary = tx.date_boundary === true;
             const reviewReason = (tx.preview_review_reason && String(tx.preview_review_reason)) || '';
+            const suggestions = Array.isArray(tx.preview_manual_suggestions) ? tx.preview_manual_suggestions : [];
+            tr.dataset.manualSuggestions = JSON.stringify(suggestions);
             if (isDup) tr.classList.add('spending-preview-row-duplicate');
             if (!isDup && reviewReason === 'missed') tr.classList.add('spending-preview-row-missed');
             if (isBoundary) tr.classList.add('spending-preview-row-boundary');
@@ -1494,7 +1605,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.dataset.origDirection = String(tx.direction || 'outgoing');
             tr.dataset.serverDupReason = dupReason;
             tr.dataset.serverReviewReason = reviewReason;
-            const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason);
+            const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason, false);
 
             const startedLabel = tx.started_date ? String(tx.started_date) : '';
             const boundaryCell = isBoundary
@@ -1558,6 +1669,7 @@ document.addEventListener('DOMContentLoaded', () => {
             directionSelect.addEventListener('change', () => {
                 const newDir = directionSelect.value;
                 tr.dataset.direction = newDir;
+                delete tr.dataset.manualSuggestId;
                 const cell = tr.querySelector('.preview-category-cell');
                 if (cell) {
                     if (newDir === 'outgoing') {
@@ -1570,6 +1682,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 recomputeSpendingPreviewDuplicates();
             });
         });
+        refreshAllPreviewManualSuggestUi();
         previewWrap.classList.remove('hidden');
         if (previewSummary && summary) {
             previewSummary.classList.remove('hidden');
@@ -2655,7 +2768,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const categorySelect = tr.querySelector('.preview-category');
                 const amount = parseFloat(tr.dataset.amount || '0');
                 if (!Number.isFinite(amount) || amount <= 0) return;
-                selected.push({
+                const item = {
                     date: tr.dataset.date,
                     description: tr.dataset.description || '',
                     direction: tr.dataset.direction || 'outgoing',
@@ -2663,7 +2776,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     category: categorySelect ? categorySelect.value : null,
                     confidence: tr.dataset.confidence ? parseFloat(tr.dataset.confidence) : null,
                     rationale: tr.dataset.rationale || '',
-                });
+                };
+                selected.push(item);
             });
             if (!selected.length) {
                 setStatus('Select at least one transaction to import.', true);

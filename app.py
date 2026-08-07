@@ -140,9 +140,17 @@ DAILY_BUDGET_IGNORE_CATEGORIES = frozenset({'savings'})
 DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
 DAILY_BUDGET_UNDERSPEND_PRIORITIES = frozenset({'debt_first', 'goals_first'})
 DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
-# Manual vs statement: allow slight amount drift (rounding / tips) and near-day posting.
-DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.50
-DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 1
+# Manual vs statement: allow slight amount drift (rounding / tips).
+DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.15
+# Statement date may post up to N days after manual (banks often lag); not the reverse.
+DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 3
+# Preview suggestions for near-misses (looser than auto-match; UI-only exclude).
+DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS = 7
+DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL = 5.0
+DAILY_BUDGET_MANUAL_SUGGEST_LIMIT = 3
+# Netted multi-manual suggestions only when part amounts sum exactly to the statement.
+DAILY_BUDGET_MANUAL_SUGGEST_NET_MAX_PARTS = 3
+DAILY_BUDGET_MANUAL_SUGGEST_NET_POOL = 14
 # Statement row vs expected monthly bill_items (label + amount).
 SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
@@ -680,6 +688,7 @@ def _apply_spending_preview_duplicate_marks(
     dup_upload = 0
     for r in rows:
         r['preview_review_reason'] = None
+        r['preview_manual_suggestions'] = []
         fp = _spending_fingerprint(
             rm,
             str(r.get('date') or ''),
@@ -728,6 +737,14 @@ def _apply_spending_preview_duplicate_marks(
                         r['preview_review_reason'] = 'expected_bill'
                     else:
                         r['preview_review_reason'] = 'missed'
+                        r['preview_manual_suggestions'] = _daily_budget_suggest_manual_matches(
+                            spending,
+                            date_str=str(r.get('date') or '')[:10],
+                            amount=float(r.get('amount') or 0),
+                            description=str(r.get('description') or ''),
+                            direction=direction,
+                            exclude_ids=claimed_manual_ids,
+                        )
     month_prefix = f'{rm}|' if len(rm) == 7 else None
     client_fps = sorted(fp for fp in ledger_fps if month_prefix and fp.startswith(month_prefix))
     return led, dup_upload, client_fps
@@ -4873,17 +4890,23 @@ def _manual_match_amounts_close(a: float, b: float) -> bool:
         bb = float(b)
     except (TypeError, ValueError):
         return False
-    if abs(aa - bb) <= DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL:
+    if round(abs(aa - bb), 2) <= DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL:
         return True
-    return _amounts_close_for_compare(aa, bb)
+    # Penny-level rounding only — no broad percentage slack for manual reconciliation.
+    if round(abs(aa - bb), 2) <= 0.02:
+        return True
+    m = max(abs(aa), abs(bb), 1e-9)
+    return abs(aa - bb) / m <= 0.01
 
 
-def _manual_match_dates_close(a: str, b: str) -> bool:
-    da = _parse_iso_date(str(a or '')[:10])
-    db = _parse_iso_date(str(b or '')[:10])
-    if da is None or db is None:
-        return str(a or '')[:10] == str(b or '')[:10]
-    return abs((da - db).days) <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
+def _manual_match_dates_close(manual_date: str, statement_date: str) -> bool:
+    """True when the statement posts on or up to N days after the manual entry date."""
+    dm = _parse_iso_date(str(manual_date or '')[:10])
+    ds = _parse_iso_date(str(statement_date or '')[:10])
+    if dm is None or ds is None:
+        return str(manual_date or '')[:10] == str(statement_date or '')[:10]
+    delta = (ds - dm).days
+    return 0 <= delta <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
 
 
 def _manual_description_match_ratio(man_n: str, desc_n: str) -> float:
@@ -4962,10 +4985,10 @@ def _daily_budget_fuzzy_match_manual(
 ) -> dict | None:
     """Find a manual ledger row that likely duplicates an incoming statement line.
 
-    Matching prioritises date (±1 day) and amount (slight tolerance). When that pair
-    uniquely identifies one unmatched manual entry, different payment references /
-    titles are ignored. Description similarity is used to break ties when several
-    manuals share a near date and amount.
+    Matching prioritises date (statement on or up to a few days after manual) and
+    amount (tight tolerance). When that pair uniquely identifies one unmatched manual
+    entry, different payment references / titles are ignored. Description similarity
+    is used to break ties when several manuals share a near date and amount.
     """
     amount = round(float(amount), 2)
     desc_n = _normalize_label(description)
@@ -5048,6 +5071,222 @@ def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: s
         cat = str(row.get('category')).strip().lower()
         if cat in SPENDING_CATEGORY_SET:
             manual_tx['category'] = cat
+
+
+def _daily_budget_manual_suggest_pool(
+    spending: dict,
+    *,
+    date_str: str,
+    direction: str,
+    exclude_ids: set[str] | None = None,
+) -> list[dict]:
+    """Unmatched manuals in the suggestion date window (statement on/after manual)."""
+    exclude = exclude_ids if exclude_ids is not None else set()
+    stmt_d = _parse_iso_date(str(date_str or '')[:10])
+    out = []
+    for t in spending.get('transactions') or []:
+        tid = str(t.get('id') or '')
+        if tid and tid in exclude:
+            continue
+        if str(t.get('source') or '') != 'manual':
+            continue
+        if t.get('bank_matched'):
+            continue
+        if str(t.get('direction') or '') != direction:
+            continue
+        man_date = str(t.get('date') or '')[:10]
+        man_d = _parse_iso_date(man_date)
+        if stmt_d is None or man_d is None:
+            if man_date != str(date_str or '')[:10]:
+                continue
+            date_delta = 0
+        else:
+            date_delta = (stmt_d - man_d).days
+            if date_delta < 0 or date_delta > DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS:
+                continue
+        try:
+            man_amt = round(float(t.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if man_amt <= 0:
+            continue
+        out.append({
+            'id': tid,
+            'date': man_date,
+            'amount': man_amt,
+            'description': str(t.get('description') or '')[:200],
+            'direction': str(t.get('direction') or 'outgoing'),
+            'category': str(t.get('category') or '') or None,
+            'date_delta_days': date_delta,
+        })
+    out.sort(key=lambda x: (x['date_delta_days'], x['date'], x['description'].lower()))
+    return out
+
+
+def _daily_budget_suggest_netted_manual_matches(
+    pool: list[dict],
+    *,
+    amount: float,
+    description: str,
+    limit: int,
+) -> list[dict]:
+    """Combinations of 2+ manuals whose amounts sum exactly to the statement amount."""
+    target = round(float(amount), 2)
+    if target <= 0 or limit <= 0:
+        return []
+    desc_n = _normalize_label(description)
+    # Only parts strictly less than the statement (a single exact match is handled separately).
+    candidates = [
+        p for p in pool
+        if p.get('amount') and round(float(p['amount']), 2) < target - 0.001
+    ][:DAILY_BUDGET_MANUAL_SUGGEST_NET_POOL]
+    if len(candidates) < 2:
+        return []
+    max_parts = max(2, min(DAILY_BUDGET_MANUAL_SUGGEST_NET_MAX_PARTS, len(candidates)))
+    found: list[tuple[float, int, int, dict]] = []
+    n = len(candidates)
+
+    def consider(idxs: tuple[int, ...]) -> None:
+        parts = [candidates[i] for i in idxs]
+        total = round(sum(float(p['amount']) for p in parts), 2)
+        if abs(total - target) > 0.001:
+            return
+        ids = [str(p['id']) for p in parts]
+        date_delta = max(int(p.get('date_delta_days') or 0) for p in parts)
+        ratios = [
+            _manual_description_match_ratio(_normalize_label(str(p.get('description') or '')), desc_n)
+            for p in parts
+        ]
+        avg_ratio = sum(ratios) / len(ratios) if ratios else 0.0
+        # Prefer fewer parts, nearer dates, better labels.
+        score = (len(parts) * 1.5) + (date_delta * 0.35) - (avg_ratio * 3.0)
+        descs = [str(p.get('description') or '').strip() or 'Manual' for p in parts]
+        found.append((score, len(parts), date_delta, {
+            'id': '+'.join(ids),
+            'ids': ids,
+            'kind': 'netted',
+            'date': parts[0]['date'],
+            'amount': target,
+            'description': ' + '.join(descs)[:200],
+            'direction': parts[0].get('direction') or 'outgoing',
+            'category': parts[0].get('category'),
+            'parts': [
+                {
+                    'id': str(p['id']),
+                    'date': p['date'],
+                    'amount': p['amount'],
+                    'description': str(p.get('description') or '')[:120],
+                }
+                for p in parts
+            ],
+            'amount_delta': 0.0,
+            'date_delta_days': date_delta,
+            'label_ratio': round(avg_ratio, 3),
+        }))
+
+    # Size 2 first (most common netting), then 3.
+    for size in range(2, max_parts + 1):
+        if size == 2:
+            for i in range(n):
+                for j in range(i + 1, n):
+                    consider((i, j))
+        elif size == 3:
+            for i in range(n):
+                for j in range(i + 1, n):
+                    for k in range(j + 1, n):
+                        consider((i, j, k))
+        if len(found) >= limit * 3:
+            break
+    found.sort(key=lambda x: (x[0], x[1], x[2]))
+    # Deduplicate by id set.
+    seen: set[str] = set()
+    out = []
+    for _, _, _, row in found:
+        key = row['id']
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _daily_budget_suggest_manual_matches(
+    spending: dict,
+    *,
+    date_str: str,
+    amount: float,
+    description: str,
+    direction: str,
+    exclude_ids: set[str] | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Near-miss manuals for preview UI — user can dismiss a statement row as already covered.
+
+    Looser than auto-match: wider date/amount windows. Also suggests netted multi-manual
+    groups when part amounts sum exactly to the statement. Does not claim ledger rows.
+    """
+    amount = round(float(amount), 2)
+    desc_n = _normalize_label(description)
+    max_n = DAILY_BUDGET_MANUAL_SUGGEST_LIMIT if limit is None else max(0, int(limit))
+    if max_n <= 0:
+        return []
+    pool = _daily_budget_manual_suggest_pool(
+        spending,
+        date_str=date_str,
+        direction=direction,
+        exclude_ids=exclude_ids,
+    )
+    scored: list[tuple[float, float, int, dict]] = []
+    for p in pool:
+        man_amt = round(float(p['amount']), 2)
+        amount_delta = round(abs(man_amt - amount), 2)
+        if amount_delta > DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL:
+            m = max(abs(man_amt), abs(amount), 1e-9)
+            if amount_delta / m > 0.15:
+                continue
+        man_n = _normalize_label(str(p.get('description') or ''))
+        ratio = _manual_description_match_ratio(man_n, desc_n)
+        date_delta = int(p.get('date_delta_days') or 0)
+        score = (amount_delta * 2.0) + (date_delta * 0.35) - (ratio * 3.0)
+        scored.append((score, amount_delta, date_delta, {
+            'id': p['id'],
+            'ids': [p['id']],
+            'kind': 'single',
+            'date': p['date'],
+            'amount': man_amt,
+            'description': str(p.get('description') or '')[:200],
+            'direction': p.get('direction') or 'outgoing',
+            'category': p.get('category'),
+            'amount_delta': amount_delta,
+            'date_delta_days': date_delta,
+            'label_ratio': round(ratio, 3),
+        }))
+    scored.sort(key=lambda x: (x[0], x[1], x[2]))
+    singles = [row for _, _, _, row in scored]
+
+    # Exact-sum netted combos are high-signal — prefer them in the shortlist.
+    netted = _daily_budget_suggest_netted_manual_matches(
+        pool, amount=amount, description=description, limit=max_n,
+    )
+    used_ids: set[str] = set()
+    out: list[dict] = []
+    for row in netted:
+        if len(out) >= max_n:
+            break
+        out.append(row)
+        used_ids.update(str(i) for i in (row.get('ids') or []))
+    for row in singles:
+        if len(out) >= max_n:
+            break
+        rid = str(row.get('id') or '')
+        if rid and rid in used_ids:
+            continue
+        out.append(row)
+        if rid:
+            used_ids.add(rid)
+    return out
 
 
 def _normalize_daily_bill_items(raw_items) -> list:
@@ -8563,6 +8802,7 @@ def spending_statement_import():
     inserted = 0
     skipped = 0
     affected_months = set()
+    claimed_manual_ids: set[str] = set()
 
     for row in validated:
         fp = _spending_fingerprint(
@@ -8577,9 +8817,13 @@ def spending_statement_import():
             amount=row['amount'],
             description=row['description'],
             direction=row['direction'],
+            exclude_ids=claimed_manual_ids,
         )
         if manual_match is not None:
             _daily_budget_claim_manual_match(manual_match, row, statement_id, fp)
+            mid = str(manual_match.get('id') or '')
+            if mid:
+                claimed_manual_ids.add(mid)
             existing_fingerprints.add(fp)
             skipped += 1
             affected_months.add(report_month)

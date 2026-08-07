@@ -503,12 +503,101 @@ class TestManualImportDedup(unittest.TestCase):
         match = app_mod._daily_budget_fuzzy_match_manual(
             spending,
             date_str='2024-03-12',
-            amount=10.2,
+            amount=10.05,
             description='UBER *TRIP HELP.UBER.COM',
             direction='outgoing',
         )
         self.assertIsNotNone(match)
         self.assertEqual(match['id'], 'm1')
+
+    def test_fuzzy_match_statement_up_to_three_days_after_manual(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-05-01',
+                    amount=25.0,
+                    description='Groceries',
+                    source='manual',
+                    category='groceries',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-05-04',
+            amount=25.0,
+            description='TESCO STORES 1234',
+            direction='outgoing',
+        )
+        self.assertIsNotNone(match)
+        self.assertEqual(match['id'], 'm1')
+
+    def test_fuzzy_match_rejects_statement_older_than_manual(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-05-05',
+                    amount=25.0,
+                    description='Groceries',
+                    source='manual',
+                    category='groceries',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-05-04',
+            amount=25.0,
+            description='TESCO STORES 1234',
+            direction='outgoing',
+        )
+        self.assertIsNone(match)
+
+    def test_fuzzy_match_rejects_statement_more_than_three_days_after_manual(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-05-01',
+                    amount=25.0,
+                    description='Groceries',
+                    source='manual',
+                    category='groceries',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-05-05',
+            amount=25.0,
+            description='TESCO STORES 1234',
+            direction='outgoing',
+        )
+        self.assertIsNone(match)
+
+    def test_fuzzy_match_rejects_loose_amount_tolerance(self):
+        spending = {
+            'transactions': [
+                _tx(
+                    id='m1',
+                    date='2024-06-01',
+                    amount=10.0,
+                    description='Lunch',
+                    source='manual',
+                    category='dining',
+                ),
+            ],
+        }
+        match = app_mod._daily_budget_fuzzy_match_manual(
+            spending,
+            date_str='2024-06-01',
+            amount=10.35,
+            description='PRET A MANGER',
+            direction='outgoing',
+        )
+        self.assertIsNone(match)
 
     def test_fuzzy_match_ambiguous_same_amount_needs_label(self):
         spending = {
