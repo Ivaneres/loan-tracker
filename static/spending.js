@@ -2435,9 +2435,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function syncStatementSourceOptions(sources) {
-        const list = document.getElementById('statement-source-options');
-        if (!list) return;
+    function normalizeKnownBankSources(sources) {
         const labels = Array.isArray(sources) ? sources : [];
         const byLower = new Map();
         labels.forEach((raw) => {
@@ -2446,16 +2444,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const low = label.toLowerCase();
             if (!byLower.has(low)) byLower.set(low, label);
         });
-        const sorted = Array.from(byLower.values()).sort((a, b) =>
+        return Array.from(byLower.values()).sort((a, b) =>
             a.toLowerCase().localeCompare(b.toLowerCase()),
         );
-        list.innerHTML = '';
-        sorted.forEach((label) => {
-            const opt = document.createElement('option');
-            opt.value = label;
-            list.appendChild(opt);
-        });
+    }
+
+    function syncStatementSourceOptions(sources) {
+        const sorted = normalizeKnownBankSources(sources);
         window.KNOWN_BANK_SOURCES = sorted;
+        const combobox = statementSourceCombobox;
+        if (combobox && typeof combobox.refresh === 'function') {
+            combobox.refresh(sorted);
+        }
     }
 
     function readStatementSourceInput() {
@@ -2463,6 +2463,187 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!el) return '';
         return String(el.value || '').trim().slice(0, 80);
     }
+
+    function createStatementSourceCombobox() {
+        const wrap = document.querySelector('[data-source-combobox]');
+        const input = document.getElementById('statement-source');
+        const list = document.getElementById('statement-source-listbox');
+        if (!wrap || !input || !list) return null;
+
+        let options = normalizeKnownBankSources(window.KNOWN_BANK_SOURCES || []);
+        let open = false;
+        let activeIndex = -1;
+        let filtered = options.slice();
+
+        const setExpanded = (expanded) => {
+            open = expanded;
+            input.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            list.hidden = !expanded;
+            if (!expanded) {
+                activeIndex = -1;
+                input.removeAttribute('aria-activedescendant');
+            }
+        };
+
+        const optionId = (index) => `statement-source-option-${index}`;
+
+        const renderList = () => {
+            list.innerHTML = '';
+            if (!filtered.length) {
+                if (!options.length) {
+                    setExpanded(false);
+                    return;
+                }
+                const empty = document.createElement('p');
+                empty.className = 'source-combobox__empty';
+                empty.textContent = 'No matching sources';
+                list.appendChild(empty);
+                input.removeAttribute('aria-activedescendant');
+                return;
+            }
+            filtered.forEach((label, index) => {
+                const li = document.createElement('li');
+                li.id = optionId(index);
+                li.className = 'source-combobox__option';
+                li.setAttribute('role', 'option');
+                li.setAttribute('aria-selected', index === activeIndex ? 'true' : 'false');
+                li.dataset.value = label;
+                li.textContent = label;
+                list.appendChild(li);
+            });
+            if (activeIndex >= 0 && activeIndex < filtered.length) {
+                input.setAttribute('aria-activedescendant', optionId(activeIndex));
+                const activeEl = list.children[activeIndex];
+                if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+                    activeEl.scrollIntoView({ block: 'nearest' });
+                }
+            } else {
+                input.removeAttribute('aria-activedescendant');
+            }
+        };
+
+        const filterOptions = () => {
+            const q = String(input.value || '').trim().toLowerCase();
+            filtered = !q
+                ? options.slice()
+                : options.filter((label) => label.toLowerCase().includes(q));
+            if (activeIndex >= filtered.length) activeIndex = filtered.length ? 0 : -1;
+        };
+
+        const openList = ({ filter = true } = {}) => {
+            if (filter) {
+                filterOptions();
+            } else {
+                filtered = options.slice();
+                activeIndex = -1;
+            }
+            if (!options.length) {
+                setExpanded(false);
+                return;
+            }
+            setExpanded(true);
+            renderList();
+        };
+
+        const closeList = () => {
+            setExpanded(false);
+        };
+
+        const selectValue = (label) => {
+            input.value = String(label || '').slice(0, 80);
+            closeList();
+        };
+
+        const moveActive = (delta) => {
+            if (!open) {
+                openList({ filter: false });
+                if (!filtered.length) return;
+            }
+            if (!filtered.length) return;
+            if (activeIndex < 0) {
+                activeIndex = delta > 0 ? 0 : filtered.length - 1;
+            } else {
+                activeIndex = (activeIndex + delta + filtered.length) % filtered.length;
+            }
+            renderList();
+        };
+
+        input.addEventListener('focus', () => {
+            // Show the full known-source list on focus so users can switch
+            // without clearing first; typing still filters via `input`.
+            openList({ filter: false });
+        });
+
+        input.addEventListener('input', () => {
+            activeIndex = -1;
+            openList({ filter: true });
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                moveActive(1);
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                moveActive(-1);
+                return;
+            }
+            if (e.key === 'Enter' && open && activeIndex >= 0 && filtered[activeIndex]) {
+                e.preventDefault();
+                selectValue(filtered[activeIndex]);
+                return;
+            }
+            if (e.key === 'Escape') {
+                if (open) {
+                    e.preventDefault();
+                    closeList();
+                }
+                return;
+            }
+            if (e.key === 'Tab') {
+                closeList();
+            }
+        });
+
+        list.addEventListener('mousedown', (e) => {
+            // Keep focus on the input so blur does not race the click.
+            e.preventDefault();
+        });
+
+        list.addEventListener('click', (e) => {
+            const option = e.target && e.target.closest
+                ? e.target.closest('[role="option"]')
+                : null;
+            if (!option || !list.contains(option)) return;
+            selectValue(option.dataset.value || option.textContent || '');
+        });
+
+        document.addEventListener('pointerdown', (e) => {
+            if (!open) return;
+            if (wrap.contains(e.target)) return;
+            closeList();
+        });
+
+        return {
+            refresh(sources) {
+                options = normalizeKnownBankSources(sources);
+                if (open) {
+                    if (!options.length) {
+                        closeList();
+                    } else {
+                        // Keep whatever filter the user currently has while typing.
+                        filterOptions();
+                        renderList();
+                    }
+                }
+            },
+            close: closeList,
+        };
+    }
+
+    const statementSourceCombobox = createStatementSourceCombobox();
 
     if (importBtn) {
         importBtn.addEventListener('click', async () => {
