@@ -730,7 +730,7 @@ class TestManualImportDedup(unittest.TestCase):
                 'description': 'SALARY',
             },
         ]
-        led, dup_u, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
+        led, dup_u, _, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
         self.assertEqual(led, 0)
         self.assertEqual(dup_u, 0)
         self.assertFalse(rows[0]['preview_duplicate'])

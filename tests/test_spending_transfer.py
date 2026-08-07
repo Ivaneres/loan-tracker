@@ -757,7 +757,7 @@ class TestSpendingPairing(unittest.TestCase):
             },
             {'date': '2024-01-11', 'amount': 10.0, 'direction': 'outgoing', 'description': 'Other'},
         ]
-        led, dup_u, client_fps = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
+        led, dup_u, client_fps, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
         self.assertEqual(led, 2)
         self.assertEqual(dup_u, 0)
         self.assertIn(fp, client_fps)
@@ -772,7 +772,7 @@ class TestSpendingPairing(unittest.TestCase):
             {'date': '2024-01-10', 'amount': 5.0, 'direction': 'outgoing', 'description': 'A'},
             {'date': '2024-01-10', 'amount': 5.0, 'direction': 'outgoing', 'description': 'A'},
         ]
-        led, dup_u, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
+        led, dup_u, _, _ = app_mod._apply_spending_preview_duplicate_marks('2024-01', rows, spending)
         self.assertEqual(led, 0)
         self.assertEqual(dup_u, 1)
         self.assertFalse(rows[0]['preview_duplicate'])

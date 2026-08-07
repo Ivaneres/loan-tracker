@@ -673,8 +673,10 @@ def _apply_spending_preview_duplicate_marks(
     - expected_bill — matches an included daily-budget bill_item (not “missed”)
     - missed — on statement but not in the unmatched manual list (review these)
 
-    Returns (ledger_duplicate_count, upload_duplicate_count, ledger_fingerprints_for_ui).
-    The fingerprint list is restricted to the current report month for a smaller JSON payload.
+    Returns (ledger_duplicate_count, upload_duplicate_count, ledger_fingerprints_for_ui,
+    claimed_manual_ids). The fingerprint list is restricted to the current report month
+    for a smaller JSON payload. claimed_manual_ids are manuals auto-matched in this preview
+    (not yet bank_matched on the ledger).
     """
     tx_store = spending.get('transactions') or []
     ledger_fps = {str(t.get('fingerprint')) for t in tx_store if t.get('fingerprint')}
@@ -746,7 +748,7 @@ def _apply_spending_preview_duplicate_marks(
                         )
     month_prefix = f'{rm}|' if len(rm) == 7 else None
     client_fps = sorted(fp for fp in ledger_fps if month_prefix and fp.startswith(month_prefix))
-    return led, dup_upload, client_fps
+    return led, dup_upload, client_fps, claimed_manual_ids
 
 
 def _report_month_for_spending_tx(t: dict) -> str:
@@ -4967,6 +4969,49 @@ def _match_expected_bill_item(
     return best_j
 
 
+def _spending_unmatched_manuals(
+    spending: dict,
+    report_month: str | None = None,
+    *,
+    exclude_ids: set[str] | None = None,
+) -> list[dict]:
+    """Manual ledger rows not yet bank-matched (for preview comparison sidebar).
+
+    When report_month is set, only manuals in that month (report_month/month/date) are
+    included. exclude_ids skips manuals already auto-claimed in the current preview.
+    """
+    rm = (report_month or '').strip()[:7]
+    exclude = exclude_ids if exclude_ids is not None else set()
+    out = []
+    for t in spending.get('transactions') or []:
+        if str(t.get('source') or '') != 'manual':
+            continue
+        if t.get('bank_matched'):
+            continue
+        tid = str(t.get('id') or '')
+        if not tid or tid in exclude:
+            continue
+        if rm:
+            tx_month = str(t.get('report_month') or t.get('month') or '')[:7]
+            tx_date_month = str(t.get('date') or '')[:7]
+            if tx_month != rm and tx_date_month != rm:
+                continue
+        try:
+            amount = round(float(t.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+        out.append({
+            'id': tid,
+            'date': str(t.get('date') or '')[:10],
+            'amount': amount,
+            'description': str(t.get('description') or '')[:200],
+            'direction': str(t.get('direction') or 'outgoing'),
+            'category': str(t.get('category') or '') or None,
+        })
+    out.sort(key=lambda x: (x['date'], x['description'].lower()))
+    return out
+
+
 def _daily_budget_fuzzy_match_manual(
     spending: dict,
     *,
@@ -7071,7 +7116,9 @@ def _spending_statement_preview_finalize(
             'peer_description': None,
         }
 
-    d_led, d_up, dup_ledger_fps = _apply_spending_preview_duplicate_marks(rm, rows, spending)
+    d_led, d_up, dup_ledger_fps, claimed_manual_ids = _apply_spending_preview_duplicate_marks(
+        rm, rows, spending
+    )
     missed_n = sum(1 for r in rows if r.get('preview_review_reason') == 'missed')
     expected_bill_n = sum(1 for r in rows if r.get('preview_review_reason') == 'expected_bill')
 
@@ -7101,6 +7148,9 @@ def _spending_statement_preview_finalize(
         'preview_missed_manual': missed_n,
         'preview_expected_bill': expected_bill_n,
         'duplicate_ledger_fingerprints': dup_ledger_fps,
+        'unmatched_manuals': _spending_unmatched_manuals(
+            spending, rm, exclude_ids=claimed_manual_ids
+        ),
     }
     if extraction_meta:
         summary['extraction'] = extraction_meta
