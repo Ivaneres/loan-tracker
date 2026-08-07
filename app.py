@@ -144,6 +144,10 @@ DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
 DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.15
 # Statement date may post up to N days after manual (banks often lag); not the reverse.
 DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 3
+# Preview suggestions for near-misses (looser than auto-match; UI-only exclude).
+DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS = 7
+DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL = 5.0
+DAILY_BUDGET_MANUAL_SUGGEST_LIMIT = 3
 # Statement row vs expected monthly bill_items (label + amount).
 SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
@@ -681,6 +685,7 @@ def _apply_spending_preview_duplicate_marks(
     dup_upload = 0
     for r in rows:
         r['preview_review_reason'] = None
+        r['preview_manual_suggestions'] = []
         fp = _spending_fingerprint(
             rm,
             str(r.get('date') or ''),
@@ -729,6 +734,14 @@ def _apply_spending_preview_duplicate_marks(
                         r['preview_review_reason'] = 'expected_bill'
                     else:
                         r['preview_review_reason'] = 'missed'
+                        r['preview_manual_suggestions'] = _daily_budget_suggest_manual_matches(
+                            spending,
+                            date_str=str(r.get('date') or '')[:10],
+                            amount=float(r.get('amount') or 0),
+                            description=str(r.get('description') or ''),
+                            direction=direction,
+                            exclude_ids=claimed_manual_ids,
+                        )
     month_prefix = f'{rm}|' if len(rm) == 7 else None
     client_fps = sorted(fp for fp in ledger_fps if month_prefix and fp.startswith(month_prefix))
     return led, dup_upload, client_fps
@@ -5057,64 +5070,72 @@ def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: s
             manual_tx['category'] = cat
 
 
-def _spending_unmatched_manuals(spending: dict, report_month: str | None = None) -> list[dict]:
-    """Manual ledger rows available for user-selected statement reconciliation."""
-    rm = (report_month or '').strip()[:7]
-    out = []
+def _daily_budget_suggest_manual_matches(
+    spending: dict,
+    *,
+    date_str: str,
+    amount: float,
+    description: str,
+    direction: str,
+    exclude_ids: set[str] | None = None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Near-miss manuals for preview UI — user can dismiss a statement row as already covered.
+
+    Looser than auto-match: wider date/amount windows. Does not claim or mutate ledger rows.
+    """
+    amount = round(float(amount), 2)
+    desc_n = _normalize_label(description)
+    exclude = exclude_ids if exclude_ids is not None else set()
+    max_n = DAILY_BUDGET_MANUAL_SUGGEST_LIMIT if limit is None else max(0, int(limit))
+    stmt_d = _parse_iso_date(str(date_str or '')[:10])
+    scored: list[tuple[float, float, int, dict]] = []
     for t in spending.get('transactions') or []:
+        tid = str(t.get('id') or '')
+        if tid and tid in exclude:
+            continue
         if str(t.get('source') or '') != 'manual':
             continue
         if t.get('bank_matched'):
             continue
-        tid = str(t.get('id') or '')
-        if not tid:
+        if str(t.get('direction') or '') != direction:
             continue
-        if rm:
-            tx_month = str(t.get('report_month') or t.get('month') or '')[:7]
-            tx_date_month = str(t.get('date') or '')[:7]
-            if tx_month != rm and tx_date_month != rm:
+        man_date = str(t.get('date') or '')[:10]
+        man_d = _parse_iso_date(man_date)
+        if stmt_d is None or man_d is None:
+            if man_date != str(date_str or '')[:10]:
+                continue
+            date_delta = 0
+        else:
+            date_delta = (stmt_d - man_d).days
+            if date_delta < 0 or date_delta > DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS:
                 continue
         try:
-            amount = round(float(t.get('amount') or 0), 2)
+            man_amt = round(float(t.get('amount') or 0), 2)
         except (TypeError, ValueError):
-            amount = 0.0
-        out.append({
+            continue
+        amount_delta = round(abs(man_amt - amount), 2)
+        if amount_delta > DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL:
+            m = max(abs(man_amt), abs(amount), 1e-9)
+            if amount_delta / m > 0.15:
+                continue
+        man_n = _normalize_label(str(t.get('description') or ''))
+        ratio = _manual_description_match_ratio(man_n, desc_n)
+        # Prefer closer amounts, nearer dates, better labels.
+        score = (amount_delta * 2.0) + (date_delta * 0.35) - (ratio * 3.0)
+        scored.append((score, amount_delta, date_delta, {
             'id': tid,
-            'date': str(t.get('date') or '')[:10],
-            'amount': amount,
+            'date': man_date,
+            'amount': man_amt,
             'description': str(t.get('description') or '')[:200],
             'direction': str(t.get('direction') or 'outgoing'),
             'category': str(t.get('category') or '') or None,
-        })
-    out.sort(key=lambda x: (x['date'], x['description'].lower()))
-    return out
-
-
-def _spending_manual_for_user_claim(
-    spending: dict,
-    manual_id: str,
-    *,
-    direction: str,
-    exclude_ids: set[str] | None = None,
-) -> dict | None:
-    """Resolve a user-picked manual row for import-time reconciliation."""
-    mid = str(manual_id or '').strip()
-    if not mid:
-        return None
-    exclude = exclude_ids if exclude_ids is not None else set()
-    if mid in exclude:
-        return None
-    for t in spending.get('transactions') or []:
-        if str(t.get('id') or '') != mid:
-            continue
-        if str(t.get('source') or '') != 'manual':
-            return None
-        if t.get('bank_matched'):
-            return None
-        if str(t.get('direction') or '') != str(direction or ''):
-            return None
-        return t
-    return None
+            'amount_delta': amount_delta,
+            'date_delta_days': date_delta,
+            'label_ratio': round(ratio, 3),
+        }))
+    scored.sort(key=lambda x: (x[0], x[1], x[2]))
+    return [row for _, _, _, row in scored[:max_n]]
 
 
 def _normalize_daily_bill_items(raw_items) -> list:
@@ -6936,7 +6957,6 @@ def _spending_statement_preview_finalize(
         'preview_missed_manual': missed_n,
         'preview_expected_bill': expected_bill_n,
         'duplicate_ledger_fingerprints': dup_ledger_fps,
-        'unmatched_manuals': _spending_unmatched_manuals(spending, rm),
     }
     if extraction_meta:
         summary['extraction'] = extraction_meta
@@ -8617,7 +8637,6 @@ def spending_statement_import():
             'category': category,
             'confidence': confidence,
             'rationale': rationale,
-            'manual_match_id': str(row.get('manual_match_id') or '').strip() or None,
         })
 
     tx_store = spending.setdefault('transactions', [])
@@ -8641,26 +8660,14 @@ def spending_statement_import():
         if fp in existing_fingerprints:
             skipped += 1
             continue
-        manual_match = None
-        user_manual_id = row.get('manual_match_id')
-        if user_manual_id:
-            manual_match = _spending_manual_for_user_claim(
-                spending,
-                user_manual_id,
-                direction=row['direction'],
-                exclude_ids=claimed_manual_ids,
-            )
-            if manual_match is None:
-                return jsonify({'error': f'Invalid or unavailable manual_match_id: {user_manual_id}'}), 400
-        else:
-            manual_match = _daily_budget_fuzzy_match_manual(
-                spending,
-                date_str=row['date'],
-                amount=row['amount'],
-                description=row['description'],
-                direction=row['direction'],
-                exclude_ids=claimed_manual_ids,
-            )
+        manual_match = _daily_budget_fuzzy_match_manual(
+            spending,
+            date_str=row['date'],
+            amount=row['amount'],
+            description=row['description'],
+            direction=row['direction'],
+            exclude_ids=claimed_manual_ids,
+        )
         if manual_match is not None:
             _daily_budget_claim_manual_match(manual_match, row, statement_id, fp)
             mid = str(manual_match.get('id') or '')

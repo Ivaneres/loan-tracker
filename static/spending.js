@@ -773,8 +773,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let insightTransactionsSnapshot = [];
     /** Set of existing ledger fingerprint strings (same import scheme); used when reconciling dups after direction edit. */
     let spendingPreviewLedgerFps = null;
-    /** Unmatched manual ledger rows for user-selected reconciliation in import preview. */
-    let spendingPreviewUnmatchedManuals = [];
     let spendingMetricsChart = null;
     let spendingCategoryStackChart = null;
     /** @type {string|null} */
@@ -1154,9 +1152,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function spendingPreviewMatchCell(isDup, dupReason, reviewReason, manualLinked) {
-        if (manualLinked) {
-            return '<span class="preview-duplicate-pill" data-reason="manual" title="You linked this statement line to a manual entry">Linked to manual</span>';
+    function spendingPreviewMatchCell(isDup, dupReason, reviewReason, userDismissed) {
+        if (userDismissed) {
+            return '<span class="preview-duplicate-pill" data-reason="manual" title="You marked this as already covered by a manual entry — excluded from import">Already logged</span>';
         }
         if (isDup) {
             let label = 'Same as row in file';
@@ -1173,87 +1171,99 @@ document.addEventListener('DOMContentLoaded', () => {
         return '<span class="preview-match-empty text-gray-300">—</span>';
     }
 
-    function formatManualLinkOptionLabel(manual) {
+    function formatManualSuggestLabel(manual) {
         const date = String(manual.date || '').slice(0, 10);
+        const shortDate = formatPreviewShortDate(date) || date;
         const amt = Number(manual.amount);
         const amtStr = Number.isFinite(amt) ? amt.toFixed(2) : '0.00';
         const desc = String(manual.description || 'Manual spend').trim() || 'Manual spend';
-        return `${date} · £${amtStr} · ${desc}`;
+        const shortDesc = desc.length > 28 ? `${desc.slice(0, 26)}…` : desc;
+        return `${shortDate} · £${amtStr} · ${shortDesc}`;
     }
 
-    function getPreviewClaimedManualIds() {
-        const claimed = new Set();
-        if (!previewTbody) return claimed;
-        previewTbody.querySelectorAll('tr').forEach((tr) => {
-            const mid = tr.dataset.manualMatchId || '';
-            if (mid) claimed.add(mid);
-        });
-        return claimed;
+    function parsePreviewSuggestions(tr) {
+        try {
+            const raw = tr.dataset.manualSuggestions || '[]';
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
     }
 
-    function manualLinkCandidatesForRow(tr) {
-        const direction = tr.dataset.direction || 'outgoing';
-        const claimed = getPreviewClaimedManualIds();
-        const selected = tr.dataset.manualMatchId || '';
-        return (spendingPreviewUnmatchedManuals || []).filter((m) => {
-            if (String(m.direction || 'outgoing') !== direction) return false;
-            const id = String(m.id || '');
-            if (!id) return false;
-            if (claimed.has(id) && id !== selected) return false;
-            return true;
-        });
-    }
-
-    function buildManualLinkSelectHtml(tr) {
-        const candidates = manualLinkCandidatesForRow(tr);
-        if (!candidates.length) return '';
-        const selected = tr.dataset.manualMatchId || '';
-        const opts = candidates
+    function buildManualSuggestHtml(tr) {
+        const suggestions = parsePreviewSuggestions(tr);
+        if (!suggestions.length) return '';
+        const selected = tr.dataset.manualSuggestId || '';
+        const chips = suggestions
             .map((m) => {
                 const id = String(m.id || '');
-                const label = formatManualLinkOptionLabel(m);
-                const sel = id === selected ? ' selected' : '';
-                return `<option value="${escapeHtml(id)}"${sel}>${escapeHtml(label)}</option>`;
+                if (!id) return '';
+                const active = id === selected ? ' is-selected' : '';
+                const title = formatManualSuggestLabel(m);
+                return `<button type="button" class="preview-manual-suggest-chip${active}" data-manual-id="${escapeHtml(id)}" title="Mark as already logged — exclude from import">${escapeHtml(title)}</button>`;
             })
+            .filter(Boolean)
             .join('');
-        return `<select class="preview-manual-match-select border border-gray-300 rounded px-1 py-0.5 bg-white text-xs mt-1 max-w-full" aria-label="Link to manual entry"><option value="">Link to manual…</option>${opts}</select>`;
+        if (!chips) return '';
+        const clear = selected
+            ? '<button type="button" class="preview-manual-suggest-clear" title="Include this row again">Undo</button>'
+            : '';
+        return `<div class="preview-manual-suggest-list" role="group" aria-label="Possible manual matches">${chips}${clear}</div>`;
     }
 
-    function refreshPreviewManualLinkUi(tr) {
+    function refreshPreviewManualSuggestUi(tr) {
         if (!tr) return;
-        const manualLinked = Boolean(tr.dataset.manualMatchId);
+        const userDismissed = Boolean(tr.dataset.manualSuggestId);
         const isDup = tr.classList.contains('spending-preview-row-duplicate');
-        const reviewReason = manualLinked ? '' : tr.dataset.serverReviewReason || '';
-        tr.classList.toggle('spending-preview-row-missed', !isDup && !manualLinked && reviewReason === 'missed');
-        tr.classList.toggle('spending-preview-row-manual-linked', manualLinked);
+        const reviewReason = userDismissed ? '' : tr.dataset.serverReviewReason || '';
+        tr.classList.toggle('spending-preview-row-missed', !isDup && !userDismissed && reviewReason === 'missed');
+        tr.classList.toggle('spending-preview-row-manual-dismissed', userDismissed);
         const badgeCell = tr.querySelector('.preview-duplicate-cell');
         if (!badgeCell) return;
         const dupReason = tr.dataset.serverDupReason || '';
-        const linkable =
+        const showSuggest =
             !isDup &&
             (tr.dataset.direction || 'outgoing') === 'outgoing' &&
-            tr.dataset.serverReviewReason !== 'expected_bill' &&
-            (spendingPreviewUnmatchedManuals || []).length > 0;
-        const badge = spendingPreviewMatchCell(isDup, dupReason, reviewReason, manualLinked);
-        const selectHtml = linkable ? buildManualLinkSelectHtml(tr) : '';
-        badgeCell.innerHTML = selectHtml
-            ? `<div class="preview-manual-link-stack">${badge}${selectHtml}</div>`
+            tr.dataset.serverReviewReason === 'missed' &&
+            parsePreviewSuggestions(tr).length > 0;
+        const badge = spendingPreviewMatchCell(isDup, dupReason, reviewReason, userDismissed);
+        const suggestHtml = showSuggest ? buildManualSuggestHtml(tr) : '';
+        badgeCell.innerHTML = suggestHtml
+            ? `<div class="preview-manual-suggest-stack">${badge}${suggestHtml}</div>`
             : badge;
-        const select = badgeCell.querySelector('.preview-manual-match-select');
-        if (select && !select.dataset.bound) {
-            select.dataset.bound = '1';
-            select.addEventListener('change', () => {
-                const val = select.value || '';
-                if (val) tr.dataset.manualMatchId = val;
-                else delete tr.dataset.manualMatchId;
-                previewTbody.querySelectorAll('tr').forEach((row) => refreshPreviewManualLinkUi(row));
+        const include = tr.querySelector('.preview-include');
+        if (include) {
+            if (userDismissed || isDup) include.checked = false;
+            else if (!isDup) include.checked = true;
+        }
+        badgeCell.querySelectorAll('.preview-manual-suggest-chip').forEach((btn) => {
+            btn.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const id = btn.getAttribute('data-manual-id') || '';
+                if (tr.dataset.manualSuggestId === id) delete tr.dataset.manualSuggestId;
+                else tr.dataset.manualSuggestId = id;
+                refreshPreviewManualSuggestUi(tr);
+                syncPreviewIncludeAll();
+            });
+        });
+        const clearBtn = badgeCell.querySelector('.preview-manual-suggest-clear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                delete tr.dataset.manualSuggestId;
+                refreshPreviewManualSuggestUi(tr);
+                syncPreviewIncludeAll();
             });
         }
     }
 
-    function refreshAllPreviewManualLinkUi() {
+    function refreshAllPreviewManualSuggestUi() {
         if (!previewTbody) return;
-        previewTbody.querySelectorAll('tr').forEach((tr) => refreshPreviewManualLinkUi(tr));
+        previewTbody.querySelectorAll('tr').forEach((tr) => refreshPreviewManualSuggestUi(tr));
+        syncPreviewIncludeAll();
     }
 
     function formatPreviewShortDate(iso) {
@@ -1300,11 +1310,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const origDir = tr.dataset.origDirection || direction;
             const serverDupReason = tr.dataset.serverDupReason || '';
             const serverReview = tr.dataset.serverReviewReason || '';
-            const manualLinked = Boolean(tr.dataset.manualMatchId);
+            const userDismissed = Boolean(tr.dataset.manualSuggestId);
             let isDup = false;
             let reason = '';
             let reviewReason = '';
-            if (manualLinked) {
+            if (userDismissed) {
                 isDup = false;
             } else if (ledger.has(fp)) {
                 isDup = true;
@@ -1326,25 +1336,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             tr.classList.toggle('spending-preview-row-duplicate', isDup);
-            tr.classList.toggle('spending-preview-row-missed', !isDup && !manualLinked && reviewReason === 'missed');
-            tr.classList.toggle('spending-preview-row-manual-linked', manualLinked);
-            const badgeCell = tr.querySelector('.preview-duplicate-cell');
-            if (badgeCell) {
-                const manualLinked = Boolean(tr.dataset.manualMatchId);
-                const badge = spendingPreviewMatchCell(isDup, reason, reviewReason, manualLinked);
-                const linkable =
-                    !isDup &&
-                    direction === 'outgoing' &&
-                    tr.dataset.serverReviewReason !== 'expected_bill' &&
-                    (spendingPreviewUnmatchedManuals || []).length > 0;
-                const selectHtml = linkable ? buildManualLinkSelectHtml(tr) : '';
-                badgeCell.innerHTML = selectHtml
-                    ? `<div class="preview-manual-link-stack">${badge}${selectHtml}</div>`
-                    : badge;
-            }
+            tr.classList.toggle('spending-preview-row-missed', !isDup && !userDismissed && reviewReason === 'missed');
+            tr.classList.toggle('spending-preview-row-manual-dismissed', userDismissed);
+            refreshPreviewManualSuggestUi(tr);
             const include = tr.querySelector('.preview-include');
             if (include) {
-                if (isDup) include.checked = false;
+                if (isDup || userDismissed) include.checked = false;
                 else include.checked = true;
             }
         });
@@ -1484,7 +1481,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (importBtn) importBtn.disabled = true;
         spendingPreviewLedgerFps = null;
-        spendingPreviewUnmatchedManuals = [];
         const homeNext = document.getElementById('home-import-next');
         if (homeNext) {
             homeNext.classList.add('hidden');
@@ -1571,9 +1567,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!previewTbody || !previewWrap) return;
         const dupLedgerList = (summary && summary.duplicate_ledger_fingerprints) || [];
         spendingPreviewLedgerFps = new Set(Array.isArray(dupLedgerList) ? dupLedgerList : []);
-        spendingPreviewUnmatchedManuals = Array.isArray(summary && summary.unmatched_manuals)
-            ? summary.unmatched_manuals
-            : [];
         previewTbody.innerHTML = '';
         transactions.forEach((tx) => {
             const tr = document.createElement('tr');
@@ -1593,6 +1586,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const isDup = tx.preview_duplicate === true;
             const isBoundary = tx.date_boundary === true;
             const reviewReason = (tx.preview_review_reason && String(tx.preview_review_reason)) || '';
+            const suggestions = Array.isArray(tx.preview_manual_suggestions) ? tx.preview_manual_suggestions : [];
+            tr.dataset.manualSuggestions = JSON.stringify(suggestions);
             if (isDup) tr.classList.add('spending-preview-row-duplicate');
             if (!isDup && reviewReason === 'missed') tr.classList.add('spending-preview-row-missed');
             if (isBoundary) tr.classList.add('spending-preview-row-boundary');
@@ -1601,19 +1596,6 @@ document.addEventListener('DOMContentLoaded', () => {
             tr.dataset.serverDupReason = dupReason;
             tr.dataset.serverReviewReason = reviewReason;
             const dupCell = spendingPreviewMatchCell(isDup, dupReason, reviewReason, false);
-            const linkable =
-                !isDup &&
-                tx.direction === 'outgoing' &&
-                reviewReason !== 'expected_bill' &&
-                spendingPreviewUnmatchedManuals.length > 0;
-            const matchCellInner = linkable
-                ? `<div class="preview-manual-link-stack">${dupCell}<select class="preview-manual-match-select border border-gray-300 rounded px-1 py-0.5 bg-white text-xs mt-1 max-w-full" aria-label="Link to manual entry"><option value="">Link to manual…</option>${manualLinkCandidatesForRow(tr)
-                      .map((m) => {
-                          const id = String(m.id || '');
-                          return `<option value="${escapeHtml(id)}">${escapeHtml(formatManualLinkOptionLabel(m))}</option>`;
-                      })
-                      .join('')}</select></div>`
-                : dupCell;
 
             const startedLabel = tx.started_date ? String(tx.started_date) : '';
             const boundaryCell = isBoundary
@@ -1646,7 +1628,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td class="px-3 py-2 preview-tx-include">
                     <input type="checkbox" class="preview-include" ${includeChecked ? 'checked' : ''} aria-label="Include in import">
                 </td>
-                <td class="px-3 py-2 align-top preview-duplicate-cell preview-tx-match text-sm" data-label="Match">${matchCellInner}</td>
+                <td class="px-3 py-2 align-top preview-duplicate-cell preview-tx-match text-sm" data-label="Match">${dupCell}</td>
                 <td class="px-3 py-2 align-top whitespace-nowrap preview-tx-date preview-tx-detail" data-label="Date">${dateInner}</td>
                 <td class="px-3 py-2 preview-tx-desc" data-label="Description">
                     <span class="preview-tx-ref">${escapeHtml(String(tx.description || ''))}</span>${shortDateHtml}
@@ -1677,7 +1659,7 @@ document.addEventListener('DOMContentLoaded', () => {
             directionSelect.addEventListener('change', () => {
                 const newDir = directionSelect.value;
                 tr.dataset.direction = newDir;
-                delete tr.dataset.manualMatchId;
+                delete tr.dataset.manualSuggestId;
                 const cell = tr.querySelector('.preview-category-cell');
                 if (cell) {
                     if (newDir === 'outgoing') {
@@ -1688,10 +1670,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 recomputeSpendingPreviewDuplicates();
-                refreshAllPreviewManualLinkUi();
             });
         });
-        refreshAllPreviewManualLinkUi();
+        refreshAllPreviewManualSuggestUi();
         previewWrap.classList.remove('hidden');
         if (previewSummary && summary) {
             previewSummary.classList.remove('hidden');
@@ -2786,8 +2767,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     confidence: tr.dataset.confidence ? parseFloat(tr.dataset.confidence) : null,
                     rationale: tr.dataset.rationale || '',
                 };
-                const manualMatchId = tr.dataset.manualMatchId || '';
-                if (manualMatchId) item.manual_match_id = manualMatchId;
                 selected.push(item);
             });
             if (!selected.length) {
