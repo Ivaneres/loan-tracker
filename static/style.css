@@ -781,10 +781,71 @@ body.home-page {
 }
 
 /* Same box for month/date/text so the Source column lines up with period fields. */
-.import-fields .import-field > input.spending-control {
+.import-fields .import-field > input.spending-control,
+.import-fields .import-field .source-combobox > input.spending-control {
     height: 2.75rem;
     min-height: 2.75rem;
     line-height: 1.25;
+}
+
+/* Custom Source combobox (replaces unreliable native <datalist>). */
+.source-combobox {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+}
+
+.source-combobox__list {
+    position: absolute;
+    z-index: 40;
+    left: 0;
+    right: 0;
+    top: calc(100% + 0.25rem);
+    margin: 0;
+    padding: 0.35rem;
+    list-style: none;
+    max-height: min(14rem, 45vh);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--line);
+    border-radius: 0.85rem;
+    background: var(--surface-solid);
+    box-shadow: 0 10px 28px rgba(15, 40, 32, 0.12);
+}
+
+.source-combobox__list[hidden] {
+    display: none !important;
+}
+
+.source-combobox__option {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0.65rem 0.75rem;
+    border: 0;
+    border-radius: 0.65rem;
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: 0.95rem;
+    text-align: left;
+    cursor: pointer;
+    line-height: 1.3;
+}
+
+.source-combobox__option:hover,
+.source-combobox__option[aria-selected="true"] {
+    background: rgba(13, 122, 98, 0.12);
+    color: var(--accent-deep);
+}
+
+.source-combobox__empty {
+    margin: 0;
+    padding: 0.65rem 0.75rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    line-height: 1.35;
 }
 
 .import-reset {
@@ -4880,9 +4941,16 @@ body.home-page {
 
 @media (max-width: 640px) {
     body.home-page .import-fields .import-field > input.spending-control,
+    body.home-page .import-fields .import-field .source-combobox > input.spending-control,
     body.home-page .import-field--file .import-file-input {
         font-size: 1rem;
         min-height: 2.85rem;
+    }
+
+    body.home-page .source-combobox__option {
+        padding: 0.75rem 0.85rem;
+        font-size: 1rem;
+        min-height: 2.75rem;
     }
 
     body.home-page .import-actions .spending-btn {

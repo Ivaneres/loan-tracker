@@ -75,20 +75,27 @@
                     </label>
                     <label class="import-field" for="statement-source">
                         <span class="import-label">Source <span class="font-normal">(optional)</span></span>
-                        <input
-                            id="statement-source"
-                            type="text"
-                            list="statement-source-options"
-                            class="spending-control"
-                            placeholder="e.g. Monzo, Barclays"
-                            autocomplete="off"
-                            maxlength="80"
-                        />
-                        <datalist id="statement-source-options">
-                            {% for src in known_bank_sources %}
-                            <option value="{{ src }}"></option>
-                            {% endfor %}
-                        </datalist>
+                        <div class="source-combobox" data-source-combobox>
+                            <input
+                                id="statement-source"
+                                type="text"
+                                class="spending-control"
+                                placeholder="e.g. Monzo, Barclays"
+                                autocomplete="off"
+                                maxlength="80"
+                                role="combobox"
+                                aria-expanded="false"
+                                aria-controls="statement-source-listbox"
+                                aria-autocomplete="list"
+                                aria-haspopup="listbox"
+                            />
+                            <ul
+                                id="statement-source-listbox"
+                                class="source-combobox__list"
+                                role="listbox"
+                                hidden
+                            ></ul>
+                        </div>
                     </label>
                 </div>
                 <button type="button" id="period-reset-btn" class="spending-btn spending-btn--muted import-reset">Reset range from month</button>

@@ -151,5 +151,30 @@ class TestStatementImportBankSource(unittest.TestCase):
         self.assertIn('Monzo', body['known_bank_sources'])
 
 
+class TestStatementSourceComboboxMarkup(unittest.TestCase):
+    def test_home_uses_custom_source_combobox_not_datalist(self):
+        from pathlib import Path
+
+        home = (Path(__file__).resolve().parents[1] / 'templates' / 'home.html').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn('data-source-combobox', home)
+        self.assertIn('id="statement-source-listbox"', home)
+        self.assertIn('role="combobox"', home)
+        self.assertNotIn('list="statement-source-options"', home)
+        self.assertNotIn('<datalist', home)
+
+        js = (Path(__file__).resolve().parents[1] / 'static' / 'spending.js').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn('createStatementSourceCombobox', js)
+        self.assertIn('source-combobox__option', js)
+
+        css = (Path(__file__).resolve().parents[1] / 'static' / 'style.css').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn('.source-combobox__list', css)
+
+
 if __name__ == '__main__':
     unittest.main()
