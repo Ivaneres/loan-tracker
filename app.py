@@ -140,9 +140,10 @@ DAILY_BUDGET_IGNORE_CATEGORIES = frozenset({'savings'})
 DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
 DAILY_BUDGET_UNDERSPEND_PRIORITIES = frozenset({'debt_first', 'goals_first'})
 DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
-# Manual vs statement: allow slight amount drift (rounding / tips) and near-day posting.
-DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.50
-DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 1
+# Manual vs statement: allow slight amount drift (rounding / tips).
+DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL = 0.15
+# Statement date may post up to N days after manual (banks often lag); not the reverse.
+DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 3
 # Statement row vs expected monthly bill_items (label + amount).
 SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
@@ -4873,17 +4874,23 @@ def _manual_match_amounts_close(a: float, b: float) -> bool:
         bb = float(b)
     except (TypeError, ValueError):
         return False
-    if abs(aa - bb) <= DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL:
+    if round(abs(aa - bb), 2) <= DAILY_BUDGET_MANUAL_MATCH_AMOUNT_TOL:
         return True
-    return _amounts_close_for_compare(aa, bb)
+    # Penny-level rounding only — no broad percentage slack for manual reconciliation.
+    if round(abs(aa - bb), 2) <= 0.02:
+        return True
+    m = max(abs(aa), abs(bb), 1e-9)
+    return abs(aa - bb) / m <= 0.01
 
 
-def _manual_match_dates_close(a: str, b: str) -> bool:
-    da = _parse_iso_date(str(a or '')[:10])
-    db = _parse_iso_date(str(b or '')[:10])
-    if da is None or db is None:
-        return str(a or '')[:10] == str(b or '')[:10]
-    return abs((da - db).days) <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
+def _manual_match_dates_close(manual_date: str, statement_date: str) -> bool:
+    """True when the statement posts on or up to N days after the manual entry date."""
+    dm = _parse_iso_date(str(manual_date or '')[:10])
+    ds = _parse_iso_date(str(statement_date or '')[:10])
+    if dm is None or ds is None:
+        return str(manual_date or '')[:10] == str(statement_date or '')[:10]
+    delta = (ds - dm).days
+    return 0 <= delta <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
 
 
 def _manual_description_match_ratio(man_n: str, desc_n: str) -> float:
@@ -4962,10 +4969,10 @@ def _daily_budget_fuzzy_match_manual(
 ) -> dict | None:
     """Find a manual ledger row that likely duplicates an incoming statement line.
 
-    Matching prioritises date (±1 day) and amount (slight tolerance). When that pair
-    uniquely identifies one unmatched manual entry, different payment references /
-    titles are ignored. Description similarity is used to break ties when several
-    manuals share a near date and amount.
+    Matching prioritises date (statement on or up to a few days after manual) and
+    amount (tight tolerance). When that pair uniquely identifies one unmatched manual
+    entry, different payment references / titles are ignored. Description similarity
+    is used to break ties when several manuals share a near date and amount.
     """
     amount = round(float(amount), 2)
     desc_n = _normalize_label(description)
