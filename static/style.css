@@ -1705,7 +1705,6 @@ span.preview-boundary-pill {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     min-width: 0;
-    flex: 1 1 auto;
 }
 
 .import-preview-body {
@@ -1718,12 +1717,12 @@ span.preview-boundary-pill {
 .import-unclaimed-manuals {
     border: 1px solid var(--line, rgba(15, 40, 34, 0.12));
     border-radius: 0.65rem;
-    background: rgba(255, 255, 255, 0.82);
+    background: rgba(255, 255, 255, 0.9);
     padding: 0.55rem 0.7rem 0.7rem;
 }
 
 .import-unclaimed-manuals.hidden {
-    display: none;
+    display: none !important;
 }
 
 .import-unclaimed-manuals-details {
@@ -1846,36 +1845,40 @@ span.preview-boundary-pill {
     display: none;
 }
 
-@media (min-width: 1100px) {
-    .import-preview-body {
-        flex-direction: row;
-        align-items: flex-start;
-        gap: 1rem;
-    }
-
-    .import-preview-scroll {
-        flex: 1 1 auto;
-        min-width: 0;
-    }
-
-    .import-unclaimed-manuals {
-        flex: 0 0 17.5rem;
-        width: 17.5rem;
-        position: sticky;
-        top: 1rem;
-        align-self: flex-start;
+/*
+ * Wide desktops: float in the right viewport gutter beside the centered
+ * .app-shell (max 1120px) so the preview table keeps full content width.
+ * Needs ~15.5rem + gap in the right gutter → ≈1640px viewport.
+ */
+@media (min-width: 1640px) {
+    .import-unclaimed-manuals:not(.hidden) {
+        position: fixed;
+        /* top/max-height set in JS to track .import-preview-scroll */
+        top: 0;
+        left: calc(50% + 560px + 0.75rem);
+        width: 15.5rem;
+        max-width: calc(50vw - 560px - 1.5rem);
         max-height: calc(100vh - 2rem);
+        margin: 0;
+        z-index: 30;
         overflow: hidden;
         display: flex;
         flex-direction: column;
-        box-shadow: 0 8px 24px rgba(15, 40, 34, 0.06);
+        box-shadow: 0 12px 32px rgba(15, 40, 34, 0.12);
+        backdrop-filter: blur(10px);
+        background: rgba(255, 255, 255, 0.94);
+    }
+
+    .import-unclaimed-manuals--offscreen {
+        visibility: hidden;
+        pointer-events: none;
     }
 
     .import-unclaimed-manuals-details {
         display: flex;
         flex-direction: column;
         min-height: 0;
-        max-height: calc(100vh - 2.5rem);
+        max-height: inherit;
         overflow: hidden;
     }
 
@@ -1890,7 +1893,6 @@ span.preview-boundary-pill {
         padding-right: 0.15rem;
     }
 
-    /* Keep summary always visible; details stay open on desktop for comparison */
     .import-unclaimed-manuals-summary {
         cursor: default;
         pointer-events: none;

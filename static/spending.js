@@ -1340,6 +1340,90 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    /** Remember in-flow parent so gutter mode can portal the panel to document.body. */
+    let unclaimedManualsHome = null;
+
+    function unclaimedManualsGutterActive() {
+        return typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 1640px)').matches;
+    }
+
+    function ensureUnclaimedManualsPortal() {
+        const panel = document.getElementById('import-unclaimed-manuals');
+        if (!panel) return;
+        // Fixed descendants of .card (backdrop-filter) are positioned against the card,
+        // not the viewport — move to <body> while gutter mode is active.
+        if (unclaimedManualsGutterActive() && !panel.classList.contains('hidden')) {
+            if (!unclaimedManualsHome) {
+                unclaimedManualsHome = {
+                    parent: panel.parentElement,
+                    next: panel.nextSibling,
+                };
+            }
+            if (panel.parentElement !== document.body) {
+                document.body.appendChild(panel);
+            }
+            return;
+        }
+        if (unclaimedManualsHome && panel.parentElement === document.body) {
+            const home = unclaimedManualsHome;
+            if (home.next && home.next.parentNode === home.parent) {
+                home.parent.insertBefore(panel, home.next);
+            } else if (home.parent) {
+                home.parent.appendChild(panel);
+            }
+        }
+    }
+
+    function resetUnclaimedManualsGutterPosition() {
+        const panel = document.getElementById('import-unclaimed-manuals');
+        if (!panel) return;
+        panel.style.removeProperty('top');
+        panel.style.removeProperty('max-height');
+        panel.classList.remove('import-unclaimed-manuals--offscreen');
+        const details = panel.querySelector('.import-unclaimed-manuals-details');
+        if (details) details.style.removeProperty('max-height');
+        ensureUnclaimedManualsPortal();
+    }
+
+    function syncUnclaimedManualsGutterPosition() {
+        const panel = document.getElementById('import-unclaimed-manuals');
+        if (!panel || panel.classList.contains('hidden')) return;
+        ensureUnclaimedManualsPortal();
+        if (!unclaimedManualsGutterActive()) {
+            resetUnclaimedManualsGutterPosition();
+            return;
+        }
+        const anchor =
+            document.querySelector('.import-preview-scroll') ||
+            previewWrap ||
+            document.getElementById('spending-preview-wrap');
+        if (!anchor) return;
+        const rect = anchor.getBoundingClientRect();
+        const margin = 16;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+        if (!vh || rect.bottom < margin || rect.top > vh - margin) {
+            panel.classList.add('import-unclaimed-manuals--offscreen');
+            return;
+        }
+        panel.classList.remove('import-unclaimed-manuals--offscreen');
+        // Align with the transactions list; clamp so the panel stays on-screen.
+        const top = Math.max(margin, Math.min(rect.top, vh - margin - 140));
+        const maxH = Math.max(140, Math.min(rect.bottom, vh - margin) - top);
+        panel.style.top = `${Math.round(top)}px`;
+        panel.style.maxHeight = `${Math.round(maxH)}px`;
+        const details = panel.querySelector('.import-unclaimed-manuals-details');
+        if (details) details.style.maxHeight = `${Math.round(maxH - 8)}px`;
+    }
+
+    let unclaimedGutterRaf = 0;
+    function scheduleUnclaimedManualsGutterPosition() {
+        if (unclaimedGutterRaf) return;
+        unclaimedGutterRaf = window.requestAnimationFrame(() => {
+            unclaimedGutterRaf = 0;
+            syncUnclaimedManualsGutterPosition();
+        });
+    }
+
     function renderUnclaimedManuals(manuals) {
         const panel = document.getElementById('import-unclaimed-manuals');
         const list = document.getElementById('import-unclaimed-manuals-list');
@@ -1350,6 +1434,7 @@ document.addEventListener('DOMContentLoaded', () => {
         list.innerHTML = '';
         if (!spendingPreviewUnmatchedManuals.length) {
             panel.classList.add('hidden');
+            resetUnclaimedManualsGutterPosition();
             if (empty) empty.classList.remove('hidden');
             if (countEl) countEl.textContent = '';
             return;
@@ -1373,6 +1458,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (countEl) countEl.textContent = String(spendingPreviewUnmatchedManuals.length);
         syncUnclaimedManualsLinkedState();
+        scheduleUnclaimedManualsGutterPosition();
     }
 
     function formatPreviewShortDate(iso) {
@@ -1592,7 +1678,20 @@ document.addEventListener('DOMContentLoaded', () => {
         spendingPreviewLedgerFps = null;
         spendingPreviewUnmatchedManuals = [];
         const unclaimedPanel = document.getElementById('import-unclaimed-manuals');
-        if (unclaimedPanel) unclaimedPanel.classList.add('hidden');
+        if (unclaimedPanel) {
+            unclaimedPanel.classList.add('hidden');
+            resetUnclaimedManualsGutterPosition();
+            // Restore into the preview body before leaving the page state empty.
+            if (unclaimedManualsHome && unclaimedPanel.parentElement === document.body) {
+                const home = unclaimedManualsHome;
+                if (home.next && home.next.parentNode === home.parent) {
+                    home.parent.insertBefore(unclaimedPanel, home.next);
+                } else if (home.parent) {
+                    home.parent.appendChild(unclaimedPanel);
+                }
+            }
+            unclaimedManualsHome = null;
+        }
         const unclaimedList = document.getElementById('import-unclaimed-manuals-list');
         if (unclaimedList) unclaimedList.innerHTML = '';
         const unclaimedCount = document.getElementById('import-unclaimed-manuals-count');
@@ -1791,6 +1890,7 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshAllPreviewManualSuggestUi();
         renderUnclaimedManuals((summary && summary.unmatched_manuals) || []);
         previewWrap.classList.remove('hidden');
+        scheduleUnclaimedManualsGutterPosition();
         if (previewSummary && summary) {
             previewSummary.classList.remove('hidden');
             const metaBits = [];
@@ -2997,6 +3097,9 @@ document.addEventListener('DOMContentLoaded', () => {
             clearUnclaimedManualsSuggestHighlight();
         });
     }
+
+    window.addEventListener('scroll', scheduleUnclaimedManualsGutterPosition, { passive: true });
+    window.addEventListener('resize', scheduleUnclaimedManualsGutterPosition);
 
     if (monthSelect) {
         monthSelect.addEventListener('change', async () => {

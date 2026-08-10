@@ -30,7 +30,8 @@ Used on preview (`_apply_spending_preview_duplicate_marks`) and import (`spendin
 - **expected_bill** — `_match_expected_bill_item` (label sim ≥ `SPENDING_EXPECTED_BILL_SIM_THRESHOLD`, amount close); one bill claimed per row
 - Summary: `preview_missed_manual`, `preview_expected_bill`
 - Client `recomputeSpendingPreviewDuplicates` preserves server `manual` / review marks when direction unchanged (`data-server-*`)
-- **Unclaimed manuals sidebar:** `summary.unmatched_manuals` lists manuals in the report month that are not `bank_matched` and not auto-claimed in this preview; desktop sticky panel beside the preview table for comparison
+- **Unclaimed manuals sidebar:** `summary.unmatched_manuals` lists manuals in the report month that are not `bank_matched` and not auto-claimed in this preview; on wide desktops the panel is portaled to `document.body` and `position: fixed` in the right viewport gutter (vertical position tracks the preview table via `syncUnclaimedManualsGutterPosition`) so it is not trapped by `.card` `backdrop-filter`; narrower viewports stack it under the table
+
 
 ## Tests
 

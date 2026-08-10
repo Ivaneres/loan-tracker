@@ -233,4 +233,7 @@ class TestUnmatchedManualsSidebar(unittest.TestCase):
         self.assertIn('unmatched_manuals', js)
         self.assertIn('renderUnclaimedManuals', js)
         self.assertIn('import-unclaimed-manuals', css)
-        self.assertIn('position: sticky', css)
+        self.assertIn('position: fixed', css)
+        self.assertIn('50% + 560px', css)
+        self.assertIn('syncUnclaimedManualsGutterPosition', js)
+        self.assertIn('ensureUnclaimedManualsPortal', js)
