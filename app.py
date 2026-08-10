@@ -1250,11 +1250,65 @@ def _normalize_amount_sign(raw) -> str:
         return 'negative_is_outgoing'
     if s in {
         'positive_is_outgoing', 'positive_outgoing', 'signed_positive_out',
+        'amex', 'american_express', 'credit_card',
     }:
         return 'positive_is_outgoing'
     if s in {'absolute', 'unsigned', 'abs', 'money_columns'}:
         return 'absolute'
     return 'negative_is_outgoing'
+
+
+def _infer_amount_sign_from_data_rows(
+    data_rows: list[list[str]],
+    col: dict[str, int],
+    *,
+    sample_limit: int = 200,
+) -> str | None:
+    """
+    Infer signed-amount convention from row data.
+
+    Statement imports are mostly outgoing (debits), so the majority sign of the
+    Amount column is treated as outgoing. That distinguishes Revolut-style
+    exports (negative spend) from Amex/credit-card CSVs (positive spend) that
+    share generic Date/Description/Amount headers.
+
+    Returns 'positive_is_outgoing' | 'negative_is_outgoing' | None when
+    inconclusive (no amounts, tie, no amount column, or an explicit direction column).
+    """
+    if 'amount' not in col or 'direction' in col:
+        return None
+    amt_i = col['amount']
+    pos = 0
+    neg = 0
+    for cells in data_rows[:sample_limit]:
+        if amt_i >= len(cells):
+            continue
+        signed = _parse_signed_amount_cell(cells[amt_i])
+        if signed is None or signed == 0:
+            continue
+        if signed > 0:
+            pos += 1
+        else:
+            neg += 1
+    if pos == 0 and neg == 0:
+        return None
+    if pos == neg:
+        return None
+    return 'positive_is_outgoing' if pos > neg else 'negative_is_outgoing'
+
+
+def _resolve_amount_sign_for_rows(
+    data_rows: list[list[str]],
+    col: dict[str, int],
+    mapped_amount_sign: str | None,
+) -> str:
+    """Prefer data-inferred sign; fall back to header-map / alias default."""
+    inferred = _infer_amount_sign_from_data_rows(data_rows, col)
+    if inferred:
+        return inferred
+    if 'amount' not in col:
+        return 'absolute'
+    return _normalize_amount_sign(mapped_amount_sign or 'negative_is_outgoing')
 
 
 def _llm_map_tabular_headers(header_row: list[str]) -> dict | None:
@@ -1283,9 +1337,11 @@ def _llm_map_tabular_headers(header_row: list[str]) -> dict | None:
         'Rules: (1) description = merchant/payee/narrative/details. '
         '(2) Prefer separate money_in/money_out (Paid in/Paid out) when both exist; else use amount. '
         '(3) date = single booking/value date; started_date/completed_date when both start and settle exist. '
-        '(4) amount_sign: negative_is_outgoing when negatives are debits (e.g. Revolut); '
-        'positive_is_outgoing when positives are debits; absolute when amounts are unsigned '
-        'or when money_in/money_out columns are used. '
+        '(4) amount_sign: negative_is_outgoing when negatives are debits (e.g. Revolut / accounting); '
+        'positive_is_outgoing when positives are debits (e.g. American Express / many credit-card CSVs); '
+        'absolute when amounts are unsigned or when money_in/money_out columns are used. '
+        'Generic Date/Description/Amount headers alone are ambiguous — prefer positive_is_outgoing '
+        'when the export looks like a card statement, else negative_is_outgoing. '
         '(5) is_transaction_table=false for non-transaction sheets (balances-only, metadata).'
     )
     user_msg = 'Header columns:\n' + json.dumps(indexed, ensure_ascii=False)
@@ -1340,7 +1396,7 @@ def _resolve_tabular_headers(header_row: list[str], *, allow_llm: bool = True) -
 
     alias = _map_tabular_headers_alias(header_row)
     if alias is not None:
-        # Signed amount exports (Revolut-like) use negative=outgoing by convention.
+        # Provisional only — row sampling may refine amount_sign (Amex vs Revolut).
         amount_sign = 'negative_is_outgoing' if 'amount' in alias else 'absolute'
         resolved = {'columns': alias, 'amount_sign': amount_sign, 'source': 'alias'}
         _TABULAR_HEADER_MAP_CACHE[fp] = resolved
@@ -1594,7 +1650,9 @@ def _try_parse_tabular_spending_transactions(
     if resolved is None:
         return None
     col = resolved['columns']
-    amount_sign = resolved.get('amount_sign') or 'negative_is_outgoing'
+    amount_sign = _resolve_amount_sign_for_rows(
+        data_rows, col, resolved.get('amount_sign'),
+    )
     raw, stats = _parse_tabular_data_rows(header, data_rows, col, amount_sign=amount_sign)
     if len(raw) < SPENDING_TABULAR_MIN_ROWS:
         return None
@@ -1635,6 +1693,7 @@ def _iter_tabular_spending_extraction(statement_text: str):
     else:
         alias = _map_tabular_headers_alias(header)
         if alias is not None:
+            # Provisional only — row sampling may refine amount_sign (Amex vs Revolut).
             amount_sign = 'negative_is_outgoing' if 'amount' in alias else 'absolute'
             resolved = {'columns': alias, 'amount_sign': amount_sign, 'source': 'alias'}
             _TABULAR_HEADER_MAP_CACHE[fp] = resolved
@@ -1655,7 +1714,9 @@ def _iter_tabular_spending_extraction(statement_text: str):
             _TABULAR_HEADER_MAP_CACHE[fp] = resolved
 
     col = resolved['columns']
-    amount_sign = resolved.get('amount_sign') or 'negative_is_outgoing'
+    amount_sign = _resolve_amount_sign_for_rows(
+        data_rows, col, resolved.get('amount_sign'),
+    )
     raw, stats = _parse_tabular_data_rows(header, data_rows, col, amount_sign=amount_sign)
     if len(raw) < SPENDING_TABULAR_MIN_ROWS:
         return

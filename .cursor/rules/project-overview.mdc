@@ -36,9 +36,9 @@ Flask monolith finance tracker (loans + spending + daily budget). No separate fr
 - Period filter keeps rows by that ledger date; rows whose `started_date` is outside the range are tagged `date_boundary` and shown in preview (included by default; user can uncheck)
 - Preview summary exposes `date_boundary_count`; UI pill: `preview-boundary-pill`
 - Supported uploads: PDF, CSV, TXT, Excel **`.xlsx`** (converted via `openpyxl` → CSV-like text). File inputs must include `.xlsx` + `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` in `accept` or mobile pickers hide Excel files. Old `.xls` is rejected with a clear error.
-- **Structured CSV/XLSX** are parsed **locally** after mapping headers: optional alias fast path, else a **tiny LLM call on header titles only** (`_llm_map_tabular_headers`) that returns column indices + amount-sign convention — never sends row data. PENDING/FAILED states are skipped when a state column is mapped.
+- **Structured CSV/XLSX** are parsed **locally** after mapping headers: optional alias fast path, else a **tiny LLM call on header titles only** (`_llm_map_tabular_headers`) that returns column indices + amount-sign convention — never sends row data. Amount-sign from headers alone is provisional: after columns are mapped, `_infer_amount_sign_from_data_rows` samples the Amount column and treats the **majority sign as outgoing** (so Amex-style positive charges stay outgoing; Revolut-style negative spend stays outgoing). PENDING/FAILED states are skipped when a state column is mapped.
 - Unstructured PDFs still use layout hints and/or chunked LLM extraction (`STATEMENT_LLM_CHUNK_CHARS`, default extraction timeout **90s** per chunk via `OPENAI_EXTRACTION_TIMEOUT`).
-- Helpers: `_extract_spreadsheet_text`, `_is_spreadsheet_filename`, `_try_parse_tabular_spending_transactions`, `_llm_map_tabular_headers`, `_split_statement_text_into_llm_chunks`; tests: `@tests/test_statement_xlsx.py`, `@tests/test_statement_date_boundary.py`
+- Helpers: `_extract_spreadsheet_text`, `_is_spreadsheet_filename`, `_try_parse_tabular_spending_transactions`, `_llm_map_tabular_headers`, `_infer_amount_sign_from_data_rows`, `_split_statement_text_into_llm_chunks`; tests: `@tests/test_statement_xlsx.py`, `@tests/test_statement_date_boundary.py`
 
 ## Tests
 

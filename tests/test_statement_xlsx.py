@@ -310,6 +310,68 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(by_desc['Shop']['direction'], 'outgoing')
         self.assertEqual(by_desc['Refund']['direction'], 'incoming')
 
+    def test_amex_csv_positive_charges_are_outgoing(self):
+        """Amex Date/Description/Amount CSVs use positive amounts for purchases."""
+        text = (
+            'Date,Description,Amount\n'
+            '31/07/2026,GO AHEAD GROUP          LONDON,36.60\n'
+            "31/07/2026,SAINSBURY'S SUPERMARKET CAMBRIDGE,19.55\n"
+        )
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertIsNotNone(parsed)
+        rows, meta = parsed
+        self.assertEqual(meta['header_map_source'], 'alias')
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        self.assertEqual(len(rows), 2)
+        by_desc = {r['description']: r for r in rows}
+        go = by_desc['GO AHEAD GROUP          LONDON']
+        self.assertEqual(go['direction'], 'outgoing')
+        self.assertEqual(go['amount'], 36.6)
+        sains = by_desc["SAINSBURY'S SUPERMARKET CAMBRIDGE"]
+        self.assertEqual(sains['direction'], 'outgoing')
+        self.assertEqual(sains['amount'], 19.55)
+
+    def test_amex_csv_payment_credit_is_incoming(self):
+        text = (
+            'Date,Description,Amount\n'
+            '01/08/2026,TESCO STORES,24.99\n'
+            '02/08/2026,PAYMENT RECEIVED - THANK YOU,-150.00\n'
+            '03/08/2026,COFFEE SHOP,4.50\n'
+        )
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertIsNotNone(parsed)
+        rows, meta = parsed
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        by_desc = {r['description']: r for r in rows}
+        self.assertEqual(by_desc['TESCO STORES']['direction'], 'outgoing')
+        self.assertEqual(by_desc['PAYMENT RECEIVED - THANK YOU']['direction'], 'incoming')
+        self.assertEqual(by_desc['PAYMENT RECEIVED - THANK YOU']['amount'], 150.0)
+        self.assertEqual(by_desc['COFFEE SHOP']['direction'], 'outgoing')
+
+    def test_amex_headers_do_not_poison_revolut_sign_cache(self):
+        """Same generic headers must not lock the opposite bank into a wrong sign."""
+        amex = (
+            'Date,Description,Amount\n'
+            '31/07/2026,SAINSBURY,19.55\n'
+            '31/07/2026,BUS,36.60\n'
+        )
+        accounting = (
+            'Date,Description,Amount\n'
+            '2024-07-01,Coffee,-4.80\n'
+            '2024-07-02,Payroll,1000.00\n'
+        )
+        amex_parsed = app_mod._try_parse_tabular_spending_transactions(amex, allow_llm=False)
+        acct_parsed = app_mod._try_parse_tabular_spending_transactions(accounting, allow_llm=False)
+        self.assertIsNotNone(amex_parsed)
+        self.assertIsNotNone(acct_parsed)
+        self.assertEqual(amex_parsed[1]['amount_sign'], 'positive_is_outgoing')
+        self.assertEqual(acct_parsed[1]['amount_sign'], 'negative_is_outgoing')
+        self.assertEqual(amex_parsed[0][0]['direction'], 'outgoing')
+        coffee = next(r for r in acct_parsed[0] if r['description'] == 'Coffee')
+        self.assertEqual(coffee['direction'], 'outgoing')
+        payroll = next(r for r in acct_parsed[0] if r['description'] == 'Payroll')
+        self.assertEqual(payroll['direction'], 'incoming')
+
 
 class TestStatementXlsxUiAccept(unittest.TestCase):
     def setUp(self):
