@@ -1,0 +1,39 @@
+{
+  "month": "2026-08",
+  "after_statement1_import": {
+    "manual-pret": {
+      "bank_matched": true,
+      "bank_matched_via": "preview_suggest",
+      "amount": 10.35,
+      "manual_amount": 9.5
+    },
+    "manual-cafe": {
+      "bank_matched": false,
+      "bank_matched_via": null,
+      "amount": 10.0,
+      "manual_amount": null
+    },
+    "manual-a": {
+      "bank_matched": true,
+      "bank_matched_via": "preview_suggest",
+      "amount": 6.5,
+      "manual_amount": null
+    },
+    "manual-b": {
+      "bank_matched": true,
+      "bank_matched_via": "preview_suggest",
+      "amount": 3.5,
+      "manual_amount": null
+    },
+    "manual-open": {
+      "bank_matched": false,
+      "bank_matched_via": null,
+      "amount": 12.0,
+      "manual_amount": null
+    }
+  },
+  "statement2_unclaimed_ids": [
+    "manual-cafe",
+    "manual-open"
+  ]
+}
