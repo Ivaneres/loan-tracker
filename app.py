@@ -5079,7 +5079,14 @@ def _daily_budget_fuzzy_match_manual(
     return pool[0][2]
 
 
-def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: str, fingerprint: str) -> None:
+def _daily_budget_claim_manual_match(
+    manual_tx: dict,
+    row: dict,
+    statement_id: str,
+    fingerprint: str,
+    *,
+    adjust_amount_to_bank: bool = True,
+) -> None:
     manual_tx['bank_matched'] = True
     manual_tx['source_statement_id'] = statement_id
     manual_tx['fingerprint'] = fingerprint
@@ -5090,15 +5097,17 @@ def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: s
         man = str(manual_tx.get('description') or '').strip()
         if not man or man.lower() in ('spend', 'expense', 'purchase'):
             manual_tx['description'] = bank_desc[:500]
-    # Bank amount is ground truth when reconciling slight differences.
-    try:
-        bank_amt = round(float(row.get('amount') or 0), 2)
-        man_amt = round(float(manual_tx.get('amount') or 0), 2)
-        if bank_amt > 0 and abs(bank_amt - man_amt) > 0.001:
-            manual_tx['manual_amount'] = man_amt
-            manual_tx['amount'] = bank_amt
-    except (TypeError, ValueError):
-        pass
+    # Bank amount is ground truth when reconciling slight differences (single match).
+    # Skip for netted multi-manual claims — each part keeps its own amount.
+    if adjust_amount_to_bank:
+        try:
+            bank_amt = round(float(row.get('amount') or 0), 2)
+            man_amt = round(float(manual_tx.get('amount') or 0), 2)
+            if bank_amt > 0 and abs(bank_amt - man_amt) > 0.001:
+                manual_tx['manual_amount'] = man_amt
+                manual_tx['amount'] = bank_amt
+        except (TypeError, ValueError):
+            pass
     bank_date = str(row.get('date') or '')[:10]
     man_date = str(manual_tx.get('date') or '')[:10]
     if bank_date and man_date and bank_date != man_date:
@@ -5109,6 +5118,113 @@ def _daily_budget_claim_manual_match(manual_tx: dict, row: dict, statement_id: s
         cat = str(row.get('category')).strip().lower()
         if cat in SPENDING_CATEGORY_SET:
             manual_tx['category'] = cat
+
+
+def _spending_manuals_for_user_claim(
+    spending: dict,
+    manual_ids,
+    *,
+    direction: str,
+    exclude_ids: set[str] | None = None,
+) -> list[dict] | None:
+    """Resolve user-picked manual row(s) for import-time reconciliation (incl. netted)."""
+    if isinstance(manual_ids, str):
+        raw_ids = [p.strip() for p in manual_ids.split('+') if p.strip()]
+    elif isinstance(manual_ids, (list, tuple)):
+        raw_ids = [str(x or '').strip() for x in manual_ids if str(x or '').strip()]
+    else:
+        return None
+    if not raw_ids:
+        return None
+    # Preserve order, drop dupes.
+    ids: list[str] = []
+    seen: set[str] = set()
+    for mid in raw_ids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        ids.append(mid)
+    exclude = exclude_ids if exclude_ids is not None else set()
+    by_id = {}
+    for t in spending.get('transactions') or []:
+        tid = str(t.get('id') or '')
+        if tid:
+            by_id[tid] = t
+    out: list[dict] = []
+    for mid in ids:
+        if mid in exclude:
+            return None
+        t = by_id.get(mid)
+        if t is None:
+            return None
+        if str(t.get('source') or '') != 'manual':
+            return None
+        if t.get('bank_matched'):
+            return None
+        if str(t.get('direction') or '') != str(direction or ''):
+            return None
+        out.append(t)
+    return out
+
+
+def _apply_manual_reconcile_claims(
+    spending: dict,
+    claims: list,
+    *,
+    report_month: str,
+    statement_id: str,
+    claimed_manual_ids: set[str],
+    existing_fingerprints: set[str],
+) -> tuple[int, str | None]:
+    """Persist preview 'Skip — matched' picks as bank_matched manuals.
+
+    Returns (claims_applied, error_message).
+    """
+    if not isinstance(claims, list) or not claims:
+        return 0, None
+    applied = 0
+    for claim in claims:
+        if not isinstance(claim, dict):
+            return applied, 'Invalid manual_reconcile_claims entry'
+        direction = _normalize_spending_direction(
+            claim.get('direction'),
+            str(claim.get('description') or ''),
+            float(claim.get('amount') or 0) if claim.get('amount') is not None else 0.0,
+        )
+        manuals = _spending_manuals_for_user_claim(
+            spending,
+            claim.get('manual_ids') if claim.get('manual_ids') is not None else claim.get('manual_match_id'),
+            direction=direction,
+            exclude_ids=claimed_manual_ids,
+        )
+        if not manuals:
+            return applied, 'Invalid or unavailable manual id(s) in manual_reconcile_claims'
+        try:
+            amount = round(abs(float(claim.get('amount') or 0)), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+        date_str = str(claim.get('date') or '')[:10]
+        desc = str(claim.get('description') or '').strip()[:500] or 'Bank transaction'
+        row_meta = {
+            'date': date_str,
+            'amount': amount,
+            'description': desc,
+            'direction': direction,
+            'category': claim.get('category'),
+        }
+        fp = _spending_fingerprint(report_month, date_str, amount, direction, desc)
+        adjust = len(manuals) == 1
+        for man in manuals:
+            _daily_budget_claim_manual_match(
+                man, row_meta, statement_id, fp, adjust_amount_to_bank=adjust,
+            )
+            mid = str(man.get('id') or '')
+            if mid:
+                claimed_manual_ids.add(mid)
+            man['bank_matched_via'] = 'preview_suggest'
+        existing_fingerprints.add(fp)
+        applied += 1
+    return applied, None
 
 
 def _daily_budget_manual_suggest_pool(
@@ -8762,8 +8878,17 @@ def spending_statement_preview_stream():
 def spending_statement_import():
     payload = request.get_json(silent=True) or {}
     rows = payload.get('transactions')
-    if not isinstance(rows, list) or not rows:
-        return jsonify({'error': 'transactions[] is required and must be non-empty'}), 400
+    if rows is None:
+        rows = []
+    if not isinstance(rows, list):
+        return jsonify({'error': 'transactions[] must be a list'}), 400
+    claims_raw = payload.get('manual_reconcile_claims')
+    if claims_raw is None:
+        claims_raw = []
+    if not isinstance(claims_raw, list):
+        return jsonify({'error': 'manual_reconcile_claims must be a list'}), 400
+    if not rows and not claims_raw:
+        return jsonify({'error': 'transactions[] or manual_reconcile_claims[] is required'}), 400
 
     period, perr = _parse_spending_period_from_values(
         payload.get('report_month'),
@@ -8847,6 +8972,21 @@ def spending_statement_import():
     affected_months = set()
     claimed_manual_ids: set[str] = set()
 
+    # Persist preview "Skip — matched" picks before row import so fuzzy match
+    # cannot also claim the same manuals, and so they drop from later previews.
+    suggest_claims, claim_err = _apply_manual_reconcile_claims(
+        spending,
+        claims_raw,
+        report_month=report_month,
+        statement_id=statement_id,
+        claimed_manual_ids=claimed_manual_ids,
+        existing_fingerprints=existing_fingerprints,
+    )
+    if claim_err:
+        return jsonify({'error': claim_err}), 400
+    if suggest_claims:
+        affected_months.add(report_month)
+
     for row in validated:
         fp = _spending_fingerprint(
             report_month, row['date'], row['amount'], row['direction'], row['description']
@@ -8907,6 +9047,7 @@ def spending_statement_import():
         'original_row_count': len(validated),
         'imported_count': inserted,
         'skipped_duplicates': skipped,
+        'manual_suggest_claims': suggest_claims,
         'months': sorted({report_month}),
     }
     if bank_source:
@@ -8921,6 +9062,7 @@ def spending_statement_import():
         'statement_id': statement_id,
         'imported_count': inserted,
         'skipped_duplicates': skipped,
+        'manual_suggest_claims': suggest_claims,
         'report_month': report_month,
         'period_start': period['period_start'],
         'period_end': period['period_end'],

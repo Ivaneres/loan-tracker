@@ -1,6 +1,7 @@
-"""Preview near-miss suggestions for missed statement rows (UI dismiss only)."""
+"""Preview near-miss suggestions and persisted manual reconcile claims."""
 import unittest
 from datetime import date
+from unittest import mock
 
 import app as app_mod
 
@@ -237,3 +238,133 @@ class TestUnmatchedManualsSidebar(unittest.TestCase):
         self.assertIn('50% + 560px', css)
         self.assertIn('syncUnclaimedManualsGutterPosition', js)
         self.assertIn('ensureUnclaimedManualsPortal', js)
+
+
+class TestPersistManualSuggestClaims(unittest.TestCase):
+    def test_apply_claims_marks_bank_matched_and_preserves_netted_amounts(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-03-10', amount=9.5, description='Lunch'),
+                _manual_tx(id='m2', date='2024-03-10', amount=15.5, description='Coffee'),
+                _manual_tx(id='m3', date='2024-03-11', amount=7.0, description='Still open'),
+            ],
+        }
+        claimed = set()
+        fps = set()
+        n, err = app_mod._apply_manual_reconcile_claims(
+            spending,
+            [
+                {
+                    'manual_ids': ['m1', 'm2'],
+                    'date': '2024-03-12',
+                    'amount': 25.0,
+                    'description': 'CARD PAYMENT',
+                    'direction': 'outgoing',
+                }
+            ],
+            report_month='2024-03',
+            statement_id='stmt-1',
+            claimed_manual_ids=claimed,
+            existing_fingerprints=fps,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(n, 1)
+        self.assertEqual(claimed, {'m1', 'm2'})
+        self.assertTrue(spending['transactions'][0]['bank_matched'])
+        self.assertTrue(spending['transactions'][1]['bank_matched'])
+        self.assertFalse(spending['transactions'][2].get('bank_matched'))
+        # Netted parts keep their own amounts (do not all become £25).
+        self.assertEqual(spending['transactions'][0]['amount'], 9.5)
+        self.assertEqual(spending['transactions'][1]['amount'], 15.5)
+        self.assertEqual(spending['transactions'][0].get('bank_matched_via'), 'preview_suggest')
+        left = app_mod._spending_unmatched_manuals(spending, '2024-03')
+        self.assertEqual([m['id'] for m in left], ['m3'])
+
+    def test_single_claim_can_adjust_amount_to_bank(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-02-08', amount=9.5, description='Lunch'),
+            ],
+        }
+        claimed = set()
+        fps = set()
+        n, err = app_mod._apply_manual_reconcile_claims(
+            spending,
+            [
+                {
+                    'manual_ids': ['m1'],
+                    'date': '2024-02-12',
+                    'amount': 10.35,
+                    'description': 'PRET A MANGER',
+                    'direction': 'outgoing',
+                }
+            ],
+            report_month='2024-02',
+            statement_id='stmt-2',
+            claimed_manual_ids=claimed,
+            existing_fingerprints=fps,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(n, 1)
+        self.assertEqual(spending['transactions'][0]['amount'], 10.35)
+        self.assertEqual(spending['transactions'][0].get('manual_amount'), 9.5)
+
+    def test_import_endpoint_persists_claims(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='m1', date='2024-04-08', amount=9.5, description='Lunch'),
+                _manual_tx(id='m2', date='2024-04-09', amount=4.0, description='Snack'),
+            ],
+            'statements': [],
+            'monthly_insights': {},
+            'outgoing_classification_cache': {},
+        }
+        data = {'users': {'ivan': {'spending': spending}}, 'loans': {}}
+        client = app_mod.app.test_client()
+        with client.session_transaction() as sess:
+            sess['username'] = 'ivan'
+        with mock.patch.object(app_mod, 'load_data', return_value=data), mock.patch.object(
+            app_mod, 'save_data'
+        ) as save_mock:
+            resp = client.post(
+                '/api/spending/statement/import',
+                json={
+                    'report_month': '2024-04',
+                    'period_start': '2024-04-01',
+                    'period_end': '2024-04-30',
+                    'transactions': [
+                        {
+                            'date': '2024-04-10',
+                            'description': 'SALARY',
+                            'amount': 100.0,
+                            'direction': 'incoming',
+                        }
+                    ],
+                    'manual_reconcile_claims': [
+                        {
+                            'manual_ids': ['m1'],
+                            'date': '2024-04-12',
+                            'amount': 10.35,
+                            'description': 'PRET',
+                            'direction': 'outgoing',
+                        }
+                    ],
+                },
+            )
+        self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+        body = resp.get_json()
+        self.assertEqual(body['manual_suggest_claims'], 1)
+        self.assertEqual(body['imported_count'], 1)
+        self.assertTrue(spending['transactions'][0]['bank_matched'])
+        self.assertFalse(spending['transactions'][1].get('bank_matched'))
+        save_mock.assert_called()
+        # Claimed manual falls off next unmatched list
+        left = app_mod._spending_unmatched_manuals(spending, '2024-04')
+        self.assertEqual([m['id'] for m in left], ['m2'])
+
+    def test_import_js_sends_manual_reconcile_claims(self):
+        root = __import__('pathlib').Path(__file__).resolve().parents[1]
+        js = (root / 'static' / 'spending.js').read_text(encoding='utf-8')
+        self.assertIn('manual_reconcile_claims', js)
+        self.assertIn('manualClaims', js)
+        self.assertIn('Linked ${linkedN} manual match', js)

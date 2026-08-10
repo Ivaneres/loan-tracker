@@ -2969,13 +2969,29 @@ document.addEventListener('DOMContentLoaded', () => {
         importBtn.addEventListener('click', async () => {
             if (!previewTbody) return;
             const selected = [];
+            const manualClaims = [];
             previewTbody.querySelectorAll('tr').forEach((tr) => {
+                const suggestRaw = tr.dataset.manualSuggestId || '';
+                const linkedIds = manualIdsFromSuggestValue(suggestRaw);
+                if (linkedIds.length) {
+                    // Skip — matched: claim manuals on import; do not insert the bank row.
+                    const amount = parseFloat(tr.dataset.amount || '0');
+                    manualClaims.push({
+                        manual_ids: linkedIds,
+                        date: tr.dataset.date,
+                        description: tr.dataset.description || '',
+                        direction: tr.dataset.direction || 'outgoing',
+                        amount: Number.isFinite(amount) ? amount : 0,
+                        category: (tr.querySelector('.preview-category') || {}).value || null,
+                    });
+                    return;
+                }
                 const cb = tr.querySelector('.preview-include');
                 if (!cb || !cb.checked) return;
                 const categorySelect = tr.querySelector('.preview-category');
                 const amount = parseFloat(tr.dataset.amount || '0');
                 if (!Number.isFinite(amount) || amount <= 0) return;
-                const item = {
+                selected.push({
                     date: tr.dataset.date,
                     description: tr.dataset.description || '',
                     direction: tr.dataset.direction || 'outgoing',
@@ -2983,11 +2999,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     category: categorySelect ? categorySelect.value : null,
                     confidence: tr.dataset.confidence ? parseFloat(tr.dataset.confidence) : null,
                     rationale: tr.dataset.rationale || '',
-                };
-                selected.push(item);
+                });
             });
-            if (!selected.length) {
-                setStatus('Select at least one transaction to import.', true);
+            if (!selected.length && !manualClaims.length) {
+                setStatus('Select at least one transaction to import (or link a manual match).', true);
                 return;
             }
 
@@ -3002,6 +3017,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const source = readStatementSourceInput();
                 const payload = {
                     transactions: selected,
+                    manual_reconcile_claims: manualClaims,
                     file_name: fileName,
                     report_month: period.report_month,
                     period_start: period.period_start,
@@ -3018,6 +3034,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(data.error || 'Import failed');
                 let msg = `Imported ${data.imported_count} transaction(s); skipped ${data.skipped_duplicates} duplicate(s).`;
+                const linkedN = Number(data.manual_suggest_claims) || 0;
+                if (linkedN > 0) {
+                    msg += ` Linked ${linkedN} manual match(es).`;
+                }
                 const rec = data.reconciliation;
                 if (rec) {
                     msg += ` Internal transfers: ${rec.applied_pairs} pair(s) auto-matched; unmatched ${rec.unmatched_outgoing_count} out / ${rec.unmatched_incoming_count} in.`;
