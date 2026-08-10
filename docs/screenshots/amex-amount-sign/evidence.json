@@ -1,0 +1,269 @@
+{
+  "matrix": [
+    {
+      "id": "user-reported-amex",
+      "label": "User-reported Amex 2-row sample",
+      "pass": true,
+      "amount_sign": "positive_is_outgoing",
+      "expected_sign": "positive_is_outgoing",
+      "header_map_source": "alias",
+      "row_count": 2,
+      "rows": [
+        {
+          "description": "GO AHEAD GROUP          LONDON",
+          "expected_direction": "outgoing",
+          "expected_amount": 36.6,
+          "got_direction": "outgoing",
+          "got_amount": 36.6,
+          "pass": true
+        },
+        {
+          "description": "SAINSBURY'S SUPERMARKET CAMBRIDGE",
+          "expected_direction": "outgoing",
+          "expected_amount": 19.55,
+          "got_direction": "outgoing",
+          "got_amount": 19.55,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "amex-with-payment",
+      "label": "Amex charges + payment credit",
+      "pass": true,
+      "amount_sign": "positive_is_outgoing",
+      "expected_sign": "positive_is_outgoing",
+      "header_map_source": "alias",
+      "row_count": 3,
+      "rows": [
+        {
+          "description": "TESCO STORES",
+          "expected_direction": "outgoing",
+          "expected_amount": 24.99,
+          "got_direction": "outgoing",
+          "got_amount": 24.99,
+          "pass": true
+        },
+        {
+          "description": "PAYMENT RECEIVED - THANK YOU",
+          "expected_direction": "incoming",
+          "expected_amount": 150.0,
+          "got_direction": "incoming",
+          "got_amount": 150.0,
+          "pass": true
+        },
+        {
+          "description": "COFFEE SHOP",
+          "expected_direction": "outgoing",
+          "expected_amount": 4.5,
+          "got_direction": "outgoing",
+          "got_amount": 4.5,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "amex-currency-parens",
+      "label": "Amex with \u00a3 symbols, commas, paren credit",
+      "pass": true,
+      "amount_sign": "positive_is_outgoing",
+      "expected_sign": "positive_is_outgoing",
+      "header_map_source": "alias",
+      "row_count": 3,
+      "rows": [
+        {
+          "description": "WAITROSE",
+          "expected_direction": "outgoing",
+          "expected_amount": 12.4,
+          "got_direction": "outgoing",
+          "got_amount": 12.4,
+          "pass": true
+        },
+        {
+          "description": "AMAZON.CO.UK",
+          "expected_direction": "outgoing",
+          "expected_amount": 1234.56,
+          "got_direction": "outgoing",
+          "got_amount": 1234.56,
+          "pass": true
+        },
+        {
+          "description": "MERCHANT REFUND",
+          "expected_direction": "incoming",
+          "expected_amount": 12.0,
+          "got_direction": "incoming",
+          "got_amount": 12.0,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "amex-extra-columns",
+      "label": "Amex-style Card Member / Account # columns",
+      "pass": true,
+      "amount_sign": "positive_is_outgoing",
+      "expected_sign": "positive_is_outgoing",
+      "header_map_source": "alias",
+      "row_count": 3,
+      "rows": [
+        {
+          "description": "TESCO STORES 2897",
+          "expected_direction": "outgoing",
+          "expected_amount": 28.91,
+          "got_direction": "outgoing",
+          "got_amount": 28.91,
+          "pass": true
+        },
+        {
+          "description": "TFL TRAVEL CHARGE",
+          "expected_direction": "outgoing",
+          "expected_amount": 3.5,
+          "got_direction": "outgoing",
+          "got_amount": 3.5,
+          "pass": true
+        },
+        {
+          "description": "PAYMENT RECEIVED - THANK YOU",
+          "expected_direction": "incoming",
+          "expected_amount": 200.0,
+          "got_direction": "incoming",
+          "got_amount": 200.0,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "revolut-signed",
+      "label": "Revolut-like negative spend",
+      "pass": true,
+      "amount_sign": "negative_is_outgoing",
+      "expected_sign": "negative_is_outgoing",
+      "header_map_source": "alias",
+      "row_count": 3,
+      "rows": [
+        {
+          "description": "REVOLUT*COFFEE",
+          "expected_direction": "outgoing",
+          "expected_amount": 4.8,
+          "got_direction": "outgoing",
+          "got_amount": 4.8,
+          "pass": true
+        },
+        {
+          "description": "SUPERMARKET",
+          "expected_direction": "outgoing",
+          "expected_amount": 32.15,
+          "got_direction": "outgoing",
+          "got_amount": 32.15,
+          "pass": true
+        },
+        {
+          "description": "TOPUP JOHN",
+          "expected_direction": "incoming",
+          "expected_amount": 50.0,
+          "got_direction": "incoming",
+          "got_amount": 50.0,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "accounting-generic",
+      "label": "Generic Date/Description/Amount accounting (neg=out)",
+      "pass": true,
+      "amount_sign": "negative_is_outgoing",
+      "expected_sign": "negative_is_outgoing",
+      "header_map_source": "alias",
+      "row_count": 3,
+      "rows": [
+        {
+          "description": "Coffee",
+          "expected_direction": "outgoing",
+          "expected_amount": 4.8,
+          "got_direction": "outgoing",
+          "got_amount": 4.8,
+          "pass": true
+        },
+        {
+          "description": "Rent",
+          "expected_direction": "outgoing",
+          "expected_amount": 850.0,
+          "got_direction": "outgoing",
+          "got_amount": 850.0,
+          "pass": true
+        },
+        {
+          "description": "Salary",
+          "expected_direction": "incoming",
+          "expected_amount": 2800.0,
+          "got_direction": "incoming",
+          "got_amount": 2800.0,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "money-columns",
+      "label": "Paid in / Paid out columns",
+      "pass": true,
+      "amount_sign": "absolute",
+      "expected_sign": "absolute",
+      "header_map_source": "alias",
+      "row_count": 2,
+      "rows": [
+        {
+          "description": "Salary",
+          "expected_direction": "incoming",
+          "expected_amount": 2000.0,
+          "got_direction": "incoming",
+          "got_amount": 2000.0,
+          "pass": true
+        },
+        {
+          "description": "Groceries",
+          "expected_direction": "outgoing",
+          "expected_amount": 45.2,
+          "got_direction": "outgoing",
+          "got_amount": 45.2,
+          "pass": true
+        }
+      ]
+    },
+    {
+      "id": "direction-column",
+      "label": "Explicit Direction column",
+      "pass": true,
+      "amount_sign": "negative_is_outgoing",
+      "expected_sign": null,
+      "header_map_source": "alias",
+      "row_count": 2,
+      "rows": [
+        {
+          "description": "Shop",
+          "expected_direction": "outgoing",
+          "expected_amount": 12.5,
+          "got_direction": "outgoing",
+          "got_amount": 12.5,
+          "pass": true
+        },
+        {
+          "description": "Refund",
+          "expected_direction": "incoming",
+          "expected_amount": 3.0,
+          "got_direction": "incoming",
+          "got_amount": 3.0,
+          "pass": true
+        }
+      ]
+    }
+  ],
+  "ui_notes": [
+    "Home import ready with July 2026 period",
+    "Selected user-reported Amex CSV + Source=Amex",
+    "Amex user sample preview: both charges classified Outgoing (summary snippet: 'ROWS\\n2\\nIN\\n\u00a30.00\\nOUT\\n\u00a356.15\\nNET\\n\u00a3-56.15\\n\\nStats month: 2026-07 \u00b7 Range: 2026-07-01 \u2192 2026-07-31 \u00b7 Kept 2 / 2 extracted \u00b7 Transfer match preview: 0 pair(s) in full')",
+    "Amex charges+payment: TESCO/COFFEE outgoing, PAYMENT RECEIVED incoming",
+    "Revolut control: negative spend still Outgoing; TOPUP Incoming",
+    "Imported Amex user sample successfully"
+  ],
+  "all_matrix_pass": true
+}

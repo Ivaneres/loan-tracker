@@ -1424,6 +1424,9 @@ def _parse_signed_amount_cell(val) -> float | None:
         return float(val)
     s = str(val).strip().replace(',', '').replace('\u00a0', '').replace(' ', '')
     s = re.sub(r'^[$£€]', '', s)
+    # Handle "-£12.00" / "+£12.00" after a leading sign.
+    if len(s) >= 2 and s[0] in '+-' and s[1] in '$£€':
+        s = s[0] + s[2:]
     if not s or s in {'.', '-', '+', '(', ')'}:
         return None
     if s.startswith('(') and s.endswith(')'):

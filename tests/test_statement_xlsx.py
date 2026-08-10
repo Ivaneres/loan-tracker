@@ -373,6 +373,199 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(payroll['direction'], 'incoming')
 
 
+class TestAmountSignInferenceMatrix(unittest.TestCase):
+    """Variety of bank/card CSV shapes — majority Amount sign drives direction."""
+
+    def setUp(self):
+        app_mod._TABULAR_HEADER_MAP_CACHE.clear()
+
+    def _parse(self, text: str):
+        return app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+
+    def _dirs(self, rows):
+        return {r['description']: (r['direction'], r['amount']) for r in rows}
+
+    def test_user_reported_amex_two_row_sample(self):
+        text = (
+            'Date,Description,Amount\n'
+            '31/07/2026,GO AHEAD GROUP          LONDON,36.60\n'
+            "31/07/2026,SAINSBURY'S SUPERMARKET CAMBRIDGE,19.55\n"
+        )
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['GO AHEAD GROUP          LONDON'], ('outgoing', 36.6))
+        self.assertEqual(d["SAINSBURY'S SUPERMARKET CAMBRIDGE"], ('outgoing', 19.55))
+
+    def test_amex_with_currency_symbol_and_commas(self):
+        text = (
+            'Date,Description,Amount\n'
+            '01/07/2026,WAITROSE,£12.40\n'
+            '02/07/2026,AMAZON.CO.UK,"1,234.56"\n'
+            '03/07/2026,PAYMENT RECEIVED,-£500.00\n'
+        )
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['WAITROSE'][0], 'outgoing')
+        self.assertEqual(d['AMAZON.CO.UK'], ('outgoing', 1234.56))
+        self.assertEqual(d['PAYMENT RECEIVED'], ('incoming', 500.0))
+
+    def test_amex_paren_negative_credit(self):
+        text = (
+            'Date,Description,Amount\n'
+            '10/07/2026,SHELL PETROL,45.00\n'
+            '11/07/2026,MERCHANT REFUND,(12.00)\n'
+            '12/07/2026,UBER TRIP,8.20\n'
+        )
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['SHELL PETROL'][0], 'outgoing')
+        self.assertEqual(d['MERCHANT REFUND'], ('incoming', 12.0))
+        self.assertEqual(d['UBER TRIP'][0], 'outgoing')
+
+    def test_amex_single_positive_charge(self):
+        text = 'Date,Description,Amount\n15/07/2026,PRET A MANGER,6.75\n'
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        self.assertEqual(rows[0]['direction'], 'outgoing')
+        self.assertEqual(rows[0]['amount'], 6.75)
+
+    def test_amex_card_member_extra_columns(self):
+        text = (
+            'Date,Description,Card Member,Account #,Amount\n'
+            '20/07/2026,TESCO STORES 2897,IVAN E,XXXX-1234,28.91\n'
+            '21/07/2026,TFL TRAVEL CHARGE,IVAN E,XXXX-1234,3.50\n'
+            '22/07/2026,PAYMENT RECEIVED - THANK YOU,IVAN E,XXXX-1234,-200.00\n'
+        )
+        # Extra columns still alias-map Date/Description/Amount.
+        rows, meta = self._parse(text)
+        self.assertIsNotNone(rows)
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['TESCO STORES 2897'][0], 'outgoing')
+        self.assertEqual(d['TFL TRAVEL CHARGE'][0], 'outgoing')
+        self.assertEqual(d['PAYMENT RECEIVED - THANK YOU'][0], 'incoming')
+
+    def test_revolut_majority_negative_spend(self):
+        text = (
+            'Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance\n'
+            'CARD_PAYMENT,Current,2026-07-01 09:00:00,2026-07-01 09:05:00,REVOLUT*COFFEE,-4.80,0,GBP,COMPLETED,100\n'
+            'CARD_PAYMENT,Current,2026-07-02 12:00:00,2026-07-02 12:00:00,SUPERMARKET,-32.15,0,GBP,COMPLETED,67.85\n'
+            'TOPUP,Current,2026-07-03 08:00:00,2026-07-03 08:00:00,TOPUP JOHN,50.00,0,GBP,COMPLETED,117.85\n'
+        )
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'negative_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['REVOLUT*COFFEE'], ('outgoing', 4.8))
+        self.assertEqual(d['SUPERMARKET'], ('outgoing', 32.15))
+        self.assertEqual(d['TOPUP JOHN'], ('incoming', 50.0))
+
+    def test_accounting_style_generic_headers(self):
+        text = (
+            'Date,Description,Amount\n'
+            '2026-07-01,Coffee,-4.80\n'
+            '2026-07-02,Rent,-850.00\n'
+            '2026-07-03,Salary,2800.00\n'
+            '2026-07-04,Bus,-2.50\n'
+        )
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'negative_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['Coffee'][0], 'outgoing')
+        self.assertEqual(d['Rent'][0], 'outgoing')
+        self.assertEqual(d['Salary'][0], 'incoming')
+        self.assertEqual(d['Bus'][0], 'outgoing')
+
+    def test_money_in_out_columns_unaffected(self):
+        text = (
+            'Date,Description,Paid in,Paid out\n'
+            '01/07/2026,Salary,2000.00,\n'
+            '02/07/2026,Groceries,,45.20\n'
+            '03/07/2026,Refund,12.00,\n'
+        )
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'absolute')
+        d = self._dirs(rows)
+        self.assertEqual(d['Salary'], ('incoming', 2000.0))
+        self.assertEqual(d['Groceries'], ('outgoing', 45.2))
+        self.assertEqual(d['Refund'], ('incoming', 12.0))
+
+    def test_direction_column_absolute_amounts(self):
+        text = (
+            'Date,Description,Amount,Direction\n'
+            '01/07/2026,Shop,12.50,Debit\n'
+            '02/07/2026,Refund,3.00,Credit\n'
+        )
+        rows, meta = self._parse(text)
+        # Explicit direction column → inference skipped; absolute + direction cell.
+        self.assertIn(meta['amount_sign'], ('absolute', 'negative_is_outgoing'))
+        d = self._dirs(rows)
+        self.assertEqual(d['Shop'][0], 'outgoing')
+        self.assertEqual(d['Refund'][0], 'incoming')
+
+    def test_equal_pos_neg_falls_back_to_alias_default(self):
+        text = (
+            'Date,Description,Amount\n'
+            '01/07/2026,A,10.00\n'
+            '02/07/2026,B,-10.00\n'
+        )
+        rows, meta = self._parse(text)
+        # Tie → alias default negative_is_outgoing.
+        self.assertEqual(meta['amount_sign'], 'negative_is_outgoing')
+        d = self._dirs(rows)
+        self.assertEqual(d['A'][0], 'incoming')
+        self.assertEqual(d['B'][0], 'outgoing')
+
+    def test_infer_helper_majority_and_tie(self):
+        col = {'date': 0, 'description': 1, 'amount': 2}
+        pos_heavy = [
+            ['01/07/2026', 'A', '10'],
+            ['02/07/2026', 'B', '20'],
+            ['03/07/2026', 'C', '-1'],
+        ]
+        neg_heavy = [
+            ['01/07/2026', 'A', '-10'],
+            ['02/07/2026', 'B', '-20'],
+            ['03/07/2026', 'C', '1'],
+        ]
+        tie = [
+            ['01/07/2026', 'A', '10'],
+            ['02/07/2026', 'B', '-10'],
+        ]
+        self.assertEqual(
+            app_mod._infer_amount_sign_from_data_rows(pos_heavy, col),
+            'positive_is_outgoing',
+        )
+        self.assertEqual(
+            app_mod._infer_amount_sign_from_data_rows(neg_heavy, col),
+            'negative_is_outgoing',
+        )
+        self.assertIsNone(app_mod._infer_amount_sign_from_data_rows(tie, col))
+        self.assertIsNone(
+            app_mod._infer_amount_sign_from_data_rows(
+                pos_heavy, {'date': 0, 'description': 1, 'amount': 2, 'direction': 3},
+            )
+        )
+
+    def test_large_amex_month_stays_positive_outgoing(self):
+        lines = ['Date,Description,Amount']
+        for i in range(1, 41):
+            day = f'{i:02d}' if i <= 31 else '31'
+            lines.append(f'{day}/07/2026,MERCHANT {i},{10 + i * 0.35:.2f}')
+        lines.append('15/07/2026,PAYMENT RECEIVED,-1200.00')
+        lines.append('20/07/2026,STORE CREDIT,-25.00')
+        text = '\n'.join(lines) + '\n'
+        rows, meta = self._parse(text)
+        self.assertEqual(meta['amount_sign'], 'positive_is_outgoing')
+        out = [r for r in rows if r['direction'] == 'outgoing']
+        inc = [r for r in rows if r['direction'] == 'incoming']
+        self.assertEqual(len(out), 40)
+        self.assertEqual(len(inc), 2)
+        self.assertTrue(all(r['description'].startswith('MERCHANT') for r in out))
+
+
 class TestStatementXlsxUiAccept(unittest.TestCase):
     def setUp(self):
         self.client = app_mod.app.test_client()
