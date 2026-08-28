@@ -1178,11 +1178,11 @@ def _tabular_header_aliases() -> dict[str, tuple[str, ...]]:
         ),
         'money_in': (
             'money in', 'paid in', 'credit', 'credits', 'inflow', 'deposit',
-            'money in (£)', 'paid in (£)',
+            'money in (£)', 'paid in (£)', 'credit amount',
         ),
         'money_out': (
             'money out', 'paid out', 'debit', 'debits', 'outflow', 'withdrawal',
-            'money out (£)', 'paid out (£)',
+            'money out (£)', 'paid out (£)', 'debit amount',
         ),
         'date': (
             'date', 'booking date', 'transaction date', 'value date',
@@ -1583,20 +1583,35 @@ def _split_tabular_statement(statement_text: str) -> tuple[list[str], list[list[
     """
     Split CSV-like text into (header_row, data_rows) when it looks like a table export.
     Does not map columns — that happens via alias or a header-only LLM call.
+    Skips preamble rows (e.g. HSBC account metadata) before the real column header.
     """
+    rows = [r for r in _iter_csv_like_rows(statement_text) if any((c or '').strip() for c in r)]
+    if not rows:
+        return None
+
     header = None
-    data_rows: list[list[str]] = []
-    for row in _iter_csv_like_rows(statement_text):
-        if not any((c or '').strip() for c in row):
+    header_idx = None
+    fallback_idx = None
+    for i, row in enumerate(rows[:25]):
+        if _row_looks_numeric_heavy(row):
             continue
-        if header is None:
-            if _row_looks_numeric_heavy(row):
-                # First row already looks like data — not a confident tabular export.
-                return None
+        if sum(1 for c in row if str(c or '').strip()) < 3:
+            continue
+        if _map_tabular_headers_alias(row) is not None:
             header = row
-            continue
-        data_rows.append(row)
-    if header is None or not data_rows:
+            header_idx = i
+            break
+        if fallback_idx is None:
+            fallback_idx = i
+
+    if header is None and fallback_idx is not None:
+        header = rows[fallback_idx]
+        header_idx = fallback_idx
+
+    if header is None or header_idx is None:
+        return None
+    data_rows = rows[header_idx + 1:]
+    if not data_rows:
         return None
     if sum(1 for c in header if str(c or '').strip()) < 3:
         return None

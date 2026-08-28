@@ -394,8 +394,16 @@
         if (sourceInput && sourceInput.value.trim()) fd.append('bank_source', sourceInput.value.trim());
         setStatus('Extracting…');
         api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload`, { method: 'POST', body: fd })
-          .then(() => {
-            setStatus('Statement added.');
+          .then((data) => {
+            refreshFromSession(data);
+            const uploads = (data && data.session && data.session.uploads) || [];
+            const added = uploads[uploads.length - 1];
+            if (added && added.file_name) {
+              const n = Number(added.row_count) || 0;
+              setStatus(`Added ${added.file_name} (${n} row${n === 1 ? '' : 's'}).`);
+            } else {
+              setStatus('Statement added.');
+            }
             fileInput.value = '';
           })
           .catch((err) => setStatus(err.message || 'Upload failed', true));
@@ -411,7 +419,10 @@
         api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload/${encodeURIComponent(id)}`, {
           method: 'DELETE',
         })
-          .then(() => setStatus('Upload removed.'))
+          .then((data) => {
+            refreshFromSession(data);
+            setStatus('Upload removed.');
+          })
           .catch((err) => setStatus(err.message || 'Remove failed', true));
       });
     }

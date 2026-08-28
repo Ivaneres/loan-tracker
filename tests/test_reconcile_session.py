@@ -1,4 +1,5 @@
 """Month-scoped reconcile session: stage, auto-match, link, confirm."""
+import io
 import unittest
 from unittest import mock
 
@@ -300,6 +301,56 @@ class TestReconcileApi(unittest.TestCase):
             self.assertTrue(man.get('bank_matched'))
 
 
+class TestReconcileUpload(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self._data = {
+            'users': {
+                'admin': {
+                    'spending': {
+                        'transactions': [],
+                        'statements': [],
+                        'monthly_insights': {},
+                        'classification_overrides': {},
+                        'classification_cache': {},
+                        'daily_budget': {},
+                        'reconcile_sessions': {},
+                    }
+                }
+            },
+            'loans': {},
+        }
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'admin'
+
+    def test_upload_hsbc_csv_with_preamble(self):
+        csv_body = (
+            'Account name,My Current Account\n'
+            'Sort code,40-00-00\n'
+            'Date,Description,Paid Out,Paid In,Balance\n'
+            '05/06/2024,PRET A MANGER,10.50,,\n'
+            '06/06/2024,SALARY,,1500.00,\n'
+        )
+        with mock.patch.object(app_mod, 'load_data', return_value=self._data), mock.patch.object(
+            app_mod, 'save_data'
+        ):
+            resp = self.client.post(
+                '/api/spending/reconcile/2024-06/upload',
+                data={
+                    'file': (io.BytesIO(csv_body.encode('utf-8')), 'hsbc-june.csv'),
+                    'bank_source': 'HSBC',
+                },
+                content_type='multipart/form-data',
+            )
+            self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+            body = resp.get_json()
+            uploads = body['session']['uploads']
+            self.assertEqual(len(uploads), 1)
+            self.assertEqual(uploads[0]['file_name'], 'hsbc-june.csv')
+            self.assertEqual(uploads[0]['bank_source'], 'HSBC')
+            self.assertEqual(uploads[0]['row_count'], 2)
+
+
 class TestReconcileUiPresence(unittest.TestCase):
     def setUp(self):
         self.client = app_mod.app.test_client()
@@ -326,6 +377,13 @@ class TestReconcileUiPresence(unittest.TestCase):
 
             nav_daily = self.client.get('/spending/daily')
             self.assertIn('>Reconcile</a>', nav_daily.get_data(as_text=True))
+
+    def test_reconcile_js_refreshes_after_upload(self):
+        from pathlib import Path
+
+        js = (Path(app_mod.app.root_path) / 'static' / 'reconcile.js').read_text(encoding='utf-8')
+        self.assertIn('refreshFromSession(data)', js)
+        self.assertIn("api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload`", js)
 
 
 if __name__ == '__main__':

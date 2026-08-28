@@ -276,6 +276,24 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(by_desc['Rent']['direction'], 'outgoing')
         self.assertEqual(by_desc['Rent']['amount'], 850.0)
 
+    def test_hsbc_csv_skips_preamble_rows(self):
+        text = (
+            'Account name,My Current Account\n'
+            'Sort code,40-00-00\n'
+            'Date,Description,Paid Out,Paid In,Balance\n'
+            '05/06/2024,PRET A MANGER,10.50,,\n'
+            '06/06/2024,SALARY,,1500.00,\n'
+        )
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertIsNotNone(parsed)
+        rows, meta = parsed
+        self.assertEqual(meta['profile'], 'money_columns')
+        self.assertEqual(len(rows), 2)
+        by_desc = {r['description']: r for r in rows}
+        self.assertEqual(by_desc['PRET A MANGER']['direction'], 'outgoing')
+        self.assertEqual(by_desc['PRET A MANGER']['amount'], 10.5)
+        self.assertEqual(by_desc['SALARY']['direction'], 'incoming')
+
     def test_llm_chunk_split(self):
         lines = [f'row {i},value\n' for i in range(100)]
         text = ''.join(lines)

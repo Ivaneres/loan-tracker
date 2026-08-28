@@ -21,9 +21,12 @@
                 <div class="reconcile-hero-meta">
                     <label class="reconcile-field reconcile-field--month" for="reconcile-month">
                         <span class="reconcile-field-label">Stats month</span>
-                        <input id="reconcile-month" type="month" class="reconcile-input" value="{{ report_month }}" />
+                        <input id="reconcile-month" type="month" class="reconcile-input reconcile-control" value="{{ report_month }}" />
                     </label>
-                    <span id="reconcile-status-chip" class="reconcile-status-chip" aria-live="polite">staging</span>
+                    <div class="reconcile-field reconcile-field--status">
+                        <span class="reconcile-field-label">Status</span>
+                        <span id="reconcile-status-chip" class="reconcile-status-chip reconcile-control" aria-live="polite">staging</span>
+                    </div>
                 </div>
             </header>
 
@@ -32,15 +35,16 @@
                 <div class="reconcile-upload-grid">
                     <label class="reconcile-field" for="reconcile-source">
                         <span class="reconcile-field-label">Source <span class="reconcile-field-optional">optional</span></span>
-                        <input id="reconcile-source" type="text" class="reconcile-input" placeholder="e.g. Monzo, Amex" maxlength="80" list="reconcile-source-list" />
+                        <input id="reconcile-source" type="text" class="reconcile-input reconcile-control" placeholder="e.g. Monzo, Amex" maxlength="80" list="reconcile-source-list" />
                         <datalist id="reconcile-source-list"></datalist>
                     </label>
                     <label class="reconcile-field reconcile-field--file" for="reconcile-file">
                         <span class="reconcile-field-label">Statement file</span>
-                        <input id="reconcile-file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="reconcile-input reconcile-input--file" />
+                        <input id="reconcile-file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="reconcile-input reconcile-input--file reconcile-control" />
                     </label>
                     <div class="reconcile-field reconcile-field--action">
-                        <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft">Add statement</button>
+                        <span class="reconcile-field-label reconcile-field-label--spacer" aria-hidden="true">Add</span>
+                        <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft reconcile-control">Add statement</button>
                     </div>
                 </div>
                 <ul id="reconcile-upload-list" class="reconcile-upload-list" aria-label="Staged statements"></ul>
