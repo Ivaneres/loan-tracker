@@ -1,8 +1,9 @@
-{# Primary nav. Set active to: home | daily | spending | search | loans #}
+{# Primary nav. Set active to: home | daily | spending | search | reconcile | loans #}
 <nav class="app-nav" aria-label="Primary">
     <a href="/" class="{% if active == 'home' %}app-nav-active{% endif %}"{% if active == 'home' %} aria-current="page"{% endif %}>Home</a>
     <a href="/spending/daily" class="{% if active == 'daily' %}app-nav-active{% endif %}"{% if active == 'daily' %} aria-current="page"{% endif %}>Daily</a>
     <a href="/spending" class="{% if active == 'spending' %}app-nav-active{% endif %}"{% if active == 'spending' %} aria-current="page"{% endif %}>Monthly</a>
     <a href="/spending/search" class="{% if active == 'search' %}app-nav-active{% endif %}"{% if active == 'search' %} aria-current="page"{% endif %}>Search</a>
+    <a href="/spending/reconcile" class="{% if active == 'reconcile' %}app-nav-active{% endif %}"{% if active == 'reconcile' %} aria-current="page"{% endif %}>Reconcile</a>
     <a href="/loans" class="{% if active == 'loans' %}app-nav-active{% endif %}"{% if active == 'loans' %} aria-current="page"{% endif %}>Loans</a>
 </nav>

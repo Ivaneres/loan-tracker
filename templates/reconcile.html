@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Reconcile statements</title>
+    {% include 'partials/fonts.html' %}
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ asset_url('style.css') }}">
+</head>
+<body class="app-page spending-page reconcile-page min-h-screen">
+    <div class="app-shell">
+        {% with active='reconcile' %}{% include 'partials/app_header.html' %}{% endwith %}
+
+        <section class="spending-section card reconcile-section" aria-labelledby="reconcile-heading">
+            <header class="reconcile-hero">
+                <div class="reconcile-hero-copy">
+                    <h2 class="spending-h2" id="reconcile-heading">Reconcile</h2>
+                    <p class="reconcile-lead">Upload every statement for the month, run auto-match, review the queue, then confirm.</p>
+                </div>
+                <div class="reconcile-hero-meta">
+                    <label class="reconcile-field reconcile-field--month" for="reconcile-month">
+                        <span class="reconcile-field-label">Stats month</span>
+                        <input id="reconcile-month" type="month" class="reconcile-input" value="{{ report_month }}" />
+                    </label>
+                    <span id="reconcile-status-chip" class="reconcile-status-chip" aria-live="polite">staging</span>
+                </div>
+            </header>
+
+            <div class="reconcile-panel reconcile-panel--upload">
+                <h3 class="reconcile-panel-title">Add statements</h3>
+                <div class="reconcile-upload-grid">
+                    <label class="reconcile-field" for="reconcile-source">
+                        <span class="reconcile-field-label">Source <span class="reconcile-field-optional">optional</span></span>
+                        <input id="reconcile-source" type="text" class="reconcile-input" placeholder="e.g. Monzo, Amex" maxlength="80" list="reconcile-source-list" />
+                        <datalist id="reconcile-source-list"></datalist>
+                    </label>
+                    <label class="reconcile-field reconcile-field--file" for="reconcile-file">
+                        <span class="reconcile-field-label">Statement file</span>
+                        <input id="reconcile-file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="reconcile-input reconcile-input--file" />
+                    </label>
+                    <div class="reconcile-field reconcile-field--action">
+                        <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft">Add statement</button>
+                    </div>
+                </div>
+                <ul id="reconcile-upload-list" class="reconcile-upload-list" aria-label="Staged statements"></ul>
+                <div class="reconcile-toolbar">
+                    <button type="button" id="reconcile-auto-match-btn" class="reconcile-btn reconcile-btn--soft" disabled>Run auto-match</button>
+                    <button type="button" id="reconcile-bulk-accept-btn" class="reconcile-btn reconcile-btn--ghost hidden">Accept all auto-matched</button>
+                    <button type="button" id="reconcile-confirm-btn" class="reconcile-btn reconcile-btn--primary" disabled>Continue to review</button>
+                </div>
+            </div>
+
+            <p id="reconcile-status" class="reconcile-status hidden" role="status"></p>
+
+            <div id="reconcile-tally" class="reconcile-panel reconcile-panel--tally hidden" aria-live="polite"></div>
+
+            <div id="reconcile-workspace" class="reconcile-stack hidden">
+                <div id="reconcile-unclaimed-chip-wrap" class="reconcile-alert hidden">
+                    <button type="button" id="reconcile-unclaimed-chip" class="reconcile-alert-chip"></button>
+                </div>
+
+                <div id="reconcile-phase-bank" class="reconcile-panel reconcile-panel--queue">
+                    <div id="reconcile-queue-progress" class="reconcile-queue-progress"></div>
+                    <div id="reconcile-focus" class="reconcile-focus"></div>
+                    <div id="reconcile-suggestions" class="reconcile-suggestions"></div>
+                    <div id="reconcile-actions" class="reconcile-actions"></div>
+                    <div id="reconcile-queue-nav" class="reconcile-queue-nav"></div>
+                </div>
+
+                <div id="reconcile-phase-manuals" class="reconcile-panel reconcile-panel--manuals hidden">
+                    <h3 class="reconcile-panel-title">Manual entries with no bank row</h3>
+                    <p class="reconcile-panel-desc">All spending should appear on your statements — resolve or exclude each entry.</p>
+                    <ul id="reconcile-unclaimed-list" class="reconcile-unclaimed-list"></ul>
+                    <label class="reconcile-review-check">
+                        <input type="checkbox" id="reconcile-reviewed-unclaimed" />
+                        <span>I have reviewed unclaimed manuals</span>
+                    </label>
+                    <div class="reconcile-panel-footer">
+                        <button type="button" id="reconcile-to-summary-btn" class="reconcile-btn reconcile-btn--primary">Continue to summary</button>
+                    </div>
+                </div>
+
+                <div id="reconcile-phase-summary" class="reconcile-panel reconcile-panel--summary hidden">
+                    <h3 class="reconcile-panel-title">Ready to import</h3>
+                    <div id="reconcile-summary-body" class="reconcile-summary-body"></div>
+                    <div class="reconcile-panel-footer">
+                        <button type="button" id="reconcile-final-confirm-btn" class="reconcile-btn reconcile-btn--primary">Confirm import all</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="reconcile-view-all" class="reconcile-foot hidden">
+                <button type="button" id="reconcile-view-all-toggle" class="reconcile-btn reconcile-btn--ghost">View all rows</button>
+                <div id="reconcile-view-all-panel" class="reconcile-view-all-panel hidden"></div>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        window.SPENDING_CATEGORIES = {{ spending_categories | tojson }};
+        window.KNOWN_BANK_SOURCES = {{ known_bank_sources | tojson }};
+        window.RECONCILE_MONTH = {{ report_month | tojson }};
+    </script>
+    <script src="{{ asset_url('reconcile.js') }}"></script>
+</body>
+</html>

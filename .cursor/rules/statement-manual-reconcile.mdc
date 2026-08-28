@@ -1,6 +1,6 @@
 ---
 description: Spending statement import — manual fuzzy match, missed spends, expected bills
-globs: app.py,static/spending.js,templates/home.html,static/style.css,tests/test_daily_budget.py,tests/test_spending_transfer.py
+globs: app.py,static/spending.js,static/reconcile.js,templates/home.html,templates/reconcile.html,static/style.css,tests/test_daily_budget.py,tests/test_spending_transfer.py,tests/test_reconcile_session.py
 alwaysApply: false
 ---
 
@@ -36,3 +36,45 @@ Used on preview (`_apply_spending_preview_duplicate_marks`) and import (`spendin
 ## Tests
 
 `@tests/test_daily_budget.py` (`TestManualImportDedup`), `@tests/test_manual_match_import.py`, UI strings in `@tests/test_spending_transfer.py`.
+
+---
+
+# Month reconcile session (`/spending/reconcile`)
+
+Dedicated triage page: stage **multiple** statement uploads for one month, auto-match against manuals, review queue, confirm once.
+
+## Storage
+
+`spending.reconcile_sessions["YYYY-MM"]` — `{ report_month, status, auto_match_ran, uploads[], excluded_manual_ids[], kept_manual_ids[], reviewed_unclaimed }`.
+
+Each upload: `{ id, file_name, bank_source, rows[] }`. Row: `{ id, date, description, amount, direction, category, include, manual_match, transfer_pair, ledger_duplicate }`.
+
+## Match kinds (`manual_match`)
+
+- `single` — 1 bank row → 1 manual
+- `netted_manuals` — 1 bank row → N manuals (exact sum)
+- `netted_banks` — N bank rows → 1 manual (shared `group_key` on every leg)
+
+## API routes
+
+- `GET /spending/reconcile` — page
+- `GET /api/spending/reconcile/<month>` — session payload (rows, manuals, totals, queue)
+- `POST .../upload` — extract file → append upload
+- `DELETE .../upload/<id>`
+- `POST .../auto-match` — fuzzy + forward/reverse net + transfer pairs
+- `POST .../link-manual`, `.../unlink-manual`, `.../link-transfer`, `.../unlink-transfer`
+- `PATCH .../row/<id>` — `{ include, direction }`
+- `POST .../exclude-manual`, `.../keep-manual`, `.../review-unclaimed`
+- `POST .../confirm` — requires `auto_match_ran`; if unclaimed manuals remain, requires `reviewed_unclaimed`
+
+## Helpers
+
+`_reconcile_ensure_session`, `_reconcile_run_auto_match`, `_reconcile_session_payload`, `_reconcile_confirm_session`, `_is_manual_spending_tx` (legacy empty `source` = manual).
+
+## UI (`@static/reconcile.js`)
+
+Triage queue (not three-pane): focus card + suggestions + running bank/manual tally. Second pass for unclaimed manuals (keep / exclude). `bank_matched_via`: `reconcile_auto` | `reconcile_user`. Excluded manuals get `reconcile_excluded_month` on confirm.
+
+## Tests
+
+`@tests/test_reconcile_session.py`

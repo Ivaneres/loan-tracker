@@ -5048,7 +5048,7 @@ def _spending_unmatched_manuals(
     exclude = exclude_ids if exclude_ids is not None else set()
     out = []
     for t in spending.get('transactions') or []:
-        if str(t.get('source') or '') != 'manual':
+        if not _is_manual_spending_tx(t):
             continue
         if t.get('bank_matched'):
             continue
@@ -5076,6 +5076,16 @@ def _spending_unmatched_manuals(
     return out
 
 
+def _is_manual_spending_tx(t: dict) -> bool:
+    """True for daily/manual ledger rows (incl. legacy empty source)."""
+    if not isinstance(t, dict):
+        return False
+    src = str(t.get('source') or '').strip().casefold()
+    if not src:
+        return True
+    return src == 'manual'
+
+
 def _daily_budget_fuzzy_match_manual(
     spending: dict,
     *,
@@ -5100,7 +5110,7 @@ def _daily_budget_fuzzy_match_manual(
         tid = str(t.get('id') or '')
         if tid and tid in exclude:
             continue
-        if str(t.get('source') or '') != 'manual':
+        if not _is_manual_spending_tx(t):
             continue
         if t.get('bank_matched'):
             continue
@@ -5221,7 +5231,7 @@ def _spending_manuals_for_user_claim(
         t = by_id.get(mid)
         if t is None:
             return None
-        if str(t.get('source') or '') != 'manual':
+        if not _is_manual_spending_tx(t):
             return None
         if t.get('bank_matched'):
             return None
@@ -5306,7 +5316,7 @@ def _daily_budget_manual_suggest_pool(
         tid = str(t.get('id') or '')
         if tid and tid in exclude:
             continue
-        if str(t.get('source') or '') != 'manual':
+        if not _is_manual_spending_tx(t):
             continue
         if t.get('bank_matched'):
             continue
@@ -5505,6 +5515,821 @@ def _daily_budget_suggest_manual_matches(
         if rid:
             used_ids.add(rid)
     return out
+
+
+# --- Reconcile session (month-scoped statement ↔ manual triage) ---
+
+
+def _reconcile_month_key(month: str) -> str | None:
+    m = (month or '').strip()[:7]
+    if len(m) != 7 or m[4] != '-':
+        return None
+    return m
+
+
+def _reconcile_ensure_session(spending: dict, month: str) -> dict:
+    mk = _reconcile_month_key(month)
+    if not mk:
+        raise ValueError('Invalid month')
+    store = spending.setdefault('reconcile_sessions', {})
+    if mk not in store or not isinstance(store.get(mk), dict):
+        store[mk] = {
+            'report_month': mk,
+            'status': 'staging',
+            'auto_match_ran': False,
+            'uploads': [],
+            'excluded_manual_ids': [],
+            'kept_manual_ids': [],
+            'reviewed_unclaimed': False,
+        }
+    sess = store[mk]
+    sess['report_month'] = mk
+    sess.setdefault('uploads', [])
+    sess.setdefault('excluded_manual_ids', [])
+    sess.setdefault('kept_manual_ids', [])
+    sess.setdefault('reviewed_unclaimed', False)
+    sess.setdefault('status', 'staging')
+    sess.setdefault('auto_match_ran', False)
+    return sess
+
+
+def _reconcile_iter_rows(sess: dict):
+    for upload in sess.get('uploads') or []:
+        uid = str(upload.get('id') or '')
+        src = upload.get('bank_source')
+        fname = upload.get('file_name')
+        for row in upload.get('rows') or []:
+            yield upload, uid, src, fname, row
+
+
+def _reconcile_find_row(sess: dict, row_id: str):
+    rid = str(row_id or '')
+    for upload, uid, src, fname, row in _reconcile_iter_rows(sess):
+        if str(row.get('id') or '') == rid:
+            return upload, uid, src, fname, row
+    return None, None, None, None, None
+
+
+def _reconcile_clear_manual_match_on_row(row: dict) -> None:
+    row['manual_match'] = None
+
+
+def _reconcile_clear_netted_bank_group(sess: dict, group_key: str) -> None:
+    gk = str(group_key or '')
+    if not gk:
+        return
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        mm = row.get('manual_match') or {}
+        if mm.get('kind') == 'netted_banks' and str(mm.get('group_key') or '') == gk:
+            row['manual_match'] = None
+
+
+def _reconcile_claimed_manual_ids(sess: dict) -> set[str]:
+    out: set[str] = set()
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        mm = row.get('manual_match') or {}
+        for mid in mm.get('manual_ids') or []:
+            s = str(mid or '')
+            if s:
+                out.add(s)
+    return out
+
+
+def _reconcile_claimed_row_ids(sess: dict) -> set[str]:
+    out: set[str] = set()
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        rid = str(row.get('id') or '')
+        if not rid:
+            continue
+        mm = row.get('manual_match') or {}
+        if mm.get('kind') == 'netted_banks':
+            out.add(rid)
+            for peer in mm.get('row_ids') or []:
+                ps = str(peer or '')
+                if ps:
+                    out.add(ps)
+        elif mm.get('manual_ids'):
+            out.add(rid)
+        if row.get('transfer_pair'):
+            out.add(rid)
+    return out
+
+
+def _reconcile_release_manual_ids(
+    sess: dict, ids: set[str], *, keep_row_id: str | None = None,
+) -> None:
+    keep = str(keep_row_id or '')
+    id_set = {str(x) for x in ids if str(x)}
+    if not id_set:
+        return
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if keep and str(row.get('id') or '') == keep:
+            continue
+        mm = row.get('manual_match') or {}
+        mids = {str(x) for x in (mm.get('manual_ids') or []) if str(x)}
+        if not (mids & id_set):
+            continue
+        if mm.get('kind') == 'netted_banks':
+            _reconcile_clear_netted_bank_group(sess, str(mm.get('group_key') or ''))
+        else:
+            _reconcile_clear_manual_match_on_row(row)
+
+
+def _reconcile_apply_duplicate_marks(sess: dict, spending: dict, report_month: str) -> None:
+    ledger_fps = {
+        str(t.get('fingerprint'))
+        for t in spending.get('transactions') or []
+        if t.get('fingerprint')
+    }
+    seen: set[str] = set()
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        fp = _spending_fingerprint(
+            report_month,
+            str(row.get('date') or ''),
+            float(row.get('amount') or 0),
+            str(row.get('direction') or 'outgoing'),
+            str(row.get('description') or ''),
+        )
+        if fp in ledger_fps:
+            row['ledger_duplicate'] = True
+            row['duplicate_reason'] = 'ledger'
+            row['include'] = False
+        elif fp in seen:
+            row['ledger_duplicate'] = True
+            row['duplicate_reason'] = 'upload'
+            row['include'] = False
+        else:
+            row['ledger_duplicate'] = False
+            row['duplicate_reason'] = None
+            seen.add(fp)
+
+
+def _reconcile_stage_row_from_tx(tx: dict) -> dict:
+    return {
+        'id': str(tx.get('id') or uuid.uuid4()),
+        'date': str(tx.get('date') or '')[:10],
+        'description': str(tx.get('description') or '')[:500],
+        'direction': str(tx.get('direction') or 'outgoing'),
+        'amount': round(float(tx.get('amount') or 0), 2),
+        'category': tx.get('category'),
+        'include': True,
+        'manual_match': None,
+        'transfer_pair': None,
+        'ledger_duplicate': False,
+        'duplicate_reason': None,
+    }
+
+
+def _reconcile_suggest_netted_bank_groups(
+    sess: dict,
+    spending: dict,
+    report_month: str,
+    *,
+    claimed_manuals: set[str],
+    claimed_rows: set[str],
+) -> list[dict]:
+    bank_pool: list[dict] = []
+    for _, _, src, _, row in _reconcile_iter_rows(sess):
+        rid = str(row.get('id') or '')
+        if not rid or rid in claimed_rows:
+            continue
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        if row.get('manual_match') or row.get('transfer_pair'):
+            continue
+        if str(row.get('direction') or '') != 'outgoing':
+            continue
+        try:
+            amt = round(float(row.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        bank_pool.append({
+            'id': rid,
+            'date': str(row.get('date') or '')[:10],
+            'amount': amt,
+            'description': str(row.get('description') or '')[:200],
+            'bank_source': src,
+        })
+
+    manual_pool: list[dict] = []
+    rm = report_month[:7]
+    for t in spending.get('transactions') or []:
+        if not _is_manual_spending_tx(t):
+            continue
+        if t.get('bank_matched'):
+            continue
+        mid = str(t.get('id') or '')
+        if not mid or mid in claimed_manuals:
+            continue
+        if str(t.get('direction') or '') != 'outgoing':
+            continue
+        tx_month = str(t.get('report_month') or t.get('month') or '')[:7]
+        tx_date_month = str(t.get('date') or '')[:7]
+        if tx_month != rm and tx_date_month != rm:
+            continue
+        try:
+            amt = round(float(t.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        manual_pool.append({
+            'id': mid,
+            'date': str(t.get('date') or '')[:10],
+            'amount': amt,
+            'description': str(t.get('description') or '')[:200],
+        })
+
+    max_parts = max(2, min(DAILY_BUDGET_MANUAL_SUGGEST_NET_MAX_PARTS, len(bank_pool)))
+    found: list[tuple[float, dict]] = []
+    n = len(bank_pool)
+
+    def consider(idxs: tuple[int, ...], manual: dict) -> None:
+        parts = [bank_pool[i] for i in idxs]
+        total = round(sum(p['amount'] for p in parts), 2)
+        if abs(total - manual['amount']) > 0.001:
+            return
+        score = len(parts) * 1.5
+        found.append((score, {
+            'manual_id': manual['id'],
+            'manual': manual,
+            'row_ids': [p['id'] for p in parts],
+            'parts': parts,
+            'amount': total,
+        }))
+
+    for manual in manual_pool:
+        for size in range(2, max_parts + 1):
+            if size == 2:
+                for i in range(n):
+                    for j in range(i + 1, n):
+                        consider((i, j), manual)
+            elif size == 3:
+                for i in range(n):
+                    for j in range(i + 1, n):
+                        for k in range(j + 1, n):
+                            consider((i, j, k), manual)
+    found.sort(key=lambda x: x[0])
+    used_rows: set[str] = set()
+    used_manuals: set[str] = set()
+    groups: list[dict] = []
+    for _, grp in found:
+        rids = set(grp['row_ids'])
+        mid = grp['manual_id']
+        if rids & used_rows or mid in used_manuals:
+            continue
+        used_rows |= rids
+        used_manuals.add(mid)
+        groups.append(grp)
+    return groups
+
+
+def _reconcile_run_auto_match(sess: dict, spending: dict) -> dict:
+    report_month = str(sess.get('report_month') or '')
+    _reconcile_apply_duplicate_marks(sess, spending, report_month)
+    claimed_m = _reconcile_claimed_manual_ids(sess)
+    stats = {
+        'manual_auto_matches': 0,
+        'netted_manual_matches': 0,
+        'netted_bank_matches': 0,
+        'transfer_auto_pairs': 0,
+    }
+
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        if row.get('manual_match') or row.get('transfer_pair'):
+            continue
+        if str(row.get('direction') or '') != 'outgoing':
+            continue
+        match = _daily_budget_fuzzy_match_manual(
+            spending,
+            date_str=str(row.get('date') or '')[:10],
+            amount=float(row.get('amount') or 0),
+            description=str(row.get('description') or ''),
+            direction=str(row.get('direction') or 'outgoing'),
+            exclude_ids=claimed_m,
+        )
+        if match is None:
+            continue
+        mid = str(match.get('id') or '')
+        if not mid:
+            continue
+        row['manual_match'] = {'kind': 'single', 'manual_ids': [mid], 'via': 'auto'}
+        claimed_m.add(mid)
+        stats['manual_auto_matches'] += 1
+
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        if row.get('manual_match') or row.get('transfer_pair'):
+            continue
+        if str(row.get('direction') or '') != 'outgoing':
+            continue
+        suggestions = _daily_budget_suggest_manual_matches(
+            spending,
+            date_str=str(row.get('date') or '')[:10],
+            amount=float(row.get('amount') or 0),
+            description=str(row.get('description') or ''),
+            direction='outgoing',
+            exclude_ids=claimed_m,
+            limit=1,
+        )
+        netted = [s for s in suggestions if s.get('kind') == 'netted']
+        if not netted:
+            continue
+        top = netted[0]
+        ids = [str(x) for x in (top.get('ids') or []) if str(x)]
+        if len(ids) < 2:
+            continue
+        row['manual_match'] = {'kind': 'netted_manuals', 'manual_ids': ids, 'via': 'auto'}
+        claimed_m.update(ids)
+        stats['netted_manual_matches'] += 1
+
+    claimed_rows = _reconcile_claimed_row_ids(sess)
+    for grp in _reconcile_suggest_netted_bank_groups(
+        sess, spending, report_month, claimed_manuals=claimed_m, claimed_rows=claimed_rows,
+    ):
+        gk = str(uuid.uuid4())
+        mm = {
+            'kind': 'netted_banks',
+            'manual_ids': [grp['manual_id']],
+            'row_ids': list(grp['row_ids']),
+            'group_key': gk,
+            'via': 'auto',
+        }
+        for _, _, _, _, row in _reconcile_iter_rows(sess):
+            if str(row.get('id') or '') in grp['row_ids']:
+                row['manual_match'] = dict(mm)
+        claimed_m.add(grp['manual_id'])
+        stats['netted_bank_matches'] += 1
+
+    outs: list[dict] = []
+    ins: list[dict] = []
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        if row.get('manual_match') or row.get('transfer_pair'):
+            continue
+        d = str(row.get('direction') or '')
+        if d == 'outgoing':
+            outs.append(row)
+        elif d == 'incoming':
+            ins.append(row)
+    for o, i in _suggest_spending_transfer_pairs(outs, ins):
+        pk = str(uuid.uuid4())
+        o['transfer_pair'] = {'peer_row_id': str(i.get('id') or ''), 'via': 'auto', 'pair_key': pk}
+        i['transfer_pair'] = {'peer_row_id': str(o.get('id') or ''), 'via': 'auto', 'pair_key': pk}
+        stats['transfer_auto_pairs'] += 1
+
+    sess['auto_match_ran'] = True
+    sess['status'] = 'matched'
+    return stats
+
+
+def _reconcile_manuals_for_month(spending: dict, report_month: str) -> list[dict]:
+    rm = (report_month or '').strip()[:7]
+    out = []
+    for t in spending.get('transactions') or []:
+        if not _is_manual_spending_tx(t):
+            continue
+        if t.get('bank_matched'):
+            continue
+        tid = str(t.get('id') or '')
+        if not tid:
+            continue
+        tx_month = str(t.get('report_month') or t.get('month') or '')[:7]
+        tx_date_month = str(t.get('date') or '')[:7]
+        if tx_month != rm and tx_date_month != rm:
+            continue
+        try:
+            amount = round(float(t.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+        out.append({
+            'id': tid,
+            'date': str(t.get('date') or '')[:10],
+            'amount': amount,
+            'description': str(t.get('description') or '')[:200],
+            'direction': str(t.get('direction') or 'outgoing'),
+            'category': str(t.get('category') or '') or None,
+        })
+    out.sort(key=lambda x: (x['date'], x['description'].lower()))
+    return out
+
+
+def _reconcile_compute_totals(sess: dict, spending: dict, report_month: str) -> dict:
+    claimed_m = _reconcile_claimed_manual_ids(sess)
+    excluded = {str(x) for x in (sess.get('excluded_manual_ids') or []) if str(x)}
+    kept = {str(x) for x in (sess.get('kept_manual_ids') or []) if str(x)}
+    seen_net_bank: set[str] = set()
+    seen_transfer: set[str] = set()
+
+    bank_total = 0.0
+    manual_total = 0.0
+    matched_bank = 0.0
+    matched_manual = 0.0
+    unmatched_bank = 0.0
+    transfer_total = 0.0
+    auto_matched_count = 0
+    user_matched_count = 0
+    unmatched_bank_count = 0
+    transfer_pair_count = 0
+    statement_count = 0
+    manual_by_id = {m['id']: m for m in _reconcile_manuals_for_month(spending, report_month)}
+
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        statement_count += 1
+        if str(row.get('direction') or '') != 'outgoing':
+            continue
+        try:
+            amt = round(float(row.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            amt = 0.0
+        bank_total += amt
+        mm = row.get('manual_match') or {}
+        tp = row.get('transfer_pair') or {}
+        if tp:
+            pk = str(tp.get('pair_key') or '')
+            if pk and pk not in seen_transfer:
+                seen_transfer.add(pk)
+                transfer_pair_count += 1
+                transfer_total += amt
+            continue
+        if mm.get('kind') == 'netted_banks':
+            gk = str(mm.get('group_key') or '')
+            if gk and gk in seen_net_bank:
+                continue
+            if gk:
+                seen_net_bank.add(gk)
+            matched_bank += amt
+            for mid in mm.get('manual_ids') or []:
+                part = manual_by_id.get(str(mid))
+                if part:
+                    matched_manual += part['amount']
+            if mm.get('via') == 'auto':
+                auto_matched_count += 1
+            else:
+                user_matched_count += 1
+        elif mm.get('manual_ids'):
+            matched_bank += amt
+            part_sum = 0.0
+            for mid in mm.get('manual_ids') or []:
+                part = manual_by_id.get(str(mid))
+                if part:
+                    part_sum += part['amount']
+            matched_manual += part_sum if part_sum > 0 else amt
+            if mm.get('via') == 'auto':
+                auto_matched_count += 1
+            else:
+                user_matched_count += 1
+        else:
+            unmatched_bank += amt
+            unmatched_bank_count += 1
+
+    for m in manual_by_id.values():
+        if str(m.get('direction') or '') != 'outgoing':
+            continue
+        manual_total += m['amount']
+
+    unmatched_manual_count = 0
+    unmatched_manual_total = 0.0
+    excluded_manual_count = len(excluded)
+    excluded_manual_total = 0.0
+    for m in manual_by_id.values():
+        mid = m['id']
+        if mid in claimed_m or mid in excluded or mid in kept:
+            if mid in excluded:
+                excluded_manual_total += m['amount']
+            continue
+        if str(m.get('direction') or '') != 'outgoing':
+            continue
+        unmatched_manual_count += 1
+        unmatched_manual_total += m['amount']
+
+    matched_bank = round(matched_bank, 2)
+    matched_manual = round(matched_manual, 2)
+    return {
+        'statement_count': statement_count,
+        'manual_count': len(manual_by_id),
+        'bank_total': round(bank_total, 2),
+        'manual_total': round(manual_total, 2),
+        'matched_bank_total': matched_bank,
+        'matched_manual_total': matched_manual,
+        'matched_aligned': abs(matched_bank - matched_manual) < 0.01,
+        'unmatched_bank_count': unmatched_bank_count,
+        'unmatched_bank_total': round(unmatched_bank, 2),
+        'unmatched_manual_count': unmatched_manual_count,
+        'unmatched_manual_total': round(unmatched_manual_total, 2),
+        'excluded_manual_count': excluded_manual_count,
+        'excluded_manual_total': round(excluded_manual_total, 2),
+        'auto_matched_count': auto_matched_count,
+        'user_matched_count': user_matched_count,
+        'transfer_pair_count': transfer_pair_count,
+        'transfer_total': round(transfer_total, 2),
+    }
+
+
+def _reconcile_build_queue(sess: dict) -> list[dict]:
+    items: list[dict] = []
+    seen_transfer: set[str] = set()
+    seen_netted_bank: set[str] = set()
+    rows_list = []
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        rows_list.append(row)
+    rows_list.sort(key=lambda r: (str(r.get('date') or ''), str(r.get('description') or '').lower()))
+
+    for row in rows_list:
+        rid = str(row.get('id') or '')
+        tp = row.get('transfer_pair') or {}
+        if tp:
+            pk = str(tp.get('pair_key') or '')
+            if pk in seen_transfer:
+                continue
+            seen_transfer.add(pk)
+            peer_id = str(tp.get('peer_row_id') or '')
+            items.append({'kind': 'transfer', 'row_ids': [rid, peer_id], 'primary_row_id': rid})
+            continue
+        mm = row.get('manual_match') or {}
+        if mm.get('kind') == 'netted_banks':
+            gk = str(mm.get('group_key') or '')
+            if gk in seen_netted_bank:
+                continue
+            seen_netted_bank.add(gk)
+            items.append({
+                'kind': 'netted_banks',
+                'row_ids': list(mm.get('row_ids') or []),
+                'manual_ids': list(mm.get('manual_ids') or []),
+                'primary_row_id': rid,
+            })
+            continue
+        if mm:
+            items.append({'kind': 'matched', 'row_id': rid, 'manual_ids': list(mm.get('manual_ids') or [])})
+            continue
+        if str(row.get('direction') or '') == 'outgoing':
+            items.append({'kind': 'unmatched', 'row_id': rid})
+    return items
+
+
+def _reconcile_session_payload(sess: dict, spending: dict) -> dict:
+    report_month = str(sess.get('report_month') or '')
+    rows_out = []
+    for upload, uid, src, fname, row in _reconcile_iter_rows(sess):
+        r = dict(row)
+        r['upload_id'] = uid
+        r['bank_source'] = src
+        r['file_name'] = fname
+        if (
+            r.get('include', True)
+            and not r.get('ledger_duplicate')
+            and not r.get('manual_match')
+            and not r.get('transfer_pair')
+            and str(r.get('direction') or '') == 'outgoing'
+        ):
+            r['suggestions'] = _daily_budget_suggest_manual_matches(
+                spending,
+                date_str=str(r.get('date') or '')[:10],
+                amount=float(r.get('amount') or 0),
+                description=str(r.get('description') or ''),
+                direction='outgoing',
+                exclude_ids=_reconcile_claimed_manual_ids(sess),
+            )
+        else:
+            r['suggestions'] = []
+        rows_out.append(r)
+
+    uploads_out = []
+    for u in sess.get('uploads') or []:
+        uploads_out.append({
+            'id': u.get('id'),
+            'file_name': u.get('file_name'),
+            'bank_source': u.get('bank_source'),
+            'row_count': len(u.get('rows') or []),
+        })
+
+    manuals = _reconcile_manuals_for_month(spending, report_month)
+    claimed = _reconcile_claimed_manual_ids(sess)
+    excluded = {str(x) for x in (sess.get('excluded_manual_ids') or []) if str(x)}
+    kept = {str(x) for x in (sess.get('kept_manual_ids') or []) if str(x)}
+    for m in manuals:
+        mid = m['id']
+        if mid in claimed:
+            m['status'] = 'matched'
+        elif mid in excluded:
+            m['status'] = 'excluded'
+        elif mid in kept:
+            m['status'] = 'kept'
+        else:
+            m['status'] = 'unclaimed'
+
+    return {
+        'report_month': report_month,
+        'status': sess.get('status'),
+        'auto_match_ran': bool(sess.get('auto_match_ran')),
+        'uploads': uploads_out,
+        'rows': rows_out,
+        'manuals': manuals,
+        'totals': _reconcile_compute_totals(sess, spending, report_month),
+        'queue': _reconcile_build_queue(sess),
+        'excluded_manual_ids': list(excluded),
+        'kept_manual_ids': list(kept),
+        'reviewed_unclaimed': bool(sess.get('reviewed_unclaimed')),
+    }
+
+
+def _reconcile_rows_from_preview_transactions(transactions: list) -> list[dict]:
+    rows = []
+    for tx in transactions or []:
+        if not isinstance(tx, dict):
+            continue
+        rows.append(_reconcile_stage_row_from_tx(tx))
+    return rows
+
+
+def _reconcile_confirm_session(spending: dict, sess: dict) -> dict:
+    report_month = str(sess.get('report_month') or '')
+    tx_store = spending.setdefault('transactions', [])
+    statement_store = spending.setdefault('statements', [])
+    existing_fingerprints = {str(t.get('fingerprint')) for t in tx_store if t.get('fingerprint')}
+    now_iso = datetime.utcnow().isoformat() + 'Z'
+    imported_count = 0
+    manual_claims = 0
+    inserted_transfer_keys: set[str] = set()
+    processed_netted_bank: set[str] = set()
+    uploads_done: list[dict] = []
+
+    for upload in sess.get('uploads') or []:
+        upload_id = str(upload.get('id') or uuid.uuid4())
+        bank_source = _normalize_bank_source(upload.get('bank_source'))
+        statement_id = str(uuid.uuid4())
+        upload_inserted = 0
+
+        for row in upload.get('rows') or []:
+            if not row.get('include', True) or row.get('ledger_duplicate'):
+                continue
+            mm = row.get('manual_match') or {}
+            if mm.get('manual_ids'):
+                if mm.get('kind') == 'netted_banks':
+                    gk = str(mm.get('group_key') or '')
+                    if gk and gk in processed_netted_bank:
+                        continue
+                    if gk:
+                        processed_netted_bank.add(gk)
+                direction = str(row.get('direction') or 'outgoing')
+                manuals = _spending_manuals_for_user_claim(
+                    spending,
+                    mm.get('manual_ids'),
+                    direction=direction,
+                    exclude_ids=set(),
+                )
+                if not manuals:
+                    continue
+                fp = _spending_fingerprint(
+                    report_month,
+                    str(row.get('date') or ''),
+                    float(row.get('amount') or 0),
+                    direction,
+                    str(row.get('description') or ''),
+                )
+                adjust = (
+                    mm.get('kind') != 'netted_manuals'
+                    and mm.get('kind') != 'netted_banks'
+                    and len(manuals) == 1
+                )
+                via = 'reconcile_auto' if mm.get('via') == 'auto' else 'reconcile_user'
+                for man in manuals:
+                    if man.get('bank_matched'):
+                        continue
+                    _daily_budget_claim_manual_match(
+                        man, row, statement_id, fp, adjust_amount_to_bank=adjust,
+                    )
+                    man['bank_matched_via'] = via
+                manual_claims += 1
+                existing_fingerprints.add(fp)
+                continue
+
+            tp = row.get('transfer_pair') or {}
+            pk = str(tp.get('pair_key') or '')
+            if tp and pk:
+                if pk in inserted_transfer_keys:
+                    continue
+                peer_id = str(tp.get('peer_row_id') or '')
+                peer = None
+                for _, _, _, _, prow in _reconcile_iter_rows(sess):
+                    if str(prow.get('id') or '') == peer_id:
+                        peer = prow
+                        break
+                if peer is None:
+                    continue
+                inserted_transfer_keys.add(pk)
+                pair_uuid = str(uuid.uuid4())
+                for leg in (row, peer):
+                    if not leg.get('include', True):
+                        continue
+                    d = str(leg.get('date') or '')[:10]
+                    direction = str(leg.get('direction') or 'outgoing')
+                    desc = str(leg.get('description') or '').strip()[:500] or 'Bank transaction'
+                    amt = round(float(leg.get('amount') or 0), 2)
+                    fp = _spending_fingerprint(report_month, d, amt, direction, desc)
+                    if fp in existing_fingerprints:
+                        continue
+                    existing_fingerprints.add(fp)
+                    cat = leg.get('category')
+                    if direction == 'outgoing':
+                        cat = str(cat or 'unclassified').strip().lower()
+                        if cat not in SPENDING_CATEGORY_SET:
+                            cat = 'unclassified'
+                    else:
+                        cat = None
+                    tx = {
+                        'id': str(uuid.uuid4()),
+                        'date': d,
+                        'month': d[:7],
+                        'report_month': report_month,
+                        'description': desc,
+                        'amount': amt,
+                        'direction': direction,
+                        'category': cat,
+                        'source_statement_id': statement_id,
+                        'source': 'statement',
+                        'created_at': now_iso,
+                        'fingerprint': fp,
+                        'internal_transfer': True,
+                        'transfer_pair_id': pair_uuid,
+                        'pairing_source': str(tp.get('via') or 'user'),
+                    }
+                    if bank_source:
+                        tx['bank_source'] = bank_source
+                    tx_store.append(tx)
+                    imported_count += 1
+                    upload_inserted += 1
+                continue
+
+            d = str(row.get('date') or '')[:10]
+            direction = str(row.get('direction') or 'outgoing')
+            desc = str(row.get('description') or '').strip()[:500] or 'Bank transaction'
+            amt = round(float(row.get('amount') or 0), 2)
+            fp = _spending_fingerprint(report_month, d, amt, direction, desc)
+            if fp in existing_fingerprints:
+                continue
+            existing_fingerprints.add(fp)
+            cat = row.get('category')
+            if direction == 'outgoing':
+                cat = str(cat or 'unclassified').strip().lower()
+                if cat not in SPENDING_CATEGORY_SET:
+                    cat = 'unclassified'
+            else:
+                cat = None
+            tx = {
+                'id': str(uuid.uuid4()),
+                'date': d,
+                'month': d[:7],
+                'report_month': report_month,
+                'description': desc,
+                'amount': amt,
+                'direction': direction,
+                'category': cat,
+                'source_statement_id': statement_id,
+                'source': 'statement',
+                'created_at': now_iso,
+                'fingerprint': fp,
+            }
+            if bank_source:
+                tx['bank_source'] = bank_source
+            tx_store.append(tx)
+            imported_count += 1
+            upload_inserted += 1
+
+        statement_store.append({
+            'id': statement_id,
+            'uploaded_at': now_iso,
+            'file_name': str(upload.get('file_name') or '')[:200],
+            'report_month': report_month,
+            'bank_source': bank_source,
+            'transaction_count': upload_inserted,
+            'reconcile_upload_id': upload_id,
+        })
+        uploads_done.append({'id': upload_id, 'inserted': upload_inserted})
+
+    for mid in sess.get('excluded_manual_ids') or []:
+        for t in tx_store:
+            if str(t.get('id') or '') == str(mid):
+                t['reconcile_excluded_month'] = report_month
+                break
+
+    apply_auto_transfer_pairing_for_month(spending, report_month)
+    sess['status'] = 'imported'
+    return {
+        'imported_count': imported_count,
+        'manual_claims': manual_claims,
+        'uploads': uploads_done,
+    }
 
 
 def _normalize_daily_bill_items(raw_items) -> list:
@@ -7822,6 +8647,330 @@ def spending_search_tab():
         spending_categories=SPENDING_ALLOWED_CATEGORIES,
         known_bank_sources=_collect_bank_sources(spending),
     )
+
+
+def _reconcile_api_json(spending: dict, sess: dict):
+    return jsonify({'session': _reconcile_session_payload(sess, spending)})
+
+
+def _reconcile_load_context(month: str):
+    mk = _reconcile_month_key(month)
+    if not mk:
+        return None, None, None, 'Invalid month (use YYYY-MM).'
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    sess = _reconcile_ensure_session(spending, mk)
+    return data, spending, sess, None
+
+
+@app.route('/spending/reconcile')
+@login_required
+def spending_reconcile_page():
+    month = (request.args.get('month') or '').strip()[:7]
+    if not month:
+        month = date.today().strftime('%Y-%m')
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    return render_template(
+        'reconcile.html',
+        username=session.get('username'),
+        report_month=month,
+        spending_categories=SPENDING_ALLOWED_CATEGORIES,
+        known_bank_sources=_collect_bank_sources(spending),
+    )
+
+
+@app.route('/api/spending/reconcile/<month>', methods=['GET'])
+@login_required
+def reconcile_get_session(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if data is None:
+        return jsonify({'error': 'Invalid month'}), 400
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/upload', methods=['POST'])
+@login_required
+def reconcile_upload(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported for this month.'}), 400
+
+    period, perr = _parse_spending_period_from_values(month, None, None)
+    if perr:
+        return jsonify({'error': perr}), 400
+
+    prep, uerr = _prepare_statement_text_from_upload(for_spending=True)
+    if uerr:
+        return jsonify({'error': uerr}), 400
+    text, truncated_text, direction_hints, pipeline = prep
+
+    if (
+        _try_parse_tabular_spending_transactions(text, allow_llm=False) is None
+        and not _get_openai_client()
+    ):
+        return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
+
+    try:
+        body = _spending_statement_preview_payload(
+            text, truncated_text, direction_hints, pipeline, period,
+        )
+    except RuntimeError as e:
+        if 'OPENAI_API_KEY' in str(e):
+            return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
+        logger.exception('reconcile upload extraction failed')
+        return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        logger.exception('reconcile upload extraction failed')
+        return jsonify({'error': str(e)}), 500
+
+    f = request.files.get('file')
+    file_name = str(getattr(f, 'filename', None) or 'statement')[:200]
+    bank_source = _normalize_bank_source(request.form.get('bank_source') or request.form.get('source'))
+    stage_rows = _reconcile_rows_from_preview_transactions(body.get('transactions') or [])
+    upload_id = str(uuid.uuid4())
+    sess.setdefault('uploads', []).append({
+        'id': upload_id,
+        'file_name': file_name,
+        'bank_source': bank_source,
+        'rows': stage_rows,
+    })
+    _reconcile_apply_duplicate_marks(sess, spending, period['report_month'])
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/upload/<upload_id>', methods=['DELETE'])
+@login_required
+def reconcile_delete_upload(month, upload_id):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported.'}), 400
+    uid = str(upload_id or '')
+    uploads = sess.get('uploads') or []
+    sess['uploads'] = [u for u in uploads if str(u.get('id') or '') != uid]
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/auto-match', methods=['POST'])
+@login_required
+def reconcile_auto_match(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if not (sess.get('uploads') or []):
+        return jsonify({'error': 'Add at least one statement first.'}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported.'}), 400
+    stats = _reconcile_run_auto_match(sess, spending)
+    save_data(data)
+    resp = _reconcile_api_json(spending, sess)
+    body = resp.get_json()
+    body['stats'] = stats
+    return jsonify(body)
+
+
+@app.route('/api/spending/reconcile/<month>/link-manual', methods=['POST'])
+@login_required
+def reconcile_link_manual(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    row_id = str(payload.get('row_id') or '')
+    manual_ids = payload.get('manual_ids') or []
+    if not row_id or not manual_ids:
+        return jsonify({'error': 'row_id and manual_ids[] required'}), 400
+    _, _, _, _, row = _reconcile_find_row(sess, row_id)
+    if row is None:
+        return jsonify({'error': 'Row not found'}), 404
+    ids = [str(x) for x in manual_ids if str(x)]
+    _reconcile_release_manual_ids(sess, set(ids), keep_row_id=row_id)
+    kind = 'netted_manuals' if len(ids) > 1 else 'single'
+    row['manual_match'] = {'kind': kind, 'manual_ids': ids, 'via': 'user'}
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/unlink-manual', methods=['POST'])
+@login_required
+def reconcile_unlink_manual(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    row_id = str(payload.get('row_id') or '')
+    _, _, _, _, row = _reconcile_find_row(sess, row_id)
+    if row is None:
+        return jsonify({'error': 'Row not found'}), 404
+    mm = row.get('manual_match') or {}
+    if mm.get('kind') == 'netted_banks':
+        _reconcile_clear_netted_bank_group(sess, str(mm.get('group_key') or ''))
+    else:
+        _reconcile_clear_manual_match_on_row(row)
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/link-transfer', methods=['POST'])
+@login_required
+def reconcile_link_transfer(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    row_id_a = str(payload.get('row_id_a') or payload.get('row_id') or '')
+    row_id_b = str(payload.get('row_id_b') or payload.get('peer_row_id') or '')
+    _, _, _, _, row_a = _reconcile_find_row(sess, row_id_a)
+    _, _, _, _, row_b = _reconcile_find_row(sess, row_id_b)
+    if row_a is None or row_b is None:
+        return jsonify({'error': 'Row not found'}), 404
+    pk = str(uuid.uuid4())
+    row_a['transfer_pair'] = {'peer_row_id': row_id_b, 'via': 'user', 'pair_key': pk}
+    row_b['transfer_pair'] = {'peer_row_id': row_id_a, 'via': 'user', 'pair_key': pk}
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/unlink-transfer', methods=['POST'])
+@login_required
+def reconcile_unlink_transfer(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    row_id = str(payload.get('row_id') or '')
+    _, _, _, _, row = _reconcile_find_row(sess, row_id)
+    if row is None:
+        return jsonify({'error': 'Row not found'}), 404
+    tp = row.get('transfer_pair') or {}
+    peer_id = str(tp.get('peer_row_id') or '')
+    row['transfer_pair'] = None
+    _, _, _, _, peer = _reconcile_find_row(sess, peer_id)
+    if peer is not None:
+        peer['transfer_pair'] = None
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/row/<row_id>', methods=['PATCH'])
+@login_required
+def reconcile_patch_row(month, row_id):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    _, _, _, _, row = _reconcile_find_row(sess, row_id)
+    if row is None:
+        return jsonify({'error': 'Row not found'}), 404
+    if 'include' in payload:
+        row['include'] = bool(payload.get('include'))
+    if payload.get('direction') in ('incoming', 'outgoing'):
+        row['direction'] = payload['direction']
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/suggestions', methods=['GET'])
+@login_required
+def reconcile_suggestions(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    row_id = str(request.args.get('row_id') or '')
+    _, _, _, _, row = _reconcile_find_row(sess, row_id)
+    if row is None:
+        return jsonify({'error': 'Row not found'}), 404
+    suggestions = _daily_budget_suggest_manual_matches(
+        spending,
+        date_str=str(row.get('date') or '')[:10],
+        amount=float(row.get('amount') or 0),
+        description=str(row.get('description') or ''),
+        direction=str(row.get('direction') or 'outgoing'),
+        exclude_ids=_reconcile_claimed_manual_ids(sess),
+    )
+    return jsonify({'suggestions': suggestions})
+
+
+@app.route('/api/spending/reconcile/<month>/exclude-manual', methods=['POST'])
+@login_required
+def reconcile_exclude_manual(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    manual_id = str(payload.get('manual_id') or '')
+    if not manual_id:
+        return jsonify({'error': 'manual_id required'}), 400
+    excluded = sess.setdefault('excluded_manual_ids', [])
+    if manual_id not in excluded:
+        excluded.append(manual_id)
+    kept = sess.get('kept_manual_ids') or []
+    sess['kept_manual_ids'] = [x for x in kept if str(x) != manual_id]
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/keep-manual', methods=['POST'])
+@login_required
+def reconcile_keep_manual(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    manual_id = str(payload.get('manual_id') or '')
+    if not manual_id:
+        return jsonify({'error': 'manual_id required'}), 400
+    kept = sess.setdefault('kept_manual_ids', [])
+    if manual_id not in kept:
+        kept.append(manual_id)
+    excluded = sess.get('excluded_manual_ids') or []
+    sess['excluded_manual_ids'] = [x for x in excluded if str(x) != manual_id]
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/review-unclaimed', methods=['POST'])
+@login_required
+def reconcile_review_unclaimed(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    sess['reviewed_unclaimed'] = bool(payload.get('reviewed', True))
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/confirm', methods=['POST'])
+@login_required
+def reconcile_confirm(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if not sess.get('auto_match_ran'):
+        return jsonify({'error': 'Run auto-match before confirming.'}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported.'}), 400
+    totals = _reconcile_compute_totals(sess, spending, str(sess.get('report_month') or ''))
+    if totals.get('unmatched_manual_count', 0) > 0 and not sess.get('reviewed_unclaimed'):
+        return jsonify({'error': 'Review unclaimed manuals before confirming.'}), 400
+    result = _reconcile_confirm_session(spending, sess)
+    save_data(data)
+    resp = _reconcile_api_json(spending, sess)
+    body = resp.get_json()
+    body['result'] = result
+    return jsonify(body)
 
 
 @app.route('/loan/<loan_id>')
