@@ -4445,6 +4445,135 @@ def _daily_budget_period_window_figures(
     return pacing_start, window_pool, days_in_period
 
 
+def _daily_budget_window_amount(
+    full: float,
+    *,
+    pacing_start: date,
+    period_start: date,
+    days_in_window: int,
+    days_in_period: int,
+) -> float:
+    """Pro-rate a monthly plan amount to the pacing window."""
+    full = round(float(full or 0), 2)
+    if pacing_start == period_start or not days_in_period:
+        return full
+    return round(full * days_in_window / days_in_period, 2)
+
+
+def _daily_budget_cycle_label(period_start: date, period_end: date) -> str:
+    if period_start.year == period_end.year:
+        return (
+            f"{period_start.day} {period_start.strftime('%b')}"
+            f" – {period_end.day} {period_end.strftime('%b')}"
+        )
+    return (
+        f"{period_start.day} {period_start.strftime('%b %Y')}"
+        f" – {period_end.day} {period_end.strftime('%b %Y')}"
+    )
+
+
+def _daily_budget_earliest_discretionary_date(spending: dict) -> date | None:
+    earliest = None
+    for t in spending.get('transactions') or []:
+        if not _daily_budget_is_discretionary_tx(t):
+            continue
+        d = _parse_iso_date(str(t.get('date') or '')[:10])
+        if d is None:
+            continue
+        if earliest is None or d < earliest:
+            earliest = d
+    return earliest
+
+
+def _daily_budget_list_cycles(
+    plan: dict,
+    spending: dict,
+    live_as_of: date,
+) -> list[dict]:
+    """Pay cycles from tracking/first spend through the live period."""
+    pay_day = _daily_budget_parse_pay_day(plan.get('pay_day') if isinstance(plan, dict) else None)
+    live_start, live_end = _daily_budget_pay_period(live_as_of, pay_day)
+    tracking = _daily_budget_parse_tracking_from(
+        plan.get('tracking_from') if isinstance(plan, dict) else None
+    )
+    earliest_tx = _daily_budget_earliest_discretionary_date(spending)
+    seed = tracking or earliest_tx or live_start
+    if seed > live_end:
+        seed = live_start
+    cursor_start, cursor_end = _daily_budget_pay_period(seed, pay_day)
+    cycles: list[dict] = []
+    safety = 0
+    while cursor_start <= live_start and safety < 36:
+        safety += 1
+        cycles.append({
+            'period_start': cursor_start.isoformat(),
+            'period_end': cursor_end.isoformat(),
+            'label': _daily_budget_cycle_label(cursor_start, cursor_end),
+            'is_current': cursor_start == live_start,
+        })
+        nxt = cursor_end + timedelta(days=1)
+        cursor_start, cursor_end = _daily_budget_pay_period(nxt, pay_day)
+    return cycles
+
+
+def _daily_budget_allocation(
+    figures: dict,
+    *,
+    window_pool: float,
+    spent: float,
+    pacing_start: date,
+    period_start: date,
+    days_in_window: int,
+    days_in_period: int,
+) -> dict:
+    """Live income split: discretionary remaining, then savings, then past capability."""
+    income = float(figures.get('income_monthly') or 0)
+    expenses = float(figures.get('bills_monthly') or 0)
+    savings = float(figures.get('savings_monthly') or 0)
+    spent = round(max(0.0, float(spent or 0)), 2)
+    disc_orig = round(float(window_pool or 0), 2)
+    sav_orig = _daily_budget_window_amount(
+        savings,
+        pacing_start=pacing_start,
+        period_start=period_start,
+        days_in_window=days_in_window,
+        days_in_period=days_in_period,
+    )
+    exp_orig = _daily_budget_window_amount(
+        expenses,
+        pacing_start=pacing_start,
+        period_start=period_start,
+        days_in_window=days_in_window,
+        days_in_period=days_in_period,
+    )
+    income_orig = _daily_budget_window_amount(
+        income,
+        pacing_start=pacing_start,
+        period_start=period_start,
+        days_in_window=days_in_window,
+        days_in_period=days_in_period,
+    )
+    disc_spent = round(min(spent, disc_orig), 2)
+    disc_left = round(max(0.0, disc_orig - spent), 2)
+    overflow = round(max(0.0, spent - disc_orig), 2)
+    sav_eaten = round(min(overflow, sav_orig), 2)
+    sav_left = round(max(0.0, sav_orig - overflow), 2)
+    past = round(max(0.0, overflow - sav_orig), 2)
+    return {
+        'income': income_orig,
+        'expenses': exp_orig,
+        'savings_percent': float(figures.get('savings_percent') or 0),
+        'savings_original': sav_orig,
+        'savings_remaining': sav_left,
+        'savings_eaten': sav_eaten,
+        'discretionary_original': disc_orig,
+        'discretionary_remaining': disc_left,
+        'discretionary_spent': disc_spent,
+        'spent': spent,
+        'past_capability': past,
+    }
+
+
 def _daily_budget_period_net_overspend(
     spending: dict,
     plan: dict,
@@ -4452,8 +4581,8 @@ def _daily_budget_period_net_overspend(
     period_start: date,
     period_end: date,
 ) -> dict:
-    """Net overspend for a completed pay period (spent − discretionary window)."""
-    pacing_start, window_pool, _days = _daily_budget_period_window_figures(
+    """Net overspend for a completed pay period (spent − discretionary − savings)."""
+    pacing_start, window_pool, days_in_period = _daily_budget_period_window_figures(
         figures, plan, period_start, period_end,
     )
     spend_by_date = _daily_budget_spend_by_date(spending, period_start, period_end)
@@ -4463,12 +4592,24 @@ def _daily_budget_period_net_overspend(
         spent += float(spend_by_date.get(d.isoformat(), 0) or 0)
         d += timedelta(days=1)
     spent = round(spent, 2)
-    net = round(max(0.0, spent - window_pool), 2)
+    days_in_window = (period_end - pacing_start).days + 1
+    savings_window = _daily_budget_window_amount(
+        float(figures.get('savings_monthly') or 0),
+        pacing_start=pacing_start,
+        period_start=period_start,
+        days_in_window=days_in_window,
+        days_in_period=days_in_period,
+    )
+    overflow = round(max(0.0, spent - window_pool), 2)
+    savings_eaten = round(min(overflow, savings_window), 2)
+    net = round(max(0.0, spent - window_pool - savings_window), 2)
     return {
         'period_start': period_start.isoformat(),
         'period_end': period_end.isoformat(),
         'pacing_start': pacing_start.isoformat(),
         'discretionary': round(window_pool, 2),
+        'savings': savings_window,
+        'savings_eaten': savings_eaten,
         'spent': spent,
         'net_overspend': net,
     }
@@ -4640,6 +4781,8 @@ def _daily_budget_overspend_prompt(
         'net_overspend': summary['net_overspend'],
         'spent': summary['spent'],
         'discretionary': summary['discretionary'],
+        'savings': summary.get('savings'),
+        'savings_eaten': summary.get('savings_eaten'),
     }
 
 
@@ -4921,6 +5064,9 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     txs_today.sort(key=lambda r: (r.get('created_at') or '', r.get('description') or ''), reverse=True)
 
     tracking_from = _daily_budget_parse_tracking_from(plan.get('tracking_from'))
+    live_today = _daily_budget_today()
+    live_start, _live_end = _daily_budget_pay_period(live_today, pay_day)
+    cycle_is_live = period_start == live_start
     overspend_prompt = _daily_budget_overspend_prompt(
         spending, plan, figures, period_start, today,
     )
@@ -4929,6 +5075,16 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         balance=debt_balance,
         repaid_this_period=repaid_this_period,
     )
+    allocation = _daily_budget_allocation(
+        figures,
+        window_pool=window_pool,
+        spent=spent_mtd,
+        pacing_start=pacing_start,
+        period_start=period_start,
+        days_in_window=days_in_window,
+        days_in_period=days_in_period,
+    )
+    cycles = _daily_budget_list_cycles(plan, spending, live_today)
     return {
         'as_of': today_key,
         'month': today.strftime('%Y-%m'),
@@ -4940,6 +5096,9 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'days_in_month': days_in_period,
         'pacing_start': pacing_start.isoformat(),
         'tracking_from': tracking_from.isoformat() if tracking_from else None,
+        'cycle_is_live': cycle_is_live,
+        'cycles': cycles,
+        'allocation': allocation,
         'plan': figures,
         'source_month': plan.get('source_month'),
         'bill_items': plan.get('bill_items') or [],
@@ -4948,7 +5107,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'remaining_today': remaining_today,
         'spent_mtd': spent_mtd,
         'discretionary_remaining_month': round(max(0.0, window_pool - spent_mtd), 2),
-        # Unclamped period result for Goals hero (negative when net over discretionary).
+        # Unclamped period result for Goals leftover vs discretionary (negative when over).
         'period_net_saved': round(window_pool - spent_mtd, 2),
         'pace_projection': pace_projection,
         'underspend_saved': underspend_total,
@@ -10809,7 +10968,12 @@ def spending_daily_status():
     as_of = _parse_iso_date(as_of_raw) if as_of_raw else _daily_budget_today()
     if as_of is None:
         return jsonify({'error': 'Invalid date'}), 400
-    debt_changed = _daily_budget_sync_overspend_state(spending, as_of)
+    live_today = _daily_budget_today()
+    if as_of > live_today:
+        as_of = live_today
+    # Always roll debt against calendar today — a Goals history fetch must not
+    # rewind the active pay period.
+    debt_changed = _daily_budget_sync_overspend_state(spending, live_today)
     if changed or debt_changed:
         save_data(data)
     status = _daily_budget_status(spending, as_of=as_of)

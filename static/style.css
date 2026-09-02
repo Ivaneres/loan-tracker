@@ -3933,6 +3933,178 @@ body.db-page button.db-today-del:hover {
     color: var(--db-warn);
 }
 
+.db-cycle-picker {
+    margin: 0 0 1rem;
+}
+
+.db-cycle-picker-label {
+    margin: 0 0 0.4rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--db-muted);
+    font-weight: 600;
+}
+
+.db-cycle-chip-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    -webkit-overflow-scrolling: touch;
+}
+
+.db-cycle-more {
+    margin-top: 0.55rem;
+}
+
+.db-alloc {
+    margin-bottom: 1rem;
+}
+
+.db-alloc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+}
+
+.db-alloc-kicker {
+    margin: 0;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--db-muted);
+    font-weight: 600;
+}
+
+.db-alloc-income {
+    margin: 0.1rem 0 0;
+    font-family: var(--font-money);
+    font-size: 1.45rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--db-ink);
+}
+
+.db-alloc-used {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--db-muted);
+}
+
+.db-alloc-bar {
+    display: flex;
+    height: 0.62rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(15, 28, 26, 0.08);
+}
+
+.db-alloc-seg {
+    display: flex;
+    min-width: 0;
+    height: 100%;
+}
+
+.db-alloc-fill {
+    min-width: 0;
+    height: 100%;
+}
+
+.db-alloc-fill--disc {
+    background: var(--db-accent);
+}
+
+.db-alloc-fill--sav {
+    background: #1d8f82;
+}
+
+.db-alloc-fill--exp {
+    background: rgba(15, 28, 26, 0.38);
+}
+
+.db-alloc-fill--warn {
+    background: var(--db-warn);
+}
+
+.db-alloc-fill--used {
+    opacity: 0.34;
+}
+
+.db-alloc-fill--warn.db-alloc-fill--used {
+    opacity: 1;
+}
+
+.db-alloc-rows {
+    list-style: none;
+    margin: 0.85rem 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+}
+
+.db-alloc-row-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.3rem;
+}
+
+.db-alloc-row-label {
+    font-weight: 600;
+    color: var(--db-ink);
+}
+
+.db-alloc-row-detail {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--db-muted);
+    font-weight: 400;
+}
+
+.db-alloc-row-amt {
+    font-family: var(--font-money);
+    font-size: 0.92rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--db-ink);
+}
+
+.db-alloc-row-amt span {
+    font-weight: 400;
+    color: var(--db-muted);
+}
+
+.db-alloc-meter {
+    display: flex;
+    height: 0.38rem;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(15, 28, 26, 0.08);
+}
+
+.db-alloc-underspend {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 0 1.1rem;
+    padding: 0.7rem 0.85rem;
+    border-radius: 0.85rem;
+    background: rgba(13, 122, 98, 0.08);
+    border: 1px solid var(--db-line);
+    font-size: 0.88rem;
+    color: var(--db-muted);
+}
+
+.db-alloc-underspend strong {
+    font-family: var(--font-money);
+    color: var(--db-accent-deep);
+}
+
 .db-goal-form {
     display: grid;
     gap: 0.65rem;

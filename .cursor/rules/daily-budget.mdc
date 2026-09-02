@@ -13,22 +13,24 @@ Server logic: `_daily_budget_*` helpers and `/api/spending/daily/*` routes in `@
 
 - **Today** — hero (left/limit/spent/saved), add-spend form, spends list
 - **Plan** — income, bills, savings %, pay day, tracking from, daily mode
-- **Goals** — goals + day chart + pace projection math
+- **Goals** — income allocation bar (discretionary / savings / expenses), cycle picker, goals, day chart, pace math
 
 ## Entry date vs view date (important)
 
-Two independent date states in `daily_budget.js`:
+Two independent date states in `daily_budget.js` (Goals has a third):
 
 | State | Controls | Purpose |
 |---|---|---|
 | `entryDate` | form **When?** chips + `#db-entry-date` | Date written on POST |
 | `viewDate` | list **Show** chips + `#db-view-date` | Date for hero + spends list (`GET status?date=`) |
+| `goalsAsOf` | Goals cycle chips + `#goals-cycle-more` | Pay cycle for the allocation bar; **does not** change Today’s Show date |
 
-- Both default to **today** on load.
+- `entryDate` / `viewDate` both default to **today** on load.
 - Changing **When?** must **not** refresh the viewer by itself.
 - After a successful log, jump `viewDate` to the spend’s date so the new item is visible.
 - Shortcuts: Today / Yesterday / 2 days ago (+ native `<input type="date">`, `max=today`).
 - List title stays **Spends** (do not rename to “Yesterday’s spends”).
+- Goals cycle chips fetch `status?date=` with **today** for the live cycle, or **period_end** for a finished one. Status always rolls overspend-debt against calendar today (`_daily_budget_today()`), never the history `as_of`.
 
 ## APIs
 
@@ -56,14 +58,15 @@ No effect on today if the past date is **outside the current pay period** or **b
 
 ## Cross-period overspend debt
 
-No automatic month-to-month limit change. After a pay period ends **net over** (`spent − discretionary window`):
+No automatic month-to-month limit change. After a pay period ends **net over** (`spent − discretionary window − savings window`):
 
-1. Status exposes `overspend_prompt` once (opt-in every time).
+1. Status exposes `overspend_prompt` once (opt-in every time). Overflow first **eats reserved savings %**; debt is only `max(0, spent − disc − savings)`.
 2. `POST /api/spending/daily/overspend/decision` — `accept` creates/adds `overspend_debt`, `decline` records skip.
 3. Daily leftovers skim toward debt per plan `underspend_priority` (`debt_first` | `goals_first`) without cutting the base daily limit.
 4. `carry_surplus`: skim debt before rolling leftover to tomorrow.
-5. Goals shows debt progress; Today shows a small note when `overspend_debt.balance > 0`.
+5. Goals shows debt progress on the **live** cycle only (Carry forward / Write off hidden in history). Today shows a small note when `overspend_debt.balance > 0`.
 6. `POST /api/spending/daily/overspend/write-off` clears active debt.
+7. Status `allocation` + `cycles` drive the Goals bar (`#goals-alloc-bar`). Same-colour fade for used; `--db-warn` only for `past_capability`.
 
 Production user has been on `envelope` with a mid-month `tracking_from` and payday ≠ 1 — verify live plan before assuming fixed-mode behavior.
 

@@ -1348,6 +1348,109 @@ class TestOverspendDebtApi(unittest.TestCase):
         self.assertIsNone(self.spending['daily_budget'].get('overspend_debt'))
 
 
+class TestGoalsAllocation(unittest.TestCase):
+    def _spending(self, *, spent, savings_percent=20, income=2500, bills=800, as_tx_date='2024-01-15'):
+        return {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': income,
+                    'bills_monthly': bills,
+                    'savings_percent': savings_percent,
+                    'daily_mode': 'fixed',
+                    'pay_day': 1,
+                    'tracking_from': '2024-01-01',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date=as_tx_date, amount=spent, category='dining'),
+            ],
+            'monthly_insights': {},
+        }
+
+    def test_allocation_on_track_leaves_savings_intact(self):
+        status = app_mod._daily_budget_status(
+            self._spending(spent=400), as_of=date(2024, 1, 20),
+        )
+        alloc = status['allocation']
+        self.assertEqual(alloc['discretionary_original'], 1200.0)
+        self.assertEqual(alloc['discretionary_remaining'], 800.0)
+        self.assertEqual(alloc['savings_original'], 500.0)
+        self.assertEqual(alloc['savings_remaining'], 500.0)
+        self.assertEqual(alloc['savings_eaten'], 0.0)
+        self.assertEqual(alloc['past_capability'], 0.0)
+        self.assertEqual(alloc['expenses'], 800.0)
+
+    def test_allocation_overflow_eats_savings_not_debt(self):
+        status = app_mod._daily_budget_status(
+            self._spending(spent=1350), as_of=date(2024, 1, 20),
+        )
+        alloc = status['allocation']
+        self.assertEqual(alloc['discretionary_remaining'], 0.0)
+        self.assertEqual(alloc['savings_eaten'], 150.0)
+        self.assertEqual(alloc['savings_remaining'], 350.0)
+        self.assertEqual(alloc['past_capability'], 0.0)
+
+    def test_allocation_past_capability_after_savings_gone(self):
+        status = app_mod._daily_budget_status(
+            self._spending(spent=1850), as_of=date(2024, 1, 20),
+        )
+        alloc = status['allocation']
+        self.assertEqual(alloc['savings_remaining'], 0.0)
+        self.assertEqual(alloc['past_capability'], 150.0)
+
+    def test_net_overspend_waits_until_savings_exhausted(self):
+        plan = {
+            'income_monthly': 2500,
+            'bills_monthly': 800,
+            'savings_percent': 20,
+            'daily_mode': 'fixed',
+            'pay_day': 1,
+            'bill_items': [],
+        }
+        figures = app_mod._daily_budget_plan_figures(plan)
+        eating_savings = {
+            'daily_budget': {'plan': plan, 'goals': []},
+            'transactions': [_tx(id='1', date='2024-01-15', amount=1350, category='dining')],
+            'monthly_insights': {},
+        }
+        summary = app_mod._daily_budget_period_net_overspend(
+            eating_savings, plan, figures, date(2024, 1, 1), date(2024, 1, 31),
+        )
+        self.assertEqual(summary['net_overspend'], 0.0)
+        self.assertEqual(summary['savings_eaten'], 150.0)
+
+        past = {
+            'daily_budget': {'plan': plan, 'goals': []},
+            'transactions': [_tx(id='1', date='2024-01-15', amount=1850, category='dining')],
+            'monthly_insights': {},
+        }
+        summary2 = app_mod._daily_budget_period_net_overspend(
+            past, plan, figures, date(2024, 1, 1), date(2024, 1, 31),
+        )
+        self.assertEqual(summary2['net_overspend'], 150.0)
+
+    def test_cycles_span_tracking_from_to_live_period(self):
+        spending = self._spending(spent=10)
+        spending['daily_budget']['plan']['tracking_from'] = '2024-01-01'
+        with mock.patch.object(app_mod, '_daily_budget_today', return_value=date(2024, 3, 10)):
+            status = app_mod._daily_budget_status(spending, as_of=date(2024, 3, 10))
+        starts = [c['period_start'] for c in status['cycles']]
+        self.assertEqual(starts, ['2024-01-01', '2024-02-01', '2024-03-01'])
+        self.assertTrue(status['cycles'][-1]['is_current'])
+        self.assertTrue(status['cycle_is_live'])
+
+    def test_past_as_of_is_not_live_cycle(self):
+        spending = self._spending(spent=10)
+        spending['daily_budget']['plan']['tracking_from'] = '2024-01-01'
+        with mock.patch.object(app_mod, '_daily_budget_today', return_value=date(2024, 3, 10)):
+            status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 31))
+        self.assertFalse(status['cycle_is_live'])
+        self.assertEqual(status['period_start'], '2024-01-01')
+        self.assertEqual(status['period_end'], '2024-01-31')
+
+
 class TestHybridBillsEstimate(unittest.TestCase):
     def test_category_rollup_without_llm(self):
         spending = {

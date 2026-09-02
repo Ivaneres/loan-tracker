@@ -162,12 +162,16 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
             'underspend_priority',
             'renderDebtNote',
             'renderDebtCard',
-            'period_net_saved',
-            'Over this period',
-            'db-goals-hero-value--over',
+            'allocation',
+            'refreshGoals',
+            'cycle_is_live',
+            'past savings',
+            'goals-alloc-bar',
         ):
             self.assertIn(needle, js)
-        self.assertIn('id="goals-saved-label"', html)
+        self.assertIn('id="goals-alloc-bar"', html)
+        self.assertIn('id="goals-cycle-chips"', html)
+        self.assertIn('id="goals-underspend"', html)
 
 
 if __name__ == '__main__':

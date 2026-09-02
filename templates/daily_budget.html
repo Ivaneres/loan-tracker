@@ -239,11 +239,34 @@
         <!-- Goals -->
         <section id="panel-goals" class="db-panel hidden" role="tabpanel" hidden>
             <div class="db-card">
-                <h2 class="db-section-title">Savings from underspend</h2>
-                <p class="db-lead">Net vs your discretionary pool this pay period — under shows as saved, over as a negative. Separate from the % you locked in the plan.</p>
-                <p class="db-goals-hero">
-                    <span class="db-goals-hero-label" id="goals-saved-label">Saved this period</span>
-                    <span class="db-goals-hero-value" id="goals-saved">£0.00</span>
+                <h2 class="db-section-title">This cycle</h2>
+                <p class="db-lead">Income split into discretionary, reserved savings, and bills. Spend fades the same colour. Debt only starts if you go past savings.</p>
+
+                <div class="db-cycle-picker" id="goals-cycle-picker">
+                    <p class="db-cycle-picker-label">Pay cycle</p>
+                    <div class="db-date-chip-row db-cycle-chip-row" id="goals-cycle-chips" role="group" aria-label="Pay cycle"></div>
+                    <label class="db-date-other db-cycle-more hidden" id="goals-cycle-more-wrap" hidden>
+                        <span class="db-date-other-label">Older cycles</span>
+                        <select id="goals-cycle-more" aria-label="Older pay cycles"></select>
+                    </label>
+                </div>
+                <p id="goals-cycle-hint" class="db-field-hint hidden" hidden>Older cycles use your current plan amounts against that cycle’s spend.</p>
+
+                <div class="db-alloc" id="goals-alloc">
+                    <div class="db-alloc-head">
+                        <div>
+                            <p class="db-alloc-kicker">This cycle</p>
+                            <p class="db-alloc-income" id="goals-alloc-income">£0</p>
+                        </div>
+                        <p class="db-alloc-used" id="goals-alloc-spent">£0 used</p>
+                    </div>
+                    <div class="db-alloc-bar" id="goals-alloc-bar" role="img" aria-label="Income allocation"></div>
+                    <ul class="db-alloc-rows" id="goals-alloc-rows"></ul>
+                </div>
+
+                <p class="db-alloc-underspend">
+                    <span>Underspend toward goals</span>
+                    <strong id="goals-underspend">£0.00</strong>
                 </p>
 
                 <div id="goals-debt-card" class="db-debt-card hidden" hidden>

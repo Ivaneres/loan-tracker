@@ -81,12 +81,14 @@
     setTimeout(() => box.classList.remove('db-plan-math--saved'), 1200);
   }
   let state = null;
+  let goalsState = null;
   let billItems = [];
   /** Bills dropped by the latest pull; not part of the plan until restored. */
   let removedBillItems = [];
   let billPullHadBaseline = false;
   let entryDate = '';
   let viewDate = '';
+  let goalsAsOf = '';
 
   const BillDiff = window.DbBillDiff || {};
   const billAmount = BillDiff.billAmount || ((b) => Number(b && b.amount) || 0);
@@ -331,13 +333,28 @@
 
   function overspendPromptCopy(prompt) {
     if (!prompt) return '';
+    const spent = Number(prompt.spent) || 0;
+    const disc = Number(prompt.discretionary) || 0;
+    const sav = Number(prompt.savings) || 0;
+    const net = Number(prompt.net_overspend) || 0;
+    if (sav > 0.005) {
+      return (
+        'You finished ' +
+        money(net) +
+        ' past savings (' +
+        money(spent) +
+        ' spent vs ' +
+        money(disc + sav) +
+        ' discretionary + savings). Carry it forward to repay from daily leftovers?'
+      );
+    }
     return (
       'You finished ' +
-      money(prompt.net_overspend) +
+      money(net) +
       ' over discretionary (' +
-      money(prompt.spent) +
+      money(spent) +
       ' spent vs ' +
-      money(prompt.discretionary) +
+      money(disc) +
       '). Carry it forward to repay from daily leftovers?'
     );
   }
@@ -349,17 +366,19 @@
     el.hidden = !show;
   }
 
-  function renderOverspendPrompt(status) {
-    const prompt = status.overspend_prompt || null;
-    const body = overspendPromptCopy(prompt);
-    const todayPrompt = $('db-overspend-prompt');
-    const goalsPrompt = $('goals-overspend-prompt');
-    setOverspendPromptVisible(todayPrompt, prompt);
-    setOverspendPromptVisible(goalsPrompt, prompt);
+  function renderTodayOverspendPrompt(status) {
+    const prompt = status && status.overspend_prompt ? status.overspend_prompt : null;
+    setOverspendPromptVisible($('db-overspend-prompt'), prompt);
     const todayBody = $('db-overspend-prompt-body');
+    if (todayBody) todayBody.textContent = overspendPromptCopy(prompt);
+  }
+
+  function renderGoalsOverspendPrompt(status) {
+    const live = !!(status && status.cycle_is_live);
+    const prompt = live && status.overspend_prompt ? status.overspend_prompt : null;
+    setOverspendPromptVisible($('goals-overspend-prompt'), prompt);
     const goalsBody = $('goals-overspend-prompt-body');
-    if (todayBody) todayBody.textContent = body;
-    if (goalsBody) goalsBody.textContent = body;
+    if (goalsBody) goalsBody.textContent = overspendPromptCopy(prompt);
   }
 
   function renderDebtNote(status) {
@@ -386,14 +405,20 @@
   function renderDebtCard(status) {
     const card = $('goals-debt-card');
     if (!card) return;
+    const live = !!(status && status.cycle_is_live);
     const debt = status.overspend_debt;
     const bal = debt ? Number(debt.balance) || 0 : 0;
     const original = debt ? Number(debt.original_amount) || 0 : 0;
     const repaidTotal = debt ? Number(debt.repaid_total) || 0 : 0;
-    const show = bal > 0 || repaidTotal > 0;
+    const show = live && (bal > 0 || repaidTotal > 0);
     card.classList.toggle('hidden', !show || bal <= 0);
     card.hidden = !show || bal <= 0;
-    if (bal <= 0) return;
+    const writeOff = $('goals-debt-writeoff');
+    if (writeOff) {
+      writeOff.hidden = !live;
+      writeOff.classList.toggle('hidden', !live);
+    }
+    if (!show || bal <= 0) return;
     $('goals-debt-balance').textContent = money(bal);
     const meta = $('goals-debt-meta');
     if (meta) {
@@ -464,7 +489,7 @@
       month: 'long',
     });
 
-    renderOverspendPrompt(status);
+    renderTodayOverspendPrompt(status);
     renderDebtNote(status);
     renderTitleSuggestions();
 
@@ -1284,28 +1309,199 @@
     renderDayLineChart(days);
   }
 
+  function appendAllocPart(parent, flex, className) {
+    const n = Number(flex) || 0;
+    if (n <= 0) return;
+    const el = document.createElement('div');
+    el.className = className;
+    el.style.flex = String(n);
+    parent.appendChild(el);
+  }
+
+  function renderAllocBar(alloc) {
+    const bar = $('goals-alloc-bar');
+    const incomeEl = $('goals-alloc-income');
+    const spentEl = $('goals-alloc-spent');
+    if (!bar) return;
+    bar.innerHTML = '';
+    const discOrig = Number(alloc.discretionary_original) || 0;
+    const discSpent = Number(alloc.discretionary_spent) || 0;
+    const discLeft = Number(alloc.discretionary_remaining) || 0;
+    const savOrig = Number(alloc.savings_original) || 0;
+    const savEaten = Number(alloc.savings_eaten) || 0;
+    const savLeft = Number(alloc.savings_remaining) || 0;
+    const expOrig = Number(alloc.expenses) || 0;
+    const past = Number(alloc.past_capability) || 0;
+    const expLeft = Math.max(0, expOrig - past);
+
+    const discSeg = document.createElement('div');
+    discSeg.className = 'db-alloc-seg';
+    discSeg.style.flex = String(Math.max(discOrig, 0));
+    appendAllocPart(discSeg, discSpent, 'db-alloc-fill db-alloc-fill--disc db-alloc-fill--used');
+    appendAllocPart(discSeg, discLeft, 'db-alloc-fill db-alloc-fill--disc');
+    if (discOrig > 0) bar.appendChild(discSeg);
+
+    const savSeg = document.createElement('div');
+    savSeg.className = 'db-alloc-seg';
+    savSeg.style.flex = String(Math.max(savOrig, 0));
+    appendAllocPart(savSeg, savEaten, 'db-alloc-fill db-alloc-fill--sav db-alloc-fill--used');
+    appendAllocPart(savSeg, savLeft, 'db-alloc-fill db-alloc-fill--sav');
+    if (savOrig > 0) bar.appendChild(savSeg);
+
+    const expSeg = document.createElement('div');
+    expSeg.className = 'db-alloc-seg';
+    expSeg.style.flex = String(Math.max(expOrig, 0));
+    appendAllocPart(expSeg, past, 'db-alloc-fill db-alloc-fill--warn');
+    appendAllocPart(expSeg, expLeft, 'db-alloc-fill db-alloc-fill--exp');
+    if (expOrig > 0) bar.appendChild(expSeg);
+
+    if (incomeEl) incomeEl.textContent = money(alloc.income);
+    if (spentEl) spentEl.textContent = money(alloc.spent) + ' used';
+  }
+
+  function renderAllocMeter(meter, left, of, fillClass, usedWarn) {
+    meter.innerHTML = '';
+    const total = Math.max(0, Number(of) || 0);
+    const remaining = Math.max(0, Number(left) || 0);
+    const used = Math.max(0, total - remaining);
+    appendAllocPart(
+      meter,
+      used,
+      'db-alloc-fill ' + fillClass + (usedWarn ? '' : ' db-alloc-fill--used')
+    );
+    appendAllocPart(meter, remaining, 'db-alloc-fill ' + fillClass);
+  }
+
+  function renderAllocRows(alloc) {
+    const list = $('goals-alloc-rows');
+    if (!list) return;
+    list.innerHTML = '';
+    const pct = Number(alloc.savings_percent);
+    const pctLabel = Number.isFinite(pct) ? String(pct).replace(/\.0$/, '') + '%' : '0%';
+    const rows = [
+      {
+        label: 'Discretionary available',
+        detail: 'Daily spending pool — fades as you spend',
+        left: alloc.discretionary_remaining,
+        of: alloc.discretionary_original,
+        fill: 'db-alloc-fill--disc',
+        warn: false,
+      },
+      {
+        label: 'Savings',
+        detail: pctLabel + ' of income · eaten only after discretionary is gone',
+        left: alloc.savings_remaining,
+        of: alloc.savings_original,
+        fill: 'db-alloc-fill--sav',
+        warn: false,
+      },
+      {
+        label: 'Expenses',
+        detail: 'Plan bills · committed, not reduced by daily spend',
+        left: Math.max(0, (Number(alloc.expenses) || 0) - (Number(alloc.past_capability) || 0)),
+        of: alloc.expenses,
+        display: alloc.expenses,
+        fill: 'db-alloc-fill--exp',
+        warn: false,
+      },
+    ];
+    if ((Number(alloc.past_capability) || 0) > 0.005) {
+      rows.push({
+        label: 'Past capability',
+        detail: 'Spend beyond income after bills — this can become debt',
+        left: 0,
+        of: alloc.past_capability,
+        display: alloc.past_capability,
+        fill: 'db-alloc-fill--warn',
+        warn: true,
+      });
+    }
+    rows.forEach((row) => {
+      const li = document.createElement('li');
+      const shown = row.display != null ? row.display : row.left;
+      li.innerHTML =
+        '<div class="db-alloc-row-top"><div><span class="db-alloc-row-label"></span>' +
+        '<span class="db-alloc-row-detail"></span></div>' +
+        '<span class="db-alloc-row-amt"></span></div>' +
+        '<div class="db-alloc-meter"></div>';
+      li.querySelector('.db-alloc-row-label').textContent = row.label;
+      li.querySelector('.db-alloc-row-detail').textContent = row.detail;
+      const amt = li.querySelector('.db-alloc-row-amt');
+      amt.appendChild(document.createTextNode(money(shown)));
+      const ofSpan = document.createElement('span');
+      ofSpan.textContent = ' of ' + money(row.of);
+      amt.appendChild(ofSpan);
+      renderAllocMeter(li.querySelector('.db-alloc-meter'), row.left, row.of, row.fill, row.warn);
+      list.appendChild(li);
+    });
+  }
+
+  function renderCyclePicker(status) {
+    const row = $('goals-cycle-chips');
+    const moreWrap = $('goals-cycle-more-wrap');
+    const more = $('goals-cycle-more');
+    const hint = $('goals-cycle-hint');
+    const cycles = (status && status.cycles) || [];
+    const selected = status && status.period_start;
+    const CHIP_MAX = 12;
+    const older = cycles.length > CHIP_MAX ? cycles.slice(0, cycles.length - CHIP_MAX) : [];
+    const chips = cycles.length > CHIP_MAX ? cycles.slice(-CHIP_MAX) : cycles;
+    if (row) {
+      row.innerHTML = '';
+      chips.forEach((cycle) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className =
+          'db-date-chip' + (cycle.period_start === selected ? ' db-date-chip--selected' : '');
+        btn.dataset.periodStart = cycle.period_start;
+        btn.dataset.periodEnd = cycle.period_end;
+        btn.dataset.isCurrent = cycle.is_current ? '1' : '0';
+        btn.textContent = cycle.label;
+        row.appendChild(btn);
+      });
+    }
+    if (moreWrap && more) {
+      const showMore = older.length > 0;
+      moreWrap.classList.toggle('hidden', !showMore);
+      moreWrap.hidden = !showMore;
+      more.innerHTML = '';
+      if (showMore) {
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Choose…';
+        more.appendChild(placeholder);
+        older.forEach((cycle) => {
+          const opt = document.createElement('option');
+          opt.value = cycle.period_end;
+          opt.dataset.periodStart = cycle.period_start;
+          opt.textContent = cycle.label;
+          if (cycle.period_start === selected) opt.selected = true;
+          more.appendChild(opt);
+        });
+      }
+    }
+    if (hint) {
+      const hist = !!(status && status.cycle_is_live === false);
+      hint.classList.toggle('hidden', !hist);
+      hint.hidden = !hist;
+    }
+  }
+
   function renderGoals(status) {
-    const netSaved =
-      status.period_net_saved != null
-        ? Number(status.period_net_saved) || 0
-        : Number(status.underspend_saved) || 0;
-    const savedEl = $('goals-saved');
-    const savedLabel = $('goals-saved-label');
-    if (savedEl) {
-      savedEl.textContent = money(netSaved);
-      savedEl.classList.toggle('db-goals-hero-value--over', netSaved < 0);
+    renderCyclePicker(status);
+    renderAllocBar(status.allocation || {});
+    renderAllocRows(status.allocation || {});
+    const underEl = $('goals-underspend');
+    if (underEl) {
+      underEl.textContent = money(Math.max(0, Number(status.underspend_saved) || 0));
     }
-    if (savedLabel) {
-      savedLabel.textContent = netSaved < 0 ? 'Over this period' : 'Saved this period';
-    }
-    renderOverspendPrompt(status);
+    renderGoalsOverspendPrompt(status);
     renderDebtCard(status);
     const goals = status.goals || [];
     const list = $('goals-list');
     const empty = $('goals-empty');
     list.innerHTML = '';
     empty.classList.toggle('hidden', goals.length > 0);
-    // Goal bars still use leftover pot (daily underspend after debt skim), not net.
     const saved = Math.max(0, Number(status.underspend_saved) || 0);
     goals.forEach((g) => {
       const target = Number(g.target_amount) || 1;
@@ -1328,30 +1524,52 @@
     renderPaceMath(status);
   }
 
-  function applyStatus(status) {
+  function applyTodayStatus(status) {
     state = status;
     if (status && status.as_of) {
       viewDate = status.as_of;
       syncViewDateControls();
     }
     renderToday(status);
+  }
+
+  function applyGoalsStatus(status) {
+    goalsState = status;
+    if (status && status.as_of) {
+      goalsAsOf = status.as_of;
+    }
     renderGoals(status);
-    if (status.plan) {
-      // Don't clobber bill edits if user is mid-edit on plan — only seed when first load
+  }
+
+  function applyLiveStatus(status) {
+    applyTodayStatus(status);
+    if (!goalsState || goalsState.cycle_is_live) {
+      applyGoalsStatus(status);
     }
   }
 
   async function refresh(dateStr) {
     const iso = clampToToday(dateStr || viewDate || localISODate());
     viewDate = iso;
-    const q = '?date=' + encodeURIComponent(iso);
-    const data = await api('/api/spending/daily/status' + q);
-    applyStatus(data);
+    const data = await api('/api/spending/daily/status?date=' + encodeURIComponent(iso));
+    applyTodayStatus(data);
     if (data && data.as_of) {
       viewDate = data.as_of;
     }
     syncViewDateControls();
     return data;
+  }
+
+  async function refreshGoals(dateStr) {
+    const iso = clampToToday(dateStr || goalsAsOf || localISODate());
+    goalsAsOf = iso;
+    const data = await api('/api/spending/daily/status?date=' + encodeURIComponent(iso));
+    applyGoalsStatus(data);
+    return data;
+  }
+
+  async function refreshAll() {
+    await Promise.all([refresh(viewDate), refreshGoals(goalsAsOf || localISODate())]);
   }
 
   async function loadPlan() {
@@ -1362,7 +1580,7 @@
   async function deleteEntry(id) {
     try {
       await api('/api/spending/daily/entry/' + encodeURIComponent(id), { method: 'DELETE' });
-      await refresh(viewDate);
+      await refreshAll();
       flash('Deleted', 'ok');
     } catch (e) {
       flash(e.message, 'error');
@@ -1372,7 +1590,7 @@
   async function deleteGoal(id) {
     try {
       await api('/api/spending/daily/goals/' + encodeURIComponent(id), { method: 'DELETE' });
-      await refresh();
+      await refreshAll();
       flash('Goal removed', 'ok');
     } catch (e) {
       flash(e.message, 'error');
@@ -1391,8 +1609,8 @@
           period_end: prompt.period_end,
         }),
       });
-      if (data && data.status) applyStatus(data.status);
-      else await refresh(viewDate);
+      if (data && data.status) applyLiveStatus(data.status);
+      else await refreshAll();
       flash(decision === 'accept' ? 'Overspend carried forward' : 'Skipped — no debt added', 'ok');
     } catch (e) {
       flash(e.message, 'error');
@@ -1411,8 +1629,8 @@
         method: 'POST',
         body: JSON.stringify({}),
       });
-      if (data && data.status) applyStatus(data.status);
-      else await refresh(viewDate);
+      if (data && data.status) applyLiveStatus(data.status);
+      else await refreshAll();
       flash('Overspend debt written off', 'ok');
     } catch (e) {
       flash(e.message, 'error');
@@ -1420,6 +1638,33 @@
   }
 
   function bind() {
+    const cycleRow = $('goals-cycle-chips');
+    if (cycleRow) {
+      cycleRow.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('[data-period-end]');
+        if (!btn) return;
+        const isCurrent = btn.dataset.isCurrent === '1';
+        const iso = isCurrent ? localISODate() : btn.dataset.periodEnd;
+        try {
+          await refreshGoals(iso);
+        } catch (e) {
+          flash(e.message, 'error');
+        }
+      });
+    }
+    const cycleMore = $('goals-cycle-more');
+    if (cycleMore) {
+      cycleMore.addEventListener('change', async () => {
+        const iso = cycleMore.value;
+        if (!iso) return;
+        try {
+          await refreshGoals(iso);
+        } catch (e) {
+          flash(e.message, 'error');
+        }
+      });
+    }
+
     document.querySelectorAll('.db-panel-tab').forEach((btn) => {
       btn.addEventListener('click', () => setPanel(btn.dataset.panel));
     });
@@ -1558,7 +1803,8 @@
         entryDate = spendDate;
         // Jump the spends viewer to the day just logged so the new item is visible.
         viewDate = (data.status && data.status.as_of) || spendDate;
-        applyStatus(data.status);
+        applyTodayStatus(data.status);
+        await refreshGoals(goalsAsOf || localISODate());
         syncDateControls();
         $('db-amount').value = '';
         lastAutoTitle = categoryTitle($('db-category').value);
@@ -1602,7 +1848,10 @@
           method: 'PUT',
           body: JSON.stringify(body),
         });
-        if (data.status) applyStatus(data.status);
+        if (data.status) applyLiveStatus(data.status);
+        if (goalsState && !goalsState.cycle_is_live) {
+          await refreshGoals(goalsAsOf);
+        }
         fillPlanForm(data.plan);
         pulsePlanMath();
         const savedMsg = 'Plan saved — daily limit updated on Today.';
@@ -1699,7 +1948,7 @@
         });
         $('goal-name').value = '';
         $('goal-target').value = '';
-        await refresh();
+        await refreshAll();
         flash('Goal added', 'ok');
       } catch (e) {
         flash(e.message, 'error');
@@ -1710,10 +1959,11 @@
   document.addEventListener('DOMContentLoaded', async () => {
     entryDate = localISODate();
     viewDate = localISODate();
+    goalsAsOf = localISODate();
     syncDateControls();
     bind();
     try {
-      await refresh(viewDate);
+      await refreshAll();
       await loadPlan();
     } catch (e) {
       flash(e.message || 'Failed to load daily budget', 'error');
