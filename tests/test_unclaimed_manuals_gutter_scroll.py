@@ -175,6 +175,7 @@ def _geometry(page) -> dict:
     )
 
 
+@unittest.skip('Home import preview was replaced by /spending/reconcile')
 class TestUnclaimedManualsGutterScroll(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

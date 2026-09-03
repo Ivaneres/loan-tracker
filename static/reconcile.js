@@ -103,16 +103,25 @@
     if (!list) return;
     const uploads = (sessionData && sessionData.uploads) || [];
     if (!uploads.length) {
+      list.classList.add('reconcile-upload-list--empty');
       list.innerHTML = '<li class="reconcile-upload-empty">No statements staged yet.</li>';
       return;
     }
+    list.classList.remove('reconcile-upload-list--empty');
     list.innerHTML = uploads
       .map((u) => {
         const src = u.bank_source ? ` · ${escapeHtml(u.bank_source)}` : '';
+        const range =
+          u.period_start && u.period_end
+            ? ` · ${escapeHtml(u.period_start)} → ${escapeHtml(u.period_end)}`
+            : '';
+        const remove = sessionData && sessionData.readonly
+          ? ''
+          : `<button type="button" class="reconcile-btn reconcile-btn--ghost reconcile-upload-remove" data-remove-upload="${escapeHtml(u.id)}">Remove</button>`;
         return `<li class="reconcile-upload-item" data-upload-id="${escapeHtml(u.id)}">
           <span class="reconcile-upload-meta"><strong>${escapeHtml(u.file_name || 'Statement')}</strong>${src}
-          <span class="reconcile-tally-sub"> · ${u.row_count || 0} rows</span></span>
-          <button type="button" class="reconcile-btn reconcile-btn--ghost reconcile-upload-remove" data-remove-upload="${escapeHtml(u.id)}">Remove</button>
+          <span class="reconcile-tally-sub">${range} · ${u.row_count || 0} rows</span></span>
+          ${remove}
         </li>`;
       })
       .join('');
@@ -140,16 +149,22 @@
       ? `<span class="reconcile-tally-align reconcile-tally-align--ok">✓ ${formatMoney(t.matched_bank_total)} aligned</span>`
       : `<span class="reconcile-tally-align reconcile-tally-align--warn">${formatMoney(t.unmatched_bank_total)} bank · ${formatMoney(t.unmatched_manual_total)} manual gap</span>`;
     box.innerHTML = `
-      <div class="reconcile-tally-col">
-        <div class="reconcile-tally-head">Bank statements</div>
-        <div class="reconcile-tally-main">${formatMoney(t.bank_total)} · ${t.statement_count || 0} rows</div>
+      <div class="reconcile-stat">
+        <span class="reconcile-stat-label">Bank statements</span>
+        <div class="reconcile-stat-line">
+          <span class="reconcile-stat-value">${formatMoney(t.bank_total)}</span>
+          <span class="reconcile-stat-count">${t.statement_count || 0} rows</span>
+        </div>
         <div class="reconcile-tally-bar"><span style="width:${bankPct}%"></span></div>
         <div class="reconcile-tally-sub">Matched ${formatMoney(t.matched_bank_total)} · Left ${formatMoney(t.unmatched_bank_total)} · Transfers ${formatMoney(t.transfer_total || 0)}</div>
       </div>
       <div class="reconcile-tally-mid">${align}</div>
-      <div class="reconcile-tally-col">
-        <div class="reconcile-tally-head">Manual entries</div>
-        <div class="reconcile-tally-main">${formatMoney(t.manual_total)} · ${t.manual_count || 0} entries</div>
+      <div class="reconcile-stat">
+        <span class="reconcile-stat-label">Manual entries</span>
+        <div class="reconcile-stat-line">
+          <span class="reconcile-stat-value">${formatMoney(t.manual_total)}</span>
+          <span class="reconcile-stat-count">${t.manual_count || 0} entries</span>
+        </div>
         <div class="reconcile-tally-bar reconcile-tally-bar--manual"><span style="width:${manPct}%"></span></div>
         <div class="reconcile-tally-sub">Matched ${formatMoney(t.matched_manual_total)} · Unclaimed ${formatMoney(t.unmatched_manual_total)} · Excluded ${formatMoney(t.excluded_manual_total || 0)}</div>
       </div>`;
@@ -174,10 +189,28 @@
     }
   }
 
-  function sourceBadge(row) {
-    const src = row.bank_source || '';
-    if (!src) return '';
-    return `<span class="reconcile-source-pill">${escapeHtml(src)}</span>`;
+  function sourcePill(src) {
+    const value = String(src || '').trim();
+    if (!value) return '<span class="reconcile-source-pill reconcile-source-pill--empty" aria-hidden="true">—</span>';
+    return `<span class="reconcile-source-pill">${escapeHtml(value)}</span>`;
+  }
+
+  function txRow(role, name, amount, date, source, extraClass) {
+    const cls = extraClass ? ` reconcile-tx--${extraClass}` : '';
+    return `<div class="reconcile-tx${cls}">
+      <span class="reconcile-tx-role">${escapeHtml(role)}</span>
+      <span class="reconcile-tx-name">${escapeHtml(name || '')}</span>
+      <span class="reconcile-tx-meta">
+        <span class="reconcile-tx-amt">${formatMoney(amount)}</span>
+        <span class="reconcile-tx-date">${escapeHtml(date || '')}</span>
+        ${sourcePill(source)}
+      </span>
+    </div>`;
+  }
+
+  function setTriageIdle(idle) {
+    const bank = $('reconcile-phase-bank');
+    if (bank) bank.classList.toggle('reconcile-triage--idle', !!idle);
   }
 
   function renderFocusItem(item) {
@@ -187,11 +220,14 @@
     const progress = $('reconcile-queue-progress');
     const nav = $('reconcile-queue-nav');
     if (!focus || !item) {
+      setTriageIdle(true);
       if (focus) focus.innerHTML = '<p class="reconcile-empty">Queue complete — review unclaimed manuals or confirm.</p>';
       if (suggestions) suggestions.innerHTML = '';
       if (actions) actions.innerHTML = '';
+      if (nav) nav.innerHTML = '';
       return;
     }
+    setTriageIdle(false);
     const rows = rowsById();
     const manuals = manualsById();
     const q = activeQueue();
@@ -203,15 +239,13 @@
       const legs = ids.map((id) => rows.get(String(id))).filter(Boolean);
       const title = item.kind === 'transfer' ? 'Transfer pair — review' : 'Netted match — review';
       focus.innerHTML = `<div class="reconcile-focus-title">${title}</div>${legs
-        .map(
-          (leg) => `<div class="reconcile-leg">${sourceBadge(leg)}<strong>${escapeHtml(leg.description)}</strong> · ${formatMoney(leg.amount)} · ${escapeHtml(leg.date)}</div>`,
-        )
-        .join('<div class="reconcile-leg-join">↔</div>')}`;
+        .map((leg) => txRow('Bank', leg.description, leg.amount, leg.date, leg.bank_source))
+        .join('')}`;
       if (item.kind === 'netted_banks') {
         const mid = (item.manual_ids || [])[0];
         const man = manuals.get(String(mid));
         if (man) {
-          focus.innerHTML += `<div class="reconcile-manual-card">Manual: ${escapeHtml(man.description)} · ${formatMoney(man.amount)} · ${escapeHtml(man.date)}</div>`;
+          focus.innerHTML += txRow('Manual', man.description, man.amount, man.date, '', 'manual');
         }
       }
       if (suggestions) suggestions.innerHTML = '';
@@ -226,13 +260,11 @@
       const parts = mids.map((id) => manuals.get(String(id))).filter(Boolean);
       focus.innerHTML = row
         ? `<div class="reconcile-focus-title reconcile-focus-title--matched">Auto / linked match</div>
-           <div class="reconcile-bank-card">${sourceBadge(row)}<strong>${escapeHtml(row.description)}</strong> · ${formatMoney(row.amount)} · ${escapeHtml(row.date)}</div>`
+           ${txRow('Bank', row.description, row.amount, row.date, row.bank_source)}`
         : '';
       if (parts.length) {
         focus.innerHTML += parts
-          .map(
-            (p) => `<div class="reconcile-manual-card">${escapeHtml(p.description)} · ${formatMoney(p.amount)} · ${escapeHtml(p.date)}</div>`,
-          )
+          .map((p) => txRow('Manual', p.description, p.amount, p.date, '', 'manual'))
           .join('');
       }
       if (suggestions) suggestions.innerHTML = '';
@@ -246,7 +278,7 @@
       selectedSuggestion = (row && row.suggestions && row.suggestions[0]) || null;
       focus.innerHTML = row
         ? `<div class="reconcile-focus-title">Unmatched</div>
-           <div class="reconcile-bank-card">${sourceBadge(row)}<strong>${escapeHtml(row.description)}</strong> · ${formatMoney(row.amount)} · ${escapeHtml(row.date)}</div>`
+           ${txRow('Bank', row.description, row.amount, row.date, row.bank_source)}`
         : '';
       const sugs = (row && row.suggestions) || [];
       if (suggestions) {
@@ -319,6 +351,7 @@
     bank.classList.toggle('hidden', phase !== 'bank');
     manuals.classList.toggle('hidden', phase !== 'manuals');
     summary.classList.toggle('hidden', phase !== 'summary');
+    const progress = $('reconcile-queue-progress');
     if (phase === 'bank') {
       const q = activeQueue();
       if (queueIndex >= q.length) queueIndex = Math.max(0, q.length - 1);
@@ -329,8 +362,10 @@
       }
       renderFocusItem(q[queueIndex] || null);
     } else if (phase === 'manuals') {
+      if (progress) progress.textContent = 'Unclaimed manuals';
       renderManualPhase();
     } else {
+      if (progress) progress.textContent = 'Summary';
       renderSummaryPhase();
     }
   }
@@ -349,13 +384,63 @@
     }
   }
 
+  function rowMatchLabel(row) {
+    if (!row) return '—';
+    if (row.transfer_pair) return 'Transfer';
+    if (row.manual_match) return 'Matched';
+    if (row.ledger_duplicate) return 'Duplicate';
+    if (row.include === false) return 'Excluded';
+    return 'Unmatched';
+  }
+
+  function renderViewAll() {
+    const panel = $('reconcile-view-all-panel');
+    if (!panel || panel.classList.contains('hidden')) return;
+    const rows = (sessionData && sessionData.rows) || [];
+    if (!rows.length) {
+      panel.innerHTML = '<p class="reconcile-empty">No statement rows yet.</p>';
+      return;
+    }
+    panel.innerHTML = `<table class="reconcile-rows-table">
+      <thead><tr><th>Source</th><th>Description</th><th>Amount</th><th>Date</th><th>Match</th></tr></thead>
+      <tbody>${rows
+        .map(
+          (r) => `<tr>
+            <td>${escapeHtml(r.bank_source || '')}</td>
+            <td>${escapeHtml(r.description || '')}</td>
+            <td class="reconcile-tx-amt">${formatMoney(r.amount)}</td>
+            <td>${escapeHtml(r.date || '')}</td>
+            <td>${rowMatchLabel(r)}</td>
+          </tr>`,
+        )
+        .join('')}</tbody>
+    </table>`;
+  }
+
+  function renderReadonly() {
+    const readonly = !!(sessionData && sessionData.readonly);
+    document.body.classList.toggle('reconcile-readonly', readonly);
+    const lead = $('reconcile-lead');
+    if (lead) {
+      lead.textContent = readonly
+        ? 'This month is imported. You can review the session; uploads are locked.'
+        : 'Upload every statement for the month, run auto-match, review the queue, then confirm.';
+    }
+    ['reconcile-upload-btn', 'reconcile-auto-match-btn', 'reconcile-confirm-btn', 'reconcile-file', 'reconcile-source', 'reconcile-period-start', 'reconcile-period-end', 'reconcile-range-toggle', 'reconcile-range-reset'].forEach((id) => {
+      const el = $(id);
+      if (el) el.disabled = readonly;
+    });
+  }
+
   function renderAll() {
     renderChip();
+    renderReadonly();
     renderUploads();
     renderTally();
     renderUnclaimedChip();
     renderPhases();
     renderActionsBar();
+    renderViewAll();
   }
 
   function post(path, body) {
@@ -364,6 +449,27 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
     }).then(refreshFromSession);
+  }
+
+  function monthRangeFromValue(ym) {
+    const m = String(ym || '').slice(0, 7);
+    if (m.length !== 7 || m[4] !== '-') return null;
+    const y = Number(m.slice(0, 4));
+    const mo = Number(m.slice(5, 7));
+    if (!y || !mo) return null;
+    const start = `${m}-01`;
+    const last = new Date(y, mo, 0).getDate();
+    const end = `${m}-${String(last).padStart(2, '0')}`;
+    return { start, end };
+  }
+
+  function syncRangeFromMonth() {
+    const range = monthRangeFromValue(month);
+    const startEl = $('reconcile-period-start');
+    const endEl = $('reconcile-period-end');
+    if (!range || !startEl || !endEl) return;
+    startEl.value = range.start;
+    endEl.value = range.end;
   }
 
   function bindEvents() {
@@ -380,6 +486,43 @@
       sourceList.innerHTML = window.KNOWN_BANK_SOURCES.map((s) => `<option value="${escapeHtml(s)}">`).join('');
     }
 
+    const fileInputEl = $('reconcile-file');
+    const fileNameEl = $('reconcile-file-name');
+    if (fileInputEl && fileNameEl) {
+      fileInputEl.addEventListener('change', () => {
+        const f = fileInputEl.files && fileInputEl.files[0];
+        fileNameEl.textContent = f ? f.name : 'No file selected';
+      });
+    }
+
+    const viewAllToggle = $('reconcile-view-all-toggle');
+    const viewAllPanel = $('reconcile-view-all-panel');
+    if (viewAllToggle && viewAllPanel) {
+      viewAllToggle.addEventListener('click', () => {
+        const open = viewAllPanel.classList.contains('hidden');
+        viewAllPanel.classList.toggle('hidden', !open);
+        viewAllToggle.setAttribute('aria-expanded', String(open));
+        viewAllToggle.textContent = open ? 'Hide all rows' : 'View all rows';
+        if (open) renderViewAll();
+      });
+    }
+
+    const rangeToggle = $('reconcile-range-toggle');
+    const rangeFields = $('reconcile-range-fields');
+    if (rangeToggle && rangeFields) {
+      rangeToggle.addEventListener('click', () => {
+        const open = rangeFields.classList.contains('hidden');
+        rangeFields.classList.toggle('hidden', !open);
+        rangeToggle.setAttribute('aria-expanded', String(open));
+        rangeToggle.textContent = open ? 'Hide date range' : 'Adjust date range';
+      });
+    }
+    const rangeReset = $('reconcile-range-reset');
+    if (rangeReset) {
+      rangeReset.addEventListener('click', () => syncRangeFromMonth());
+    }
+    syncRangeFromMonth();
+
     const uploadBtn = $('reconcile-upload-btn');
     if (uploadBtn) {
       uploadBtn.addEventListener('click', () => {
@@ -392,6 +535,10 @@
         const fd = new FormData();
         fd.append('file', fileInput.files[0]);
         if (sourceInput && sourceInput.value.trim()) fd.append('bank_source', sourceInput.value.trim());
+        const startEl = $('reconcile-period-start');
+        const endEl = $('reconcile-period-end');
+        if (startEl && startEl.value) fd.append('period_start', startEl.value);
+        if (endEl && endEl.value) fd.append('period_end', endEl.value);
         setStatus('Extracting…');
         api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload`, { method: 'POST', body: fd })
           .then((data) => {
@@ -405,6 +552,8 @@
               setStatus('Statement added.');
             }
             fileInput.value = '';
+            const fileName = $('reconcile-file-name');
+            if (fileName) fileName.textContent = 'No file selected';
           })
           .catch((err) => setStatus(err.message || 'Upload failed', true));
       });

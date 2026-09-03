@@ -38,7 +38,7 @@
                     </span>
                     {% else %}
                     <span class="home-spotlight-stat-value home-spotlight-stat-value--muted">—</span>
-                    <span class="home-spotlight-stat-meta">Import a statement below</span>
+                    <span class="home-spotlight-stat-meta">Reconcile a month to get started</span>
                     {% endif %}
                 </a>
                 <a class="home-spotlight-stat" href="/loans">
@@ -54,167 +54,97 @@
             </div>
         </section>
 
-        <section class="home-section card home-reconcile-cta" aria-labelledby="home-reconcile-heading">
-            <h2 id="home-reconcile-heading" class="home-section-h">Reconcile a month</h2>
-            <p class="home-section-sub">Upload all bank statements for a month and match them against your daily manual entries.</p>
-                    <a href="/spending/reconcile" class="reconcile-btn reconcile-btn--soft" id="home-open-reconcile">Open Reconcile</a>
-        </section>
-
-        <section id="import" class="home-section card spending-section spending-section--import" tabindex="-1">
-            <h2 class="home-section-h">Import a statement</h2>
-            <p class="home-section-sub">Upload PDF, CSV, TXT, or Excel (.xlsx). Pick the stats month and date range — only lines whose settled/completed date falls in that range are kept.</p>
-            <p class="spending-hint home-import-hint text-xs mb-4">Prefer CSV or Excel when PDFs are messy (e.g. Revolut). Multiple banks = multiple imports. Rows that started last month but completed in range are flagged so you can include or skip them.</p>
-
-            <div class="import-form">
-                <div class="import-fields">
-                    <label class="import-field" for="report-period-month">
-                        <span class="import-label">Stats month</span>
-                        <input id="report-period-month" type="month" class="spending-control" />
-                    </label>
-                    <label class="import-field" for="period-start">
-                        <span class="import-label">Period start</span>
-                        <input id="period-start" type="date" class="spending-control" />
-                    </label>
-                    <label class="import-field" for="period-end">
-                        <span class="import-label">Period end</span>
-                        <input id="period-end" type="date" class="spending-control" />
-                    </label>
-                    <label class="import-field" for="statement-source">
-                        <span class="import-label">Source <span class="font-normal">(optional)</span></span>
-                        <div class="source-combobox" data-source-combobox>
-                            <input
-                                id="statement-source"
-                                type="text"
-                                class="spending-control"
-                                placeholder="e.g. Monzo, Barclays"
-                                autocomplete="off"
-                                maxlength="80"
-                                role="combobox"
-                                aria-expanded="false"
-                                aria-controls="statement-source-listbox"
-                                aria-autocomplete="list"
-                                aria-haspopup="listbox"
-                            />
-                            <ul
-                                id="statement-source-listbox"
-                                class="source-combobox__list"
-                                role="listbox"
-                                hidden
-                            ></ul>
-                        </div>
-                    </label>
+        <section class="home-section card" aria-labelledby="home-statements-heading">
+            <header class="home-statements-head">
+                <div>
+                    <h2 id="home-statements-heading" class="home-section-h">Statements</h2>
+                    <p class="home-section-sub">Every month opens Reconcile. Upload, match, and confirm there.</p>
                 </div>
-                <button type="button" id="period-reset-btn" class="spending-btn spending-btn--muted import-reset">Reset range from month</button>
+                {% if home_cta %}
+                <a
+                    href="/spending/reconcile?month={{ home_cta.month }}"
+                    class="reconcile-btn {% if home_cta.status == 'imported' %}reconcile-btn--soft{% else %}reconcile-btn--primary{% endif %}"
+                    id="home-open-reconcile"
+                >
+                    {% if home_cta.status == 'in_progress' %}
+                    Continue reconciling {{ home_cta.label }}
+                    {% elif home_cta.status == 'imported' %}
+                    Open {{ home_cta.label }} in Reconcile
+                    {% else %}
+                    Reconcile {{ home_cta.label }}
+                    {% endif %}
+                </a>
+                {% endif %}
+            </header>
 
-                <label class="import-field import-field--file" for="spending-file">
-                    <span class="import-label">Statement file</span>
-                    <input id="spending-file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="spending-control import-file-input" />
-                </label>
+            {% if home_progress %}
+            <p class="home-statements-callout" role="status">
+                <strong>{{ home_progress.label }} in progress.</strong>
+                {% if home_progress.uploads %}
+                {{ home_progress.uploads }} file{% if home_progress.uploads != 1 %}s{% endif %} staged
+                {% if home_progress.auto_match_ran %} · auto-match run{% else %} · auto-match pending{% endif %}
+                {% else %}
+                Auto-match pending.
+                {% endif %}
+                — <a href="/spending/reconcile?month={{ home_progress.month }}">continue in Reconcile</a>.
+            </p>
+            {% endif %}
 
-                <div class="import-actions">
-                    <button type="button" id="spending-preview-btn" class="spending-btn spending-btn--primary">Upload &amp; preview</button>
-                    <button type="button" id="spending-import-btn" class="spending-btn spending-btn--ok" disabled>Import selected</button>
-                    <button type="button" id="spending-clear-btn" class="spending-btn spending-btn--muted">Clear</button>
-                </div>
-            </div>
-
-            <p id="spending-status" class="text-sm mt-3 hidden"></p>
-            <div id="home-import-next" class="home-import-next hidden" role="status"></div>
-            <div id="spending-preview-summary" class="text-sm mt-2 hidden preview-summary" style="color: var(--text-color);"></div>
-            <details id="spending-pipeline-panel" class="mt-4 border rounded-lg p-3 text-sm hidden" style="border-color: var(--border-color); background: var(--background-color);">
-                <summary class="cursor-pointer font-medium select-none" style="color: var(--text-color);">How this file was read (intermediate representations)</summary>
-                <p id="spending-pipeline-summary" class="mt-2 text-xs leading-relaxed spending-muted"></p>
-                <p id="spending-pipeline-note" class="mt-1 text-xs italic hidden"></p>
-                <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    <div>
-                        <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Extracted text</div>
-                        <pre id="spending-pipeline-extract" class="text-xs p-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
-                    </div>
-                    <div>
-                        <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Layout column hints (PDF only)</div>
-                        <pre id="spending-pipeline-hints" class="text-xs p-2 max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
-                    </div>
-                </div>
-                <div class="mt-3">
-                    <div class="text-xs font-semibold mb-1" style="color: var(--text-color);">Direction hints from geometry (sample)</div>
-                    <pre id="spending-pipeline-direction" class="text-xs p-2 max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono border rounded" style="background: var(--card-background); border-color: var(--border-color);"></pre>
-                </div>
-            </details>
-            <div id="spending-preview-wrap" class="mt-4 hidden import-preview-wrap">
-                <div class="preview-toolbar">
-                    <label class="preview-toolbar-include inline-flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="preview-include-all" title="Select or deselect all rows" aria-label="Select or deselect all rows" />
-                        <span>Select all</span>
-                    </label>
-                    <p id="spending-preview-expand-hint" class="preview-expand-hint">Tap a row for match, direction &amp; category. Possible matches appear under “Not in manual” — pick one to skip.</p>
-                </div>
-                <div class="import-preview-body">
-                    <div class="import-preview-scroll">
-                        <table class="min-w-full text-sm preview-tx-table" style="border-color: var(--border-color);">
-                            <thead class="preview-tx-thead" style="background: var(--background-color);">
-                                <tr>
-                                    <th class="px-3 py-2 text-left">
-                                        <span class="preview-thead-include-label">Include</span>
-                                    </th>
-                                    <th class="px-3 py-2 text-left">Match <span class="text-gray-400 font-normal text-xs">(import)</span></th>
-                                    <th class="px-3 py-2 text-left">Date</th>
-                                    <th class="px-3 py-2 text-left">Description</th>
-                                    <th class="px-3 py-2 text-left">Direction <span class="text-gray-400 font-normal text-xs">(edit if wrong)</span></th>
-                                    <th class="px-3 py-2 text-left">Amount (£)</th>
-                                    <th class="px-3 py-2 text-left">Transfer <span class="text-gray-400 font-normal text-xs">(preview)</span></th>
-                                    <th class="px-3 py-2 text-left">Category</th>
-                                    <th class="px-2 py-2 preview-tx-toggle-th"><span class="sr-only">Details</span></th>
-                                </tr>
-                            </thead>
-                            <tbody id="spending-preview-tbody" class="bg-white preview-tx-tbody"></tbody>
-                        </table>
-                    </div>
-                    <aside id="import-unclaimed-manuals" class="import-unclaimed-manuals hidden" aria-label="Unclaimed manual transactions">
-                        <details class="import-unclaimed-manuals-details" open>
-                            <summary class="import-unclaimed-manuals-summary">
-                                <span class="import-unclaimed-manuals-title">Unclaimed manuals</span>
-                                <span id="import-unclaimed-manuals-count" class="import-unclaimed-manuals-count"></span>
-                            </summary>
-                            <p class="import-unclaimed-manuals-hint">Manual spends not yet matched to the bank. Compare with statement rows on the left.</p>
-                            <ul id="import-unclaimed-manuals-list" class="import-unclaimed-manuals-list"></ul>
-                            <p id="import-unclaimed-manuals-empty" class="import-unclaimed-manuals-empty hidden">None left for this month.</p>
-                        </details>
-                    </aside>
-                </div>
-            </div>
-        </section>
-
-        <section class="home-section card" aria-labelledby="home-recent-heading">
-            <h2 id="home-recent-heading" class="home-section-h">Recent statements</h2>
-            <p class="home-section-sub">Imports that feed Monthly insights and Daily plan estimates.</p>
-            <ul class="home-statements" id="home-statements-list"{% if not recent_statements %} hidden{% endif %}>
-                {% for s in recent_statements %}
-                <li>
-                    <span>
-                        <strong>{{ s.file_name or 'Statement' }}</strong>
-                        · {{ s.report_month or '—' }}
-                        {% if s.bank_source %}
-                        · {{ s.bank_source }}
-                        {% endif %}
-                        {% if s.period_start and s.period_end %}
-                        <span class="spending-muted">({{ s.period_start }} → {{ s.period_end }})</span>
-                        {% endif %}
-                    </span>
-                    <span class="spending-muted">
-                        {{ s.imported_count or 0 }} imported
-                        {% if s.uploaded_at %} · {{ s.uploaded_at[:10] }}{% endif %}
-                    </span>
+            <ul class="home-month-list" id="home-month-list" aria-label="Statement months">
+                {% for row in statement_months %}
+                <li{% if loop.index > home_months_visible %} class="home-month-overflow hidden"{% endif %}>
+                    <a class="home-month{% if home_cta and row.month == home_cta.month %} home-month--current{% endif %}" href="/spending/reconcile?month={{ row.month }}">
+                        <span class="home-month-label">{{ row.label }}</span>
+                        <span class="home-month-pill home-month-pill--{{ row.status }}">
+                            {% if row.status == 'imported' %}Imported
+                            {% elif row.status == 'imported_without_recon' %}Imported without recon
+                            {% elif row.status == 'in_progress' %}{% if row.auto_match_ran %}In progress — matched{% else %}In progress{% endif %}
+                            {% else %}Not started{% endif %}
+                        </span>
+                        <span class="home-month-detail">
+                            {% if row.status == 'imported' %}
+                            £{{ "{:,.2f}".format(row.spend or 0) }} · {{ row.tx_count }} transaction{% if row.tx_count != 1 %}s{% endif %} imported
+                            {% elif row.status == 'imported_without_recon' %}
+                            £{{ "{:,.2f}".format(row.spend or 0) }} · {{ row.tx_count }} transaction{% if row.tx_count != 1 %}s{% endif %} in ledger
+                            {% elif row.status == 'in_progress' %}
+                            {{ row.uploads }} file{% if row.uploads != 1 %}s{% endif %} staged{% if row.auto_match_ran %} · auto-matched{% else %} · auto-match pending{% endif %}
+                            {% else %}
+                            No statements uploaded yet
+                            {% endif %}
+                        </span>
+                        <span class="home-month-chevron" aria-hidden="true"></span>
+                    </a>
                 </li>
                 {% endfor %}
             </ul>
-            <p class="home-statements-empty" id="home-statements-empty"{% if recent_statements %} hidden{% endif %}>No statements yet — upload one above to get started.</p>
+            {% if home_months_overflow %}
+            <button
+                type="button"
+                id="home-months-toggle"
+                class="home-months-toggle"
+                aria-expanded="false"
+                aria-controls="home-month-list"
+            >View all months ({{ home_months_overflow }} more)</button>
+            {% endif %}
         </section>
     </div>
 
+    {% if home_months_overflow %}
     <script>
-        window.SPENDING_CATEGORIES = {{ spending_categories | tojson }};
-        window.KNOWN_BANK_SOURCES = {{ known_bank_sources | tojson }};
+        (function () {
+            var btn = document.getElementById('home-months-toggle');
+            if (!btn) return;
+            var extra = document.querySelectorAll('.home-month-overflow');
+            var more = {{ home_months_overflow | int }};
+            btn.addEventListener('click', function () {
+                var open = btn.getAttribute('aria-expanded') === 'true';
+                var next = !open;
+                btn.setAttribute('aria-expanded', String(next));
+                extra.forEach(function (el) { el.classList.toggle('hidden', !next); });
+                btn.textContent = next ? 'Show fewer months' : ('View all months (' + more + ' more)');
+            });
+        })();
     </script>
-    <script src="{{ asset_url('spending.js') }}"></script>
+    {% endif %}
 </body>
 </html>

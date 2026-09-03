@@ -177,13 +177,14 @@ class TestFilterSpendingRowsByPeriodBoundary(unittest.TestCase):
 
 
 class TestBoundaryPreviewUiPresence(unittest.TestCase):
-    def test_home_and_assets_mention_boundary_handling(self):
+    def test_reconcile_range_and_assets_mention_boundary_handling(self):
         root = __import__('pathlib').Path(__file__).resolve().parents[1]
-        home = (root / 'templates' / 'home.html').read_text(encoding='utf-8')
+        rec = (root / 'templates' / 'reconcile.html').read_text(encoding='utf-8')
         js = (root / 'static' / 'spending.js').read_text(encoding='utf-8')
         css = (root / 'static' / 'style.css').read_text(encoding='utf-8')
-        self.assertIn('started last month but completed in range', home)
-        self.assertIn('settled/completed date', home)
+        self.assertIn('id="reconcile-period-start"', rec)
+        self.assertIn('id="reconcile-period-end"', rec)
+        self.assertIn('Adjust date range', rec)
         self.assertIn('date_boundary', js)
         self.assertIn('preview-boundary-pill', js)
         self.assertIn('Boundary dates:', js)

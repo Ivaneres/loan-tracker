@@ -225,12 +225,12 @@ class TestUnmatchedManualsSidebar(unittest.TestCase):
         self.assertEqual(ids, ['m2'])
         self.assertEqual(result['transactions'][0]['preview_duplicate_reason'], 'manual')
 
-    def test_home_assets_mention_unclaimed_sidebar(self):
+    def test_unclaimed_sidebar_assets_still_present(self):
         root = __import__('pathlib').Path(__file__).resolve().parents[1]
-        home = (root / 'templates' / 'home.html').read_text(encoding='utf-8')
+        rec = (root / 'templates' / 'reconcile.html').read_text(encoding='utf-8')
         js = (root / 'static' / 'spending.js').read_text(encoding='utf-8')
         css = (root / 'static' / 'style.css').read_text(encoding='utf-8')
-        self.assertIn('import-unclaimed-manuals', home)
+        self.assertIn('reconcile-unclaimed-list', rec)
         self.assertIn('unmatched_manuals', js)
         self.assertIn('renderUnclaimedManuals', js)
         self.assertIn('import-unclaimed-manuals', css)

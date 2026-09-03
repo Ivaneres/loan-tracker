@@ -205,7 +205,7 @@ def main() -> int:
 
             page.goto(f'{BASE}/')
             page.wait_for_selector('#home-open-reconcile')
-            save_locator(page.locator('.home-reconcile-cta'), '01-home-reconcile-cta.png')
+            save_locator(page.locator('section[aria-labelledby="home-statements-heading"]'), '01-home-statements.png')
 
             page.goto(f'{BASE}/spending/reconcile?month={MONTH}')
             page.wait_for_selector('#reconcile-upload-list .reconcile-upload-item')

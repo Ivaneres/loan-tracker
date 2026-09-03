@@ -31,10 +31,10 @@ Flask monolith finance tracker (loans + spending + daily budget). No separate fr
 
 ## Statement import dates
 
-- Home import extracts optional `started_date` / `completed_date` (e.g. Revolut) alongside `date`
+- **Upload surface is Reconcile** (`/spending/reconcile`) — Home has no import form. Home Statements lists months; every row opens Reconcile.
+- Extracts optional `started_date` / `completed_date` (e.g. Revolut) alongside `date`
 - Ledger `date` prefers **completed/settled** when present (`_resolve_spending_transaction_dates`)
-- Period filter keeps rows by that ledger date; rows whose `started_date` is outside the range are tagged `date_boundary` and shown in preview (included by default; user can uncheck)
-- Preview summary exposes `date_boundary_count`; UI pill: `preview-boundary-pill`
+- Period filter keeps rows by that ledger date; rows whose `started_date` is outside the range are tagged `date_boundary`. Reconcile composer: collapsed **Adjust date range** (`#reconcile-period-start` / `#reconcile-period-end`), sent with upload.
 - Supported uploads: PDF, CSV, TXT, Excel **`.xlsx`** (converted via `openpyxl` → CSV-like text). File inputs must include `.xlsx` + `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` in `accept` or mobile pickers hide Excel files. Old `.xls` is rejected with a clear error.
 - **Structured CSV/XLSX** are parsed **locally** after mapping headers: optional alias fast path, else a **tiny LLM call on header titles only** (`_llm_map_tabular_headers`) that returns column indices + amount-sign convention — never sends row data. Amount-sign from headers alone is provisional: after columns are mapped, `_infer_amount_sign_from_data_rows` samples the Amount column and treats the **majority sign as outgoing** (so Amex-style positive charges stay outgoing; Revolut-style negative spend stays outgoing). PENDING/FAILED states are skipped when a state column is mapped.
 - Unstructured PDFs still use layout hints and/or chunked LLM extraction (`STATEMENT_LLM_CHUNK_CHARS`, default extraction timeout **90s** per chunk via `OPENAI_EXTRACTION_TIMEOUT`).
@@ -91,7 +91,7 @@ Daily Budget specifics: `@.cursor/rules/daily-budget.mdc`.
 
 Statement import ↔ manual reconciliation (fuzzy match, missed spends, expected bills): `@.cursor/rules/statement-manual-reconcile.mdc`.
 
-Import preview mobile cards (Home + loan): `@.cursor/rules/import-mobile-native.mdc`.
+Import preview mobile cards (loan): `@.cursor/rules/import-mobile-native.mdc`.
 
 ## Production
 

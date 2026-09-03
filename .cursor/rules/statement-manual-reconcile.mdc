@@ -4,7 +4,11 @@ globs: app.py,static/spending.js,static/reconcile.js,templates/home.html,templat
 alwaysApply: false
 ---
 
-# Statement ↔ manual reconciliation (Home import preview)
+# Statement ↔ manual reconciliation
+
+Home has **no import form**. Statements are uploaded on **Reconcile** (`/spending/reconcile`). Home shows a Statements month list (5 by default, View all expands). Every month row opens Reconcile.
+
+Home statuses (`_home_statement_months`): `imported` (session confirmed) · `in_progress` (uploads or auto-match) · `imported_without_recon` (ledger bank txs, no session) · `not_started`. Empty staging sessions stay `not_started`.
 
 ## Manual fuzzy match (`_daily_budget_fuzzy_match_manual`)
 
@@ -47,7 +51,7 @@ Dedicated triage page: stage **multiple** statement uploads for one month, auto-
 
 `spending.reconcile_sessions["YYYY-MM"]` — `{ report_month, status, auto_match_ran, uploads[], excluded_manual_ids[], kept_manual_ids[], reviewed_unclaimed }`.
 
-Each upload: `{ id, file_name, bank_source, rows[] }`. Row: `{ id, date, description, amount, direction, category, include, manual_match, transfer_pair, ledger_duplicate }`.
+Each upload: `{ id, file_name, bank_source, period_start, period_end, rows[] }`. Row: `{ id, date, description, amount, direction, category, include, manual_match, transfer_pair, ledger_duplicate }`.
 
 ## Match kinds (`manual_match`)
 
@@ -59,7 +63,7 @@ Each upload: `{ id, file_name, bank_source, rows[] }`. Row: `{ id, date, descrip
 
 - `GET /spending/reconcile` — page
 - `GET /api/spending/reconcile/<month>` — session payload (rows, manuals, totals, queue)
-- `POST .../upload` — extract file → append upload
+- `POST .../upload` — extract file → append upload. Form: `file`, optional `bank_source`, optional `period_start` / `period_end` (defaults to full month).
 - `DELETE .../upload/<id>`
 - `POST .../auto-match` — fuzzy + forward/reverse net + transfer pairs
 - `POST .../link-manual`, `.../unlink-manual`, `.../link-transfer`, `.../unlink-transfer`
@@ -69,11 +73,19 @@ Each upload: `{ id, file_name, bank_source, rows[] }`. Row: `{ id, date, descrip
 
 ## Helpers
 
-`_reconcile_ensure_session`, `_reconcile_run_auto_match`, `_reconcile_session_payload`, `_reconcile_confirm_session`, `_is_manual_spending_tx` (legacy empty `source` = manual).
+`_reconcile_ensure_session`, `_reconcile_run_auto_match`, `_reconcile_session_payload`, `_reconcile_confirm_session`, `_home_statement_months`, `_is_manual_spending_tx` (legacy empty `source` = manual).
 
-## UI (`@static/reconcile.js`)
+## UI (`@templates/reconcile.html`, `@static/reconcile.js`, `@static/style.css`)
 
-Triage queue (not three-pane): focus card + suggestions + running bank/manual tally. Second pass for unclaimed manuals (keep / exclude). `bank_matched_via`: `reconcile_auto` | `reconcile_user`. Excluded manuals get `reconcile_excluded_month` on confirm.
+Single card, not nested panels: header (title + month + status on one row) → statements composer → tally strip → triage card.
+
+- `.reconcile-page .hidden { display: none !important }` — required because triage/tally/toolbar use `display: flex`/`grid`/`inline-flex`, which otherwise beat Tailwind `.hidden`.
+- Composer: custom file control (`#reconcile-file-name`) so source / file / Add share a 2.5rem row. Collapsed **Adjust date range** (`#reconcile-range-toggle`) under the composer. Toolbar: auto-match left, **Continue to review** (`--primary` filled) on the right.
+- `status == imported` is read-only (`session.readonly`, `body.reconcile-readonly`) — composer, toolbar, and triage hidden; tally + view-all remain.
+- Match rows are a comparison grid (role · name · amount · date · source) so bank/manual amounts line up. Actions live in `.reconcile-triage-foot` on the same card as the match.
+- Empty queue / bulk-accept / view-all must use `.hidden`; do not leave an empty triage husk on the staging screen.
+- `#reconcile-view-all-toggle` expands a row table in the workspace (not a stray footer button).
+- Triage queue (not three-pane). Second pass for unclaimed manuals (keep / exclude). `bank_matched_via`: `reconcile_auto` | `reconcile_user`. Excluded manuals get `reconcile_excluded_month` on confirm.
 
 ## Tests
 

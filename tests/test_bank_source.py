@@ -152,17 +152,15 @@ class TestStatementImportBankSource(unittest.TestCase):
 
 
 class TestStatementSourceComboboxMarkup(unittest.TestCase):
-    def test_home_uses_custom_source_combobox_not_datalist(self):
+    def test_reconcile_source_field_and_legacy_combobox_helpers(self):
         from pathlib import Path
 
-        home = (Path(__file__).resolve().parents[1] / 'templates' / 'home.html').read_text(
+        rec = (Path(__file__).resolve().parents[1] / 'templates' / 'reconcile.html').read_text(
             encoding='utf-8'
         )
-        self.assertIn('data-source-combobox', home)
-        self.assertIn('id="statement-source-listbox"', home)
-        self.assertIn('role="combobox"', home)
-        self.assertNotIn('list="statement-source-options"', home)
-        self.assertNotIn('<datalist', home)
+        self.assertIn('id="reconcile-source"', rec)
+        self.assertIn('id="reconcile-source-list"', rec)
+        self.assertIn('<datalist', rec)
 
         js = (Path(__file__).resolve().parents[1] / 'static' / 'spending.js').read_text(
             encoding='utf-8'
