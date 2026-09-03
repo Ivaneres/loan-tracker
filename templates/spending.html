@@ -13,7 +13,7 @@
         {% with active='spending' %}{% include 'partials/app_header.html' %}{% endwith %}
 
         <p class="spending-sub text-sm mb-4">
-            <a href="/#import" class="spending-skip">Import statements on Home</a>
+            <a href="/spending/reconcile" class="spending-skip">Reconcile a month</a>
             to refresh insights for a month.
         </p>
 
@@ -42,7 +42,7 @@
             </div>
             <p id="insight-action-status" role="status" aria-live="polite" class="hidden text-sm mt-0 mb-3 rounded-md px-3 py-2 border"></p>
 
-            <div id="insight-empty" class="text-sm spending-muted">No monthly insights yet. <a href="/#import" class="spending-skip">Import a statement on Home</a> to get started.</div>
+            <div id="insight-empty" class="text-sm spending-muted">No monthly insights yet. <a href="/spending/reconcile" class="spending-skip">Reconcile a month</a> to get started.</div>
             <div id="insight-content" class="hidden">
                 <p id="kpi-exclude-note" class="spending-hint text-xs mb-3 hidden">Income and outgoing above exclude internal transfers (paired legs) and lines you mark <strong>Exclude from totals</strong> in the month list.</p>
 

@@ -1,6 +1,8 @@
 """Month-scoped reconcile session: stage, auto-match, link, confirm."""
 import io
 import unittest
+from datetime import date
+from pathlib import Path
 from unittest import mock
 
 import app as app_mod
@@ -369,21 +371,209 @@ class TestReconcileUiPresence(unittest.TestCase):
             self.assertIn('Run auto-match', html)
             self.assertIn('Confirm import', html)
             self.assertIn('reconcile.js', html)
+            self.assertIn('reconcile-composer', html)
+            self.assertIn('reconcile-triage-foot', html)
+            self.assertIn('id="reconcile-file-name"', html)
+            css = (Path(app_mod.app.root_path) / 'static' / 'style.css').read_text(encoding='utf-8')
+            self.assertIn('.reconcile-page .hidden {', css)
+            self.assertIn('display: none !important;', css)
 
             home = self.client.get('/')
             home_html = home.get_data(as_text=True)
-            self.assertIn('Open Reconcile', home_html)
+            self.assertIn('id="home-open-reconcile"', home_html)
             self.assertIn('/spending/reconcile', home_html)
+            self.assertIn('home-month-list', home_html)
+            self.assertIn('Statements', home_html)
+            self.assertNotIn('Import a statement', home_html)
+            self.assertNotIn('id="spending-file"', home_html)
+
+            rec = resp.get_data(as_text=True)
+            self.assertIn('id="reconcile-period-start"', rec)
+            self.assertIn('id="reconcile-range-toggle"', rec)
+            self.assertIn('Adjust date range', rec)
 
             nav_daily = self.client.get('/spending/daily')
             self.assertIn('>Reconcile</a>', nav_daily.get_data(as_text=True))
 
     def test_reconcile_js_refreshes_after_upload(self):
-        from pathlib import Path
-
         js = (Path(app_mod.app.root_path) / 'static' / 'reconcile.js').read_text(encoding='utf-8')
         self.assertIn('refreshFromSession(data)', js)
         self.assertIn("api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload`", js)
+        self.assertIn('function txRow(', js)
+        self.assertIn('function renderViewAll(', js)
+        self.assertIn("fd.append('period_start'", js)
+        self.assertIn('function renderReadonly(', js)
+        self.assertIn('function syncRangeFromMonth(', js)
+
+
+class TestHomeStatementMonths(unittest.TestCase):
+    def test_empty_spending_shows_five_not_started(self):
+        rows = app_mod._home_statement_months({}, as_of=date(2026, 9, 3))
+        self.assertEqual(len(rows), 5)
+        self.assertEqual([r['month'] for r in rows], [
+            '2026-09', '2026-08', '2026-07', '2026-06', '2026-05',
+        ])
+        self.assertTrue(all(r['status'] == 'not_started' for r in rows))
+
+    def test_legacy_ledger_is_imported_without_recon(self):
+        spending = {
+            'transactions': [
+                {
+                    'id': 'b1',
+                    'date': '2026-04-10',
+                    'report_month': '2026-04',
+                    'amount': 12.5,
+                    'direction': 'outgoing',
+                    'source': 'Monzo',
+                    'description': 'Shop',
+                },
+            ],
+            'monthly_insights': {
+                '2026-04': {'outgoing_total': 12.5},
+            },
+            'reconcile_sessions': {},
+        }
+        rows = app_mod._home_statement_months(spending, as_of=date(2026, 9, 3))
+        by_month = {r['month']: r for r in rows}
+        self.assertGreater(len(rows), 5)
+        legacy = by_month['2026-04']
+        self.assertEqual(legacy['status'], 'imported_without_recon')
+        self.assertEqual(legacy['spend'], 12.5)
+        self.assertEqual(legacy['tx_count'], 1)
+        self.assertEqual(by_month['2026-09']['status'], 'not_started')
+
+    def test_session_statuses_and_empty_staging_ignored(self):
+        spending = {
+            'transactions': [
+                {
+                    'id': 'b1',
+                    'date': '2026-08-02',
+                    'report_month': '2026-08',
+                    'amount': 40.0,
+                    'direction': 'outgoing',
+                    'source': 'Amex',
+                    'description': 'Cafe',
+                },
+            ],
+            'monthly_insights': {'2026-08': {'outgoing_total': 40.0}},
+            'reconcile_sessions': {
+                '2026-09': {
+                    'status': 'staging',
+                    'uploads': [{'id': 'u1', 'rows': [{}, {}]}],
+                    'auto_match_ran': True,
+                },
+                '2026-08': {
+                    'status': 'imported',
+                    'uploads': [{'id': 'u2', 'rows': [{}]}],
+                    'auto_match_ran': True,
+                },
+                '2026-07': {
+                    'status': 'staging',
+                    'uploads': [],
+                    'auto_match_ran': False,
+                },
+            },
+        }
+        rows = app_mod._home_statement_months(spending, as_of=date(2026, 9, 3))
+        by_month = {r['month']: r for r in rows}
+        self.assertEqual(by_month['2026-09']['status'], 'in_progress')
+        self.assertEqual(by_month['2026-09']['uploads'], 1)
+        self.assertTrue(by_month['2026-09']['auto_match_ran'])
+        self.assertEqual(by_month['2026-08']['status'], 'imported')
+        self.assertEqual(by_month['2026-08']['tx_count'], 1)
+        self.assertEqual(by_month['2026-07']['status'], 'not_started')
+
+    def test_home_renders_legacy_and_overflow_toggle(self):
+        spending = {
+            'transactions': [
+                {
+                    'id': 'b1',
+                    'date': '2026-01-04',
+                    'report_month': '2026-01',
+                    'amount': 9.0,
+                    'direction': 'outgoing',
+                    'source': 'Monzo',
+                    'description': 'Bus',
+                },
+            ],
+            'monthly_insights': {'2026-01': {'outgoing_total': 9.0}},
+            'reconcile_sessions': {},
+        }
+        client = app_mod.app.test_client()
+        with client.session_transaction() as sess:
+            sess['username'] = 'admin'
+
+        class FakeDate(date):
+            @classmethod
+            def today(cls):
+                return date(2026, 9, 3)
+
+        with mock.patch.object(app_mod, 'load_data', return_value={
+            'users': {'admin': {'spending': spending}},
+            'loans': {},
+        }), mock.patch.object(app_mod, 'save_data'), mock.patch.object(
+            app_mod, 'date', FakeDate
+        ):
+            resp = client.get('/')
+        html = resp.get_data(as_text=True)
+        self.assertIn('Imported without recon', html)
+        self.assertIn('home-months-toggle', html)
+        self.assertIn('View all months', html)
+        self.assertIn('/spending/reconcile?month=2026-01', html)
+
+
+class TestReconcileUploadPeriod(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self._data = {
+            'users': {
+                'admin': {
+                    'spending': {
+                        'transactions': [],
+                        'statements': [],
+                        'monthly_insights': {},
+                        'classification_overrides': {},
+                        'classification_cache': {},
+                        'daily_budget': {},
+                        'reconcile_sessions': {},
+                    }
+                }
+            },
+            'loans': {},
+        }
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'admin'
+
+    def test_upload_respects_custom_period(self):
+        csv_body = (
+            'Account name,My Current Account\n'
+            'Sort code,40-00-00\n'
+            'Date,Description,Paid Out,Paid In,Balance\n'
+            '05/06/2024,PRET A MANGER,10.50,,\n'
+            '06/06/2024,SALARY,,1500.00,\n'
+        )
+        with mock.patch.object(app_mod, 'load_data', return_value=self._data), mock.patch.object(
+            app_mod, 'save_data'
+        ):
+            resp = self.client.post(
+                '/api/spending/reconcile/2024-06/upload',
+                data={
+                    'file': (io.BytesIO(csv_body.encode('utf-8')), 'hsbc-june.csv'),
+                    'bank_source': 'HSBC',
+                    'period_start': '2024-06-05',
+                    'period_end': '2024-06-05',
+                },
+                content_type='multipart/form-data',
+            )
+            self.assertEqual(resp.status_code, 200, resp.get_data(as_text=True))
+            body = resp.get_json()
+            uploads = body['session']['uploads']
+            self.assertEqual(uploads[0]['row_count'], 1)
+            self.assertEqual(uploads[0]['period_start'], '2024-06-05')
+            self.assertEqual(uploads[0]['period_end'], '2024-06-05')
+            rows = body['session']['rows']
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['description'], 'PRET A MANGER')
 
 
 if __name__ == '__main__':

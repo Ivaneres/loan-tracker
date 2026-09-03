@@ -595,24 +595,23 @@ class TestStatementXlsxUiAccept(unittest.TestCase):
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
-    def test_home_file_input_accepts_xlsx(self, load_mock, save_mock):
+    def test_reconcile_file_input_accepts_xlsx(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()
-        resp = self.client.get('/')
+        resp = self.client.get('/spending/reconcile')
         self.assertEqual(resp.status_code, 200)
         html = resp.get_data(as_text=True)
-        self.assertIn('id="spending-file"', html)
+        self.assertIn('id="reconcile-file"', html)
         self.assertIn('.xlsx', html)
         self.assertIn(
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             html,
         )
-        self.assertIn('Excel (.xlsx)', html)
 
     def test_templates_and_loan_page_accept_xlsx(self):
-        home = (ROOT / 'templates' / 'home.html').read_text(encoding='utf-8')
+        rec = (ROOT / 'templates' / 'reconcile.html').read_text(encoding='utf-8')
         index = (ROOT / 'templates' / 'index.html').read_text(encoding='utf-8')
-        for html in (home, index):
+        for html in (rec, index):
             self.assertIn('.xlsx', html)
             self.assertIn(
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

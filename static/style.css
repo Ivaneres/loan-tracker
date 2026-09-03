@@ -699,32 +699,168 @@ body.home-page {
 .home-section-sub {
     font-size: 0.9rem;
     color: var(--muted);
+    margin-bottom: 0;
+}
+
+.home-page .hidden {
+    display: none !important;
+}
+
+.home-statements-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.85rem 1.25rem;
     margin-bottom: 1rem;
 }
 
-.home-statements {
+.home-statements-head .home-section-h {
+    margin-bottom: 0.25rem;
+}
+
+.home-statements-head .home-section-sub {
+    margin-bottom: 0;
+}
+
+.home-statements-head .reconcile-btn {
+    flex-shrink: 0;
+    align-self: center;
+}
+
+.home-statements-callout {
+    margin: 0 0 1rem;
+    padding: 0.7rem 0.9rem;
+    border-radius: 0.85rem;
+    border: 1px solid rgba(13, 122, 98, 0.28);
+    background: rgba(13, 122, 98, 0.08);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: var(--ink);
+}
+
+.home-statements-callout a {
+    color: var(--accent-deep);
+    font-weight: 600;
+}
+
+.home-month-list {
     list-style: none;
     padding: 0;
     margin: 0;
-}
-
-.home-statements li {
     display: flex;
-    flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 0.35rem 1rem;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid var(--line);
-    font-size: 0.9rem;
+    flex-direction: column;
+    gap: 0.4rem;
 }
 
-.home-statements li:last-child {
-    border-bottom: 0;
+.home-month {
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, auto) minmax(0, 1fr) 0.75rem;
+    align-items: center;
+    gap: 0.65rem 0.85rem;
+    padding: 0.7rem 0.95rem;
+    border-radius: 0.85rem;
+    border: 1px solid var(--line);
+    background: transparent;
+    color: inherit;
+    text-decoration: none;
 }
 
-.home-statements-empty {
+.home-month:hover {
+    border-color: rgba(13, 122, 98, 0.35);
+    background: rgba(255, 255, 255, 0.55);
+}
+
+.home-month--current {
+    background: rgba(13, 122, 98, 0.07);
+    border-color: rgba(13, 122, 98, 0.22);
+}
+
+.home-month-label {
+    font-weight: 600;
     font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.home-month-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    background: rgba(15, 28, 26, 0.06);
     color: var(--muted);
+}
+
+.home-month-pill--imported {
+    background: rgba(13, 122, 98, 0.12);
+    color: var(--accent-deep);
+}
+
+.home-month-pill--imported_without_recon {
+    background: rgba(15, 28, 26, 0.07);
+    color: var(--ink);
+}
+
+.home-month-pill--in_progress {
+    background: rgba(13, 122, 98, 0.16);
+    color: var(--accent-deep);
+}
+
+.home-month-detail {
+    font-size: 0.8125rem;
+    color: var(--muted);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.home-month-chevron {
+    width: 0.4rem;
+    height: 0.4rem;
+    border-right: 1.5px solid var(--muted);
+    border-bottom: 1.5px solid var(--muted);
+    transform: rotate(-45deg);
+    justify-self: end;
+}
+
+.home-months-toggle {
+    margin-top: 0.75rem;
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--accent-deep);
+    cursor: pointer;
+}
+
+.home-months-toggle:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+    .home-month {
+        grid-template-columns: 1fr auto;
+        grid-template-areas:
+            "label chevron"
+            "pill pill"
+            "detail detail";
+        gap: 0.35rem 0.6rem;
+        padding: 0.75rem 0.85rem;
+    }
+    .home-month-label { grid-area: label; }
+    .home-month-pill { grid-area: pill; justify-self: start; }
+    .home-month-detail { grid-area: detail; white-space: normal; }
+    .home-month-chevron { grid-area: chevron; }
+    .home-statements-head .reconcile-btn {
+        width: 100%;
+        justify-content: center;
+    }
 }
 
 .home-import-next:not(.hidden) {
@@ -5883,109 +6019,175 @@ body.home-page {
     }
 }
 
-/* --- Reconcile page (triage queue) --- */
-.reconcile-page .reconcile-section {
-    padding: 1.75rem 1.85rem 2rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1.75rem;
+/* --- Reconcile page --- */
+/* .hidden must win over display:flex / inline-flex on this page. */
+.reconcile-page .hidden {
+    display: none !important;
 }
 
-.reconcile-hero {
+.reconcile-page .reconcile-section {
+    padding: 1.35rem 1.5rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.reconcile-top {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
     align-items: flex-start;
-    gap: 1.25rem 2rem;
+    justify-content: space-between;
+    gap: 0.85rem 1.25rem;
+    padding-bottom: 1.15rem;
+}
+
+.reconcile-top-copy {
+    min-width: 0;
+    flex: 1 1 16rem;
+}
+
+.reconcile-page .reconcile-top .spending-h2 {
+    margin: 0;
 }
 
 .reconcile-lead {
-    margin: 0.35rem 0 0;
-    max-width: 36rem;
-    font-size: 0.9375rem;
-    line-height: 1.55;
+    margin: 0.3rem 0 0;
+    max-width: 38rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
     color: var(--muted);
 }
 
-.reconcile-hero-meta {
+.reconcile-top-meta {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 0.75rem 1.25rem;
+    align-items: center;
+    gap: 0.55rem;
+    flex: 0 0 auto;
 }
 
-.reconcile-field--status {
-    min-width: 6.5rem;
+.reconcile-month-wrap {
+    display: block;
+    margin: 0;
 }
 
-.reconcile-field-label--spacer {
-    visibility: hidden;
-    user-select: none;
-}
-
-/* Shared control height — lines up inputs, buttons, and status chip. */
-.reconcile-control {
-    box-sizing: border-box;
-    min-height: 2.75rem;
-}
-
-.reconcile-panel {
-    background: var(--surface-solid);
+.reconcile-month {
+    height: 2.5rem;
     border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 1.35rem 1.5rem;
+    border-radius: 0.75rem;
+    padding: 0 0.7rem;
+    background: #fff;
+    color: var(--ink);
+    font-size: 0.875rem;
+    font-family: inherit;
 }
 
+.reconcile-month:focus {
+    outline: none;
+    border-color: rgba(13, 122, 98, 0.35);
+    box-shadow: 0 0 0 3px rgba(13, 122, 98, 0.1);
+}
+
+.reconcile-status-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 0 0.85rem;
+    border-radius: 999px;
+    background: rgba(15, 28, 26, 0.05);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.reconcile-status-chip[data-status="matched"],
+.reconcile-status-chip[data-status="imported"] {
+    background: rgba(13, 122, 98, 0.1);
+    border-color: rgba(13, 122, 98, 0.18);
+    color: var(--accent-deep);
+}
+
+.reconcile-stage {
+    padding: 1.15rem 0 0;
+    border-top: 1px solid var(--line);
+}
+
+.reconcile-stage-head {
+    margin: 0 0 0.85rem;
+}
+
+.reconcile-stage-title,
 .reconcile-panel-title {
-    margin: 0 0 1rem;
+    margin: 0;
     font-family: var(--font-display);
-    font-size: 1rem;
+    font-size: 1.05rem;
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--ink);
 }
 
+.reconcile-panel-title {
+    margin-bottom: 0.35rem;
+}
+
 .reconcile-panel-desc {
-    margin: -0.35rem 0 1.25rem;
+    margin: 0 0 1rem;
     font-size: 0.875rem;
-    line-height: 1.55;
+    line-height: 1.5;
     color: var(--muted);
 }
 
-.reconcile-panel-footer {
-    margin-top: 1.5rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--line);
+.reconcile-composer {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem 0.85rem;
+    align-items: end;
 }
 
 .reconcile-field {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.35rem;
     min-width: 0;
+}
+
+.reconcile-field.reconcile-field--action {
+    display: block;
+    gap: 0;
+    line-height: 0;
+    font-size: 0;
+    align-self: start;
+}
+
+.reconcile-field.reconcile-field--action .reconcile-btn {
+    display: flex;
+    font-size: 0.875rem;
 }
 
 .reconcile-field-label {
     display: block;
-    min-height: 1.125rem;
-    font-size: 0.75rem;
+    font-size: 0.6875rem;
     font-weight: 600;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--muted);
-    line-height: 1.125rem;
+    line-height: 1;
 }
 
 .reconcile-field-optional {
     font-weight: 500;
     text-transform: none;
     letter-spacing: 0;
-    opacity: 0.85;
+    opacity: 0.8;
 }
 
 .reconcile-input {
     width: 100%;
-    height: 2.75rem;
+    height: 2.5rem;
     border: 1px solid var(--line);
     border-radius: 0.75rem;
     padding: 0 0.85rem;
@@ -6002,21 +6204,59 @@ body.home-page {
     box-shadow: 0 0 0 3px rgba(13, 122, 98, 0.1);
 }
 
-.reconcile-upload-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 1rem 1.25rem;
+.reconcile-file-control {
+    position: relative;
+    display: block;
+    height: 2.5rem;
 }
 
-@media (min-width: 720px) {
-    .reconcile-upload-grid {
-        grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 1.2fr) auto;
-        align-items: end;
-    }
+.reconcile-page .reconcile-file-input {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    margin: 0;
+    padding: 0;
+    border: 0 !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+}
 
-    .reconcile-hero-meta {
-        flex-wrap: nowrap;
-    }
+.reconcile-file-fake {
+    display: flex;
+    align-items: stretch;
+    height: 2.5rem;
+    border: 1px solid var(--line);
+    border-radius: 0.75rem;
+    background: #fff;
+    overflow: hidden;
+}
+
+.reconcile-file-choose {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 0.9rem;
+    background: rgba(15, 28, 26, 0.045);
+    border-right: 1px solid var(--line);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+}
+
+.reconcile-file-name {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: 0 0.85rem;
+    font-size: 0.8125rem;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .reconcile-btn {
@@ -6028,8 +6268,8 @@ body.home-page {
     font-size: 0.875rem;
     font-weight: 600;
     line-height: 1.25;
-    height: 2.75rem;
-    padding: 0 1.15rem;
+    height: 2.5rem;
+    padding: 0 1.05rem;
     border-radius: 999px;
     border: 1px solid transparent;
     cursor: pointer;
@@ -6054,7 +6294,7 @@ body.home-page {
 }
 
 .reconcile-btn--ghost:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.9);
+    background: rgba(15, 28, 26, 0.03);
     border-color: rgba(15, 28, 26, 0.18);
 }
 
@@ -6070,15 +6310,14 @@ body.home-page {
 }
 
 .reconcile-btn--primary {
-    background: #fff;
-    color: var(--accent-deep);
-    border-color: rgba(13, 122, 98, 0.35);
-    box-shadow: 0 1px 2px rgba(15, 40, 34, 0.04);
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
 }
 
 .reconcile-btn--primary:hover:not(:disabled) {
-    background: rgba(13, 122, 98, 0.08);
-    border-color: rgba(13, 122, 98, 0.45);
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
 }
 
 .reconcile-btn--danger {
@@ -6091,36 +6330,61 @@ body.home-page {
     background: rgba(194, 65, 12, 0.06);
 }
 
+.reconcile-field--action .reconcile-btn {
+    width: 100%;
+}
+
 .reconcile-upload-list {
     list-style: none;
-    margin: 1.25rem 0 0;
+    margin: 0.85rem 0 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: 0.85rem;
+    overflow: hidden;
+    background: #fff;
+}
+
+.reconcile-upload-list--empty {
+    border: 0;
+    background: transparent;
 }
 
 .reconcile-upload-empty {
     margin: 0;
-    padding: 0.85rem 1rem;
-    border-radius: 0.75rem;
-    background: rgba(15, 28, 26, 0.03);
+    padding: 0.7rem 0.95rem;
     color: var(--muted);
     font-size: 0.875rem;
+    background: transparent;
+}
+
+.reconcile-upload-list--empty .reconcile-upload-empty {
+    padding: 0.15rem 0 0;
 }
 
 .reconcile-upload-item {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
-    gap: 0.75rem 1rem;
-    padding: 0.85rem 1rem;
-    border: 1px solid var(--line);
-    border-radius: 0.85rem;
-    background: #fff;
+    gap: 0.5rem 1rem;
+    padding: 0.65rem 0.95rem;
     font-size: 0.875rem;
-    line-height: 1.45;
+    line-height: 1.4;
+    border-top: 1px solid var(--line);
+}
+
+.reconcile-upload-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.reconcile-upload-item:first-child,
+.reconcile-upload-empty:first-child {
+    border-top: 0;
 }
 
 .reconcile-upload-meta strong {
@@ -6129,24 +6393,15 @@ body.home-page {
 }
 
 .reconcile-upload-remove {
-    height: auto;
-    min-height: 2.25rem;
+    height: 2rem;
     font-size: 0.8125rem;
-    padding: 0 0.85rem;
-}
-
-.reconcile-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.65rem;
-    margin-top: 1.35rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--line);
+    padding: 0 0.75rem;
+    flex-shrink: 0;
 }
 
 .reconcile-status {
-    margin: 0;
-    padding: 0.65rem 0.9rem;
+    margin: 0.75rem 0 0;
+    padding: 0.55rem 0.85rem;
     border-radius: 0.75rem;
     font-size: 0.875rem;
     line-height: 1.45;
@@ -6154,40 +6409,71 @@ body.home-page {
     color: var(--accent-deep);
 }
 
-.reconcile-status.hidden {
-    display: none;
-}
-
 .reconcile-status.is-error {
     background: rgba(194, 65, 12, 0.08);
     color: #9a3412;
 }
 
-.reconcile-tally {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    gap: 1.5rem 2rem;
+.reconcile-toolbar {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
+    justify-content: space-between;
+    gap: 0.65rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
 }
 
-.reconcile-tally-col { min-width: 0; }
+.reconcile-toolbar-start {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.55rem;
+}
 
-.reconcile-tally-head {
+.reconcile-tally {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 0.85rem 1.25rem;
+    align-items: center;
+    margin-top: 1.15rem;
+    padding: 1rem 0 0;
+    border-top: 1px solid var(--line);
+}
+
+.reconcile-stat {
+    min-width: 0;
+}
+
+.reconcile-stat-label {
+    display: block;
     font-size: 0.6875rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     color: var(--muted);
+    margin-bottom: 0.2rem;
+}
+
+.reconcile-stat-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.45rem;
     margin-bottom: 0.45rem;
 }
 
-.reconcile-tally-main {
+.reconcile-stat-value {
     font-family: var(--font-money);
     font-size: 1.2rem;
     font-weight: 600;
     letter-spacing: -0.02em;
     color: var(--ink);
-    margin: 0 0 0.65rem;
+}
+
+.reconcile-stat-count {
+    font-size: 0.8125rem;
+    color: var(--muted);
 }
 
 .reconcile-tally-bar {
@@ -6195,7 +6481,7 @@ body.home-page {
     background: rgba(15, 28, 26, 0.08);
     border-radius: 999px;
     overflow: hidden;
-    margin-bottom: 0.55rem;
+    margin-bottom: 0.4rem;
 }
 
 .reconcile-tally-bar span {
@@ -6211,7 +6497,7 @@ body.home-page {
 
 .reconcile-tally-sub {
     font-size: 0.8125rem;
-    line-height: 1.5;
+    line-height: 1.4;
     color: var(--muted);
 }
 
@@ -6220,18 +6506,18 @@ body.home-page {
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 0.5rem 0.75rem;
 }
 
 .reconcile-tally-align {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.45rem 0.75rem;
+    padding: 0.4rem 0.7rem;
     border-radius: 999px;
     font-size: 0.8125rem;
     font-weight: 600;
     line-height: 1.3;
+    white-space: nowrap;
 }
 
 .reconcile-tally-align--ok {
@@ -6244,10 +6530,28 @@ body.home-page {
     color: #b45309;
 }
 
-.reconcile-stack {
+.reconcile-work {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 0.85rem;
+    margin-top: 1.15rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
+}
+
+.reconcile-work-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.85rem;
+}
+
+.reconcile-queue-progress {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
 }
 
 .reconcile-alert {
@@ -6259,7 +6563,7 @@ body.home-page {
     cursor: pointer;
     font-size: 0.8125rem;
     font-weight: 600;
-    padding: 0.5rem 0.9rem;
+    padding: 0.35rem 0.75rem;
     border-radius: 999px;
     transition: opacity 0.15s;
 }
@@ -6278,49 +6582,44 @@ body.home-page {
     color: var(--accent-deep);
 }
 
-.reconcile-status-chip {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 2.75rem;
-    font-size: 0.6875rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    padding: 0 0.85rem;
-    border-radius: 999px;
-    background: rgba(15, 28, 26, 0.05);
-    border: 1px solid var(--line);
-    color: var(--muted);
+.reconcile-allrows {
+    margin-left: auto;
 }
 
-.reconcile-status-chip[data-status="matched"],
-.reconcile-status-chip[data-status="imported"] {
-    background: rgba(13, 122, 98, 0.1);
-    border-color: rgba(13, 122, 98, 0.18);
-    color: var(--accent-deep);
-}
-
-.reconcile-panel--queue {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-}
-
-.reconcile-queue-progress {
+.reconcile-text-btn {
+    border: 0;
+    background: none;
+    padding: 0.25rem 0;
+    font: inherit;
     font-size: 0.8125rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--muted);
+    color: var(--accent-deep);
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.reconcile-text-btn:hover {
+    text-decoration: underline;
+}
+
+.reconcile-triage,
+.reconcile-panel--manuals,
+.reconcile-panel--summary {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 0.95rem;
+    background: #fff;
+    overflow: hidden;
+}
+
+.reconcile-panel--manuals,
+.reconcile-panel--summary {
+    padding: 1.1rem 1.2rem 1.15rem;
 }
 
 .reconcile-focus {
-    padding: 1.35rem 1.4rem;
-    border: 1px solid var(--line);
-    border-radius: calc(var(--radius) - 0.15rem);
-    background: #fff;
+    padding: 1.05rem 1.15rem 0.85rem;
 }
 
 .reconcile-focus-title {
@@ -6328,7 +6627,7 @@ body.home-page {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    margin: 0 0 0.85rem;
+    margin: 0 0 0.75rem;
     color: var(--muted);
 }
 
@@ -6336,62 +6635,109 @@ body.home-page {
     color: var(--accent-deep);
 }
 
-.reconcile-bank-card,
-.reconcile-manual-card,
-.reconcile-leg {
-    padding: 0.35rem 0;
+.reconcile-tx {
+    display: grid;
+    grid-template-columns: 4.4rem minmax(0, 1fr) auto;
+    gap: 0.2rem 0.75rem;
+    align-items: baseline;
+    padding: 0.4rem 0;
+}
+
+.reconcile-tx + .reconcile-tx {
+    border-top: 1px dashed var(--line);
+}
+
+.reconcile-tx-role {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.reconcile-tx-name {
     font-size: 0.9375rem;
-    line-height: 1.55;
+    font-weight: 600;
+    color: var(--ink);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.reconcile-tx--manual .reconcile-tx-name {
+    font-weight: 500;
+    color: var(--muted);
+}
+
+.reconcile-tx-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 0.7rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.reconcile-tx-amt {
+    min-width: 5.4rem;
+    text-align: right;
+    font-family: var(--font-money);
+    font-weight: 600;
     color: var(--ink);
 }
 
-.reconcile-manual-card {
-    margin-top: 0.65rem;
-    padding-top: 0.85rem;
-    border-top: 1px dashed var(--line);
+.reconcile-tx-date {
+    min-width: 6.6rem;
+    text-align: right;
+    font-size: 0.8125rem;
     color: var(--muted);
-}
-
-.reconcile-leg-join {
-    text-align: center;
-    color: var(--muted);
-    font-size: 1.1rem;
-    padding: 0.35rem 0;
 }
 
 .reconcile-source-pill {
-    display: inline-block;
-    font-size: 0.6875rem;
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.625rem;
     font-weight: 700;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    padding: 0.15rem 0.5rem;
+    padding: 0.12rem 0.45rem;
     border-radius: 999px;
     background: rgba(37, 99, 235, 0.1);
     color: #1d4ed8;
-    margin-right: 0.45rem;
-    vertical-align: middle;
+    min-width: 4.25rem;
+    justify-content: center;
+}
+
+.reconcile-source-pill--empty {
+    visibility: hidden;
+}
+
+.reconcile-leg-join {
+    display: none;
 }
 
 .reconcile-suggestions {
     display: flex;
     flex-direction: column;
-    gap: 0.55rem;
+    gap: 0.45rem;
+    padding: 0 1.15rem 0.85rem;
+}
+
+.reconcile-suggestions:empty {
+    display: none;
 }
 
 .reconcile-suggest-label {
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.04em;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--muted);
-    margin: 0;
+    margin: 0.15rem 0 0;
 }
 
 .reconcile-suggest-empty {
     margin: 0;
     font-size: 0.875rem;
-    line-height: 1.5;
+    line-height: 1.45;
     color: var(--muted);
 }
 
@@ -6399,37 +6745,59 @@ body.home-page {
     display: block;
     width: 100%;
     text-align: left;
-    padding: 0.85rem 1rem;
+    padding: 0.7rem 0.85rem;
     border: 1px solid var(--line);
-    border-radius: 0.85rem;
-    background: #fff;
+    border-radius: 0.75rem;
+    background: #f7fbf9;
     cursor: pointer;
     font-size: 0.875rem;
-    line-height: 1.45;
+    line-height: 1.4;
     color: var(--ink);
     transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
 }
 
 .reconcile-suggest-card:hover {
     border-color: rgba(13, 122, 98, 0.25);
-    background: rgba(13, 122, 98, 0.03);
+    background: rgba(13, 122, 98, 0.04);
 }
 
 .reconcile-suggest-card--selected {
     border-color: rgba(13, 122, 98, 0.4);
-    background: rgba(13, 122, 98, 0.06);
+    background: rgba(13, 122, 98, 0.07);
     box-shadow: 0 0 0 3px rgba(13, 122, 98, 0.08);
+}
+
+.reconcile-triage-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.55rem 0.85rem;
+    padding: 0.75rem 1.15rem;
+    border-top: 1px solid var(--line);
+    background: rgba(15, 28, 26, 0.025);
+}
+
+.reconcile-triage--idle .reconcile-triage-foot,
+.reconcile-triage--idle .reconcile-suggestions {
+    display: none;
+}
+
+.reconcile-triage--idle .reconcile-focus {
+    padding-bottom: 1.05rem;
 }
 
 .reconcile-actions,
 .reconcile-queue-nav {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.65rem;
+    gap: 0.5rem;
 }
 
-.reconcile-queue-nav {
-    padding-top: 0.25rem;
+.reconcile-panel-footer {
+    margin-top: 1.15rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--line);
 }
 
 .reconcile-unclaimed-list {
@@ -6438,7 +6806,7 @@ body.home-page {
     margin: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.55rem;
 }
 
 .reconcile-unclaimed-item {
@@ -6446,19 +6814,19 @@ body.home-page {
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: 0.85rem 1.25rem;
-    padding: 1rem 1.1rem;
+    gap: 0.65rem 1rem;
+    padding: 0.75rem 0.85rem;
     border: 1px solid var(--line);
-    border-radius: 0.85rem;
-    background: #fff;
+    border-radius: 0.75rem;
+    background: #f7fbf9;
     font-size: 0.875rem;
-    line-height: 1.45;
+    line-height: 1.4;
 }
 
 .reconcile-unclaimed-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.45rem;
 }
 
 .reconcile-unclaimed-empty {
@@ -6470,8 +6838,8 @@ body.home-page {
 .reconcile-review-check {
     display: flex;
     align-items: flex-start;
-    gap: 0.65rem;
-    margin: 1.35rem 0 0;
+    gap: 0.6rem;
+    margin: 1.1rem 0 0;
     font-size: 0.875rem;
     line-height: 1.5;
     color: var(--ink);
@@ -6479,31 +6847,23 @@ body.home-page {
 
 .reconcile-summary-body {
     font-size: 0.9375rem;
-    line-height: 1.65;
+    line-height: 1.6;
     color: var(--ink);
 }
 
 .reconcile-summary-body p {
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.4rem;
 }
 
 .reconcile-summary-body p:last-child {
     margin-bottom: 0;
 }
 
-.reconcile-foot {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
-}
-
-.reconcile-action-empty,
 .reconcile-empty {
     margin: 0;
     color: var(--muted);
     font-size: 0.9375rem;
-    line-height: 1.55;
+    line-height: 1.5;
 }
 
 .home-reconcile-cta {
@@ -6519,48 +6879,99 @@ body.home-page {
     margin-top: 1rem;
 }
 
-.reconcile-view-all-panel {
-    width: 100%;
-    margin-top: 0.5rem;
-    padding: 1rem 1.1rem;
-    border: 1px solid var(--line);
-    border-radius: 0.85rem;
-    background: #fff;
-    font-size: 0.875rem;
-    line-height: 1.5;
-    color: var(--ink);
+.reconcile-range-toggle {
+    margin: 0.65rem 0 0;
 }
 
-.reconcile-input--file {
-    padding: 0 0.75rem;
-    font-size: 0.875rem;
-    line-height: normal;
+.reconcile-range {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem 0.85rem;
+    margin-top: 0.65rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--line);
 }
 
-.reconcile-field--action .reconcile-btn {
-    width: 100%;
+.reconcile-readonly-note {
+    margin: 0.65rem 0 0;
+    font-size: 0.875rem;
+    color: var(--muted);
+}
+
+body.reconcile-readonly .reconcile-composer,
+body.reconcile-readonly .reconcile-toolbar,
+body.reconcile-readonly .reconcile-range-toggle,
+body.reconcile-readonly .reconcile-range,
+body.reconcile-readonly .reconcile-triage {
+    display: none !important;
 }
 
 @media (min-width: 720px) {
+    .reconcile-range {
+        grid-template-columns: minmax(8.5rem, 13rem) minmax(8.5rem, 13rem) auto;
+        align-items: end;
+    }
+}
+
+.reconcile-view-all-panel {
+    width: 100%;
+    padding: 0.75rem 0;
+    overflow-x: auto;
+}
+
+.reconcile-rows-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.reconcile-rows-table th,
+.reconcile-rows-table td {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+.reconcile-rows-table th {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.reconcile-rows-table td.reconcile-tx-amt {
+    min-width: 4.5rem;
+}
+
+@media (min-width: 720px) {
+    .reconcile-composer {
+        grid-template-columns: minmax(8.5rem, 13rem) minmax(0, 1fr) auto;
+    }
+
+    .reconcile-field--action {
+        padding-top: calc(0.6875rem + 0.35rem);
+    }
+
     .reconcile-field--action .reconcile-btn {
         width: auto;
-        min-width: 9.5rem;
+        min-width: 9.25rem;
     }
 }
 
 @media (max-width: 768px) {
     .reconcile-page .reconcile-section {
-        padding: 1.25rem 1.15rem 1.5rem;
-        gap: 1.25rem;
+        padding: 1.1rem 1.05rem 1.25rem;
     }
 
-    .reconcile-panel {
-        padding: 1.1rem 1.15rem;
+    .reconcile-top {
+        align-items: flex-start;
     }
 
     .reconcile-tally {
         grid-template-columns: 1fr;
-        gap: 1rem;
+        gap: 0.85rem;
     }
 
     .reconcile-tally-mid {
@@ -6568,10 +6979,48 @@ body.home-page {
         justify-content: flex-start;
     }
 
+    .reconcile-tx {
+        grid-template-columns: 3.6rem minmax(0, 1fr);
+    }
+
+    .reconcile-tx-meta {
+        grid-column: 2;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        gap: 0.45rem 0.75rem;
+    }
+
+    .reconcile-tx-amt,
+    .reconcile-tx-date {
+        min-width: 0;
+        text-align: left;
+    }
+
+    .reconcile-source-pill--empty {
+        display: none;
+    }
+
     .reconcile-toolbar .reconcile-btn,
     .reconcile-actions .reconcile-btn,
     .reconcile-unclaimed-actions .reconcile-btn {
         flex: 1 1 auto;
-        min-width: calc(50% - 0.35rem);
+        min-width: calc(50% - 0.3rem);
+    }
+
+    .reconcile-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .reconcile-toolbar-start {
+        width: 100%;
+    }
+
+    .reconcile-toolbar > .reconcile-btn--primary {
+        width: 100%;
+    }
+
+    .reconcile-allrows {
+        margin-left: 0;
     }
 }

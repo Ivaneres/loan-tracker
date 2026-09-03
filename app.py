@@ -5694,11 +5694,128 @@ def _daily_budget_suggest_manual_matches(
 # --- Reconcile session (month-scoped statement ↔ manual triage) ---
 
 
+HOME_STATEMENT_MONTHS_VISIBLE = 5
+
+
 def _reconcile_month_key(month: str) -> str | None:
     m = (month or '').strip()[:7]
     if len(m) != 7 or m[4] != '-':
         return None
     return m
+
+
+def _home_month_label(month_key: str) -> str:
+    d0 = _first_day_of_month(month_key)
+    if d0 is None:
+        return month_key
+    return d0.strftime('%b %Y')
+
+
+def _home_month_ledger_stats(spending: dict, month_key: str) -> dict:
+    txs = [
+        t for t in (spending.get('transactions') or [])
+        if isinstance(t, dict) and str(_report_month_for_spending_tx(t) or '')[:7] == month_key
+    ]
+    bank_txs = [t for t in txs if not _is_manual_spending_tx(t)]
+    insight = (spending.get('monthly_insights') or {}).get(month_key)
+    spend = None
+    if isinstance(insight, dict) and insight.get('outgoing_total') is not None:
+        try:
+            spend = round(float(insight.get('outgoing_total') or 0), 2)
+        except (TypeError, ValueError):
+            spend = None
+    if spend is None:
+        total = 0.0
+        for t in txs:
+            if t.get('direction') != 'outgoing':
+                continue
+            if _spending_excluded_from_insight_metrics(t):
+                continue
+            try:
+                total += float(t.get('amount') or 0)
+            except (TypeError, ValueError):
+                continue
+        spend = round(total, 2)
+    return {
+        'tx_count': len(txs),
+        'bank_count': len(bank_txs),
+        'spend': spend,
+    }
+
+
+def _home_month_status(spending: dict, month_key: str) -> dict:
+    """Status row for Home Statements: session wins, else ledger-without-recon."""
+    store = spending.get('reconcile_sessions') or {}
+    raw = store.get(month_key)
+    sess = raw if isinstance(raw, dict) else None
+    stats = _home_month_ledger_stats(spending, month_key)
+    uploads = len((sess or {}).get('uploads') or []) if sess else 0
+    auto_match_ran = bool((sess or {}).get('auto_match_ran')) if sess else False
+    sess_status = str((sess or {}).get('status') or '') if sess else ''
+
+    if sess_status == 'imported':
+        status = 'imported'
+    elif uploads or auto_match_ran:
+        status = 'in_progress'
+    elif stats['bank_count'] > 0:
+        status = 'imported_without_recon'
+    else:
+        status = 'not_started'
+
+    show_ledger = status in ('imported', 'imported_without_recon')
+    tx_count = stats['bank_count'] if show_ledger else stats['tx_count']
+    if show_ledger and not tx_count:
+        tx_count = stats['tx_count']
+    return {
+        'month': month_key,
+        'label': _home_month_label(month_key),
+        'status': status,
+        'spend': stats['spend'] if show_ledger else None,
+        'tx_count': tx_count,
+        'uploads': uploads if status == 'in_progress' else 0,
+        'auto_match_ran': auto_match_ran if status == 'in_progress' else False,
+    }
+
+
+def _home_statement_months(spending: dict, as_of: date | None = None) -> list[dict]:
+    """Newest-first month rows for Home. Always at least 5 calendar months, plus older data."""
+    as_of = as_of or date.today()
+    current = as_of.strftime('%Y-%m')
+    keys = {current}
+    for mk in (spending.get('reconcile_sessions') or {}):
+        k = _reconcile_month_key(str(mk))
+        if k:
+            keys.add(k)
+    for t in spending.get('transactions') or []:
+        if not isinstance(t, dict):
+            continue
+        rm = str(_report_month_for_spending_tx(t) or '')[:7]
+        if _reconcile_month_key(rm):
+            keys.add(rm)
+    for s in spending.get('statements') or []:
+        if not isinstance(s, dict):
+            continue
+        rm = str(s.get('report_month') or '')[:7]
+        if _reconcile_month_key(rm):
+            keys.add(rm)
+    for mk in (spending.get('monthly_insights') or {}):
+        k = _reconcile_month_key(str(mk))
+        if k:
+            keys.add(k)
+    keys = {k for k in keys if k <= current}
+    oldest = min(keys)
+    floor = _month_prev(current, HOME_STATEMENT_MONTHS_VISIBLE - 1)
+    if floor and oldest > floor:
+        oldest = floor
+    rows = []
+    cursor = current
+    while cursor and cursor >= oldest:
+        rows.append(_home_month_status(spending, cursor))
+        prev = _month_prev(cursor, 1)
+        if not prev or prev >= cursor:
+            break
+        cursor = prev
+    return rows
 
 
 def _reconcile_ensure_session(spending: dict, month: str) -> dict:
@@ -6284,6 +6401,8 @@ def _reconcile_session_payload(sess: dict, spending: dict) -> dict:
             'id': u.get('id'),
             'file_name': u.get('file_name'),
             'bank_source': u.get('bank_source'),
+            'period_start': u.get('period_start'),
+            'period_end': u.get('period_end'),
             'row_count': len(u.get('rows') or []),
         })
 
@@ -6305,6 +6424,7 @@ def _reconcile_session_payload(sess: dict, spending: dict) -> dict:
     return {
         'report_month': report_month,
         'status': sess.get('status'),
+        'readonly': str(sess.get('status') or '') == 'imported',
         'auto_match_ran': bool(sess.get('auto_match_ran')),
         'uploads': uploads_out,
         'rows': rows_out,
@@ -8720,15 +8840,14 @@ def index():
             pass
     loan_total = round(loan_total, 2)
 
-    statements = list(spending.get('statements') or [])
-    statements.sort(key=lambda s: str(s.get('uploaded_at') or ''), reverse=True)
-    recent_statements = statements[:8]
-    known_bank_sources = _collect_bank_sources(spending)
+    statement_months = _home_statement_months(spending)
+    home_cta = statement_months[0] if statement_months else None
+    home_progress = next((m for m in statement_months if m.get('status') == 'in_progress'), None)
+    overflow_count = max(0, len(statement_months) - HOME_STATEMENT_MONTHS_VISIBLE)
 
     return render_template(
         'home.html',
         username=session.get('username'),
-        spending_categories=SPENDING_ALLOWED_CATEGORIES,
         daily_has_plan=daily_has_plan,
         daily_remaining=float(daily.get('remaining_today') or 0),
         daily_limit=float(daily.get('daily_limit') or 0),
@@ -8738,8 +8857,11 @@ def index():
         latest_savings_rate=latest_savings_rate,
         loan_count=loan_count,
         loan_total=loan_total,
-        recent_statements=recent_statements,
-        known_bank_sources=known_bank_sources,
+        statement_months=statement_months,
+        home_cta=home_cta,
+        home_progress=home_progress,
+        home_months_visible=HOME_STATEMENT_MONTHS_VISIBLE,
+        home_months_overflow=overflow_count,
     )
 
 
@@ -8877,7 +8999,11 @@ def reconcile_upload(month):
     if sess.get('status') == 'imported':
         return jsonify({'error': 'Session already imported for this month.'}), 400
 
-    period, perr = _parse_spending_period_from_values(month, None, None)
+    period, perr = _parse_spending_period_from_values(
+        month,
+        request.form.get('period_start'),
+        request.form.get('period_end'),
+    )
     if perr:
         return jsonify({'error': perr}), 400
 
@@ -8914,6 +9040,8 @@ def reconcile_upload(month):
         'id': upload_id,
         'file_name': file_name,
         'bank_source': bank_source,
+        'period_start': period.get('period_start'),
+        'period_end': period.get('period_end'),
         'rows': stage_rows,
     })
     _reconcile_apply_duplicate_marks(sess, spending, period['report_month'])
@@ -9744,7 +9872,7 @@ def statement_from_spending(loan_id):
             'truncated': False,
             'source_count': 0,
             'message': 'No imported outgoing transactions found for the selected period. '
-                       'Import a statement on the home screen first.',
+                       'Reconcile a month first.',
         })
 
     pseudo_text = '\n'.join(lines)
@@ -11160,7 +11288,7 @@ def spending_daily_plan_from_statements():
         month = months[0] if months else None
     if not month:
         return jsonify({
-            'error': 'No statement months available. Import a statement in Monthly Spending first.',
+            'error': 'No statement months available. Reconcile a month first.',
             'months': [],
         }), 400
     use_llm = payload.get('use_llm', True)

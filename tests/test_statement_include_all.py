@@ -6,15 +6,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class TestStatementIncludeAllUi(unittest.TestCase):
-    def test_home_preview_has_select_all_checkbox(self):
-        home = (ROOT / 'templates' / 'home.html').read_text(encoding='utf-8')
+    def test_preview_js_has_select_all_helpers(self):
         js = (ROOT / 'static' / 'spending.js').read_text(encoding='utf-8')
-        self.assertIn('id="preview-include-all"', home)
-        self.assertIn('Select or deselect all rows', home)
         self.assertIn('preview-include-all', js)
         self.assertIn('syncPreviewIncludeAll', js)
         self.assertIn("querySelectorAll('.preview-include')", js)
-        self.assertIn('preview-toolbar', home)
         self.assertIn('togglePreviewRow', js)
 
     def test_loan_statement_import_has_select_all_checkbox(self):
