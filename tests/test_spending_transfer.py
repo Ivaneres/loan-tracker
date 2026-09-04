@@ -783,7 +783,7 @@ class TestSpendingPairing(unittest.TestCase):
     def test_preview_match_ui_strings(self):
         js = (Path(__file__).resolve().parents[1] / 'static' / 'spending.js').read_text(encoding='utf-8')
         css = (Path(__file__).resolve().parents[1] / 'static' / 'style.css').read_text(encoding='utf-8')
-        rec = (Path(__file__).resolve().parents[1] / 'templates' / 'reconcile.html').read_text(encoding='utf-8')
+        recjs = (Path(__file__).resolve().parents[1] / 'static' / 'reconcile.js').read_text(encoding='utf-8')
         self.assertIn('Matches manual entry', js)
         self.assertIn('Not in manual', js)
         self.assertIn('Expected bill', js)
@@ -791,7 +791,7 @@ class TestSpendingPairing(unittest.TestCase):
         self.assertIn('preview-review-pill', css)
         self.assertIn('preview-tx-row', js)
         self.assertIn('preview-tx-row--open', css)
-        self.assertIn('reconcile-unclaimed-list', rec)
+        self.assertIn('reconcile-unclaimed-list', recjs)
 
     def test_insight_extended_fields_with_prior_month(self):
         """MoM deltas, trailing averages, category_trends, budget_action_items shape."""

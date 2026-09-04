@@ -51,7 +51,7 @@ Dedicated triage page: stage **multiple** statement uploads for one month, auto-
 
 `spending.reconcile_sessions["YYYY-MM"]` — `{ report_month, status, auto_match_ran, uploads[], excluded_manual_ids[], kept_manual_ids[], reviewed_unclaimed }`.
 
-Each upload: `{ id, file_name, bank_source, period_start, period_end, rows[] }`. Row: `{ id, date, description, amount, direction, category, include, manual_match, transfer_pair, ledger_duplicate }`.
+Each upload: `{ id, file_name, bank_source, period_start, period_end, rows[] }`. Row: `{ id, date, description, amount, direction, category, include, manual_match, transfer_pair, ledger_duplicate, reconcile_mark }`.
 
 ## Match kinds (`manual_match`)
 
@@ -66,26 +66,29 @@ Each upload: `{ id, file_name, bank_source, period_start, period_end, rows[] }`.
 - `POST .../upload` — extract file → append upload. Form: `file`, optional `bank_source`, optional `period_start` / `period_end` (defaults to full month).
 - `DELETE .../upload/<id>`
 - `POST .../auto-match` — fuzzy + forward/reverse net + transfer pairs
-- `POST .../link-manual`, `.../unlink-manual`, `.../link-transfer`, `.../unlink-transfer`
-- `PATCH .../row/<id>` — `{ include, direction }`
+- `POST .../link-manual`, `.../unlink-manual`, `.../link-transfer`, `.../unlink-transfer`, `.../relink-netted`
+- `PATCH .../row/<id>` — `{ include, direction, reconcile_mark }` (`bill` or null)
 - `POST .../exclude-manual`, `.../keep-manual`, `.../review-unclaimed`
 - `POST .../confirm` — requires `auto_match_ran`; if unclaimed manuals remain, requires `reviewed_unclaimed`
 
-## Helpers
-
-`_reconcile_ensure_session`, `_reconcile_run_auto_match`, `_reconcile_session_payload`, `_reconcile_confirm_session`, `_home_statement_months`, `_is_manual_spending_tx` (legacy empty `source` = manual).
+- Duplicate detection (`_reconcile_apply_duplicate_marks`) ignores fingerprints on **manual** txs. Claimed manuals copy the bank fingerprint; counting those as already-imported would zero `statement_count` after Find matches / a rematch.
 
 ## UI (`@templates/reconcile.html`, `@static/reconcile.js`, `@static/style.css`)
 
-Single card, not nested panels: header (title + month + status on one row) → statements composer → tally strip → triage card.
+Linear 3-step wizard (one screen at a time): **Add files** → **Review** → **Import**.
 
-- `.reconcile-page .hidden { display: none !important }` — required because triage/tally/toolbar use `display: flex`/`grid`/`inline-flex`, which otherwise beat Tailwind `.hidden`.
-- Composer: custom file control (`#reconcile-file-name`) so source / file / Add share a 2.5rem row. Collapsed **Adjust date range** (`#reconcile-range-toggle`) under the composer. Toolbar: auto-match left, **Continue to review** (`--primary` filled) on the right.
-- `status == imported` is read-only (`session.readonly`, `body.reconcile-readonly`) — composer, toolbar, and triage hidden; tally + view-all remain.
-- Match rows are a comparison grid (role · name · amount · date · source) so bank/manual amounts line up. Actions live in `.reconcile-triage-foot` on the same card as the match.
-- Empty queue / bulk-accept / view-all must use `.hidden`; do not leave an empty triage husk on the staging screen.
-- `#reconcile-view-all-toggle` expands a row table in the workspace (not a stray footer button).
-- Triage queue (not three-pane). Second pass for unclaimed manuals (keep / exclude). `bank_matched_via`: `reconcile_auto` | `reconcile_user`. Excluded manuals get `reconcile_excluded_month` on confirm.
+- `.reconcile-page .hidden { display: none !important }` — required because steps/triage/footers use `display: flex`/`grid`/`inline-flex`, which otherwise beat Tailwind `.hidden`.
+- Composer only on step 1. Custom file control (`#reconcile-file-name`). Collapsed **Adjust date range** (`#reconcile-range-toggle`). One primary CTA: **Find matches**.
+- After auto-match, skip exact matches and unmatched rows with **no exact-amount suggestion** (fuzzy ±£5 near-misses wait until import as unaccounted + leftover manuals). Review queue is transfers, netted bank groups, and unmatched rows with an **exact** amount suggestion. Exact unmatched are shown first. Recap is the current task only plus a quiet matched count — progress **N of M** lives in the nav.
+- **N of M** uses stable `item_key`s (`transfer:<pair_key>`, `netted:<group_key>`, `unmatched:<row_id>`). Decided keys stay decided even when “not a match” unlinks a netted group and new legs appear — those new items **append**, so the counter goes to 2 of 19 rather than resetting to 1. Undo replaces Prev when an undo is available (`POST .../relink-netted` restores a netted group).
+- Actions are **Looks right** / **Not a match** on transfers, netted groups, and exact unmatched. **This is a bill** is only on **individual unmatched bank rows** (review card or Import → unaccounted) — never on net groups. Bills are not logged as manuals; they live on Daily → Plan. PATCH `/row/<id>` accepts `reconcile_mark: "bill"` (or null to unmark). Confirm imports bill-marked rows with a Daily bill category via `_reconcile_bill_import_category`.
+- Leftover spending (per-row Keep/Ignore plus **Keep all** / **Ignore all**; `POST .../keep-manual` and `.../exclude-manual` accept `manual_ids[]`), a **matched spending** sample (5 rows, `<details>` to show all; each row is a Bank vs Spending comparison, amber amount/date when they differ), bill comparison, and unaccounted bank rows are on the **Import** page. Unaccounted rows can be ignored or marked as a bill. Confirm auto-POSTs `reviewed_unclaimed`. Payload includes `expected_bills` / `expected_bills_total` from Daily → Plan `bill_items`. Totals: `bill_marked_*`, `unaccounted_bank_*`.
+- Do not use a status chip as navigation.
+- `status == imported` is read-only (`session.readonly`, `body.reconcile-readonly`) — composer and import CTA hidden; summary lists files, outgoing, incoming (non-transfer), transfers, matches, bills, new outgoing, leftover kept, and ignored. Totals include `incoming_count` / `incoming_total` / `ignored_bank_count`.
+- Match rows are a comparison grid (role · name · amount · date · source). Actions live in `.reconcile-triage-foot`.
+- **Mobile (≤768px):** primary review action is full width, secondary actions share the next row; leftover/unaccounted Keep/Ignore sit under the copy (not a side column); month picker stretches; reconcile buttons are 44px tall. Nav is a 3×2 grid (Home/Daily/Monthly · Search/Reconcile/Loans); ≥768px is a single nowrap row.
+- `#reconcile-view-all-toggle` expands a row table under Review.
+- `bank_matched_via`: `reconcile_auto` | `reconcile_user`. Excluded manuals get `reconcile_excluded_month` on confirm.
 
 ## Tests
 

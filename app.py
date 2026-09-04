@@ -5172,6 +5172,62 @@ def _spending_included_bill_items(spending: dict) -> list:
     return out
 
 
+def _reconcile_expected_bills(spending: dict) -> list[dict]:
+    """Monthly plan bills (Daily → Plan) for the import-page comparison."""
+    out = []
+    for b in _spending_included_bill_items(spending):
+        try:
+            amt = round(float(b.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        cat = str(b.get('category') or '').strip().lower()
+        out.append({
+            'label': str(b.get('label') or b.get('description') or 'Bill').strip()[:120],
+            'amount': amt,
+            'category': cat if cat in SPENDING_CATEGORY_SET else '',
+        })
+    return out
+
+
+def _reconcile_bill_import_category(row: dict, spending: dict) -> str:
+    existing = str(row.get('category') or '').strip().lower()
+    if existing in DAILY_BUDGET_BILL_CATEGORIES:
+        return existing
+    bills = _spending_included_bill_items(spending)
+    try:
+        amt = float(row.get('amount') or 0)
+    except (TypeError, ValueError):
+        amt = 0.0
+    matched = _match_expected_bill_item(str(row.get('description') or ''), amt, bills)
+    if matched is not None:
+        cat = str(bills[matched].get('category') or '').strip().lower()
+        if cat in SPENDING_CATEGORY_SET:
+            return cat
+    return 'utilities'
+
+
+def _reconcile_annotate_suggestions(row: dict, suggestions: list) -> list[dict]:
+    try:
+        row_amt = round(float(row.get('amount') or 0), 2)
+    except (TypeError, ValueError):
+        row_amt = 0.0
+    out = []
+    for s in suggestions or []:
+        if not isinstance(s, dict):
+            continue
+        item = dict(s)
+        try:
+            sug_amt = round(float(item.get('amount') or 0), 2)
+        except (TypeError, ValueError):
+            sug_amt = 0.0
+        item['exact_amount'] = abs(sug_amt - row_amt) < 0.005
+        out.append(item)
+    out.sort(key=lambda x: (not bool(x.get('exact_amount')),))
+    return out
+
+
 def _match_expected_bill_item(
     description: str,
     amount: float,
@@ -5875,6 +5931,36 @@ def _reconcile_clear_netted_bank_group(sess: dict, group_key: str) -> None:
             row['manual_match'] = None
 
 
+def _reconcile_apply_netted_bank_group(
+    sess: dict,
+    row_ids: list,
+    manual_ids: list,
+    *,
+    group_key: str | None = None,
+    via: str = 'user',
+) -> str:
+    ids = [str(x) for x in (row_ids or []) if str(x)]
+    mids = [str(x) for x in (manual_ids or []) if str(x)]
+    gk = str(group_key or uuid.uuid4())
+    source = via if via in ('auto', 'user') else 'user'
+    if mids:
+        _reconcile_release_manual_ids(sess, set(mids))
+    mm = {
+        'kind': 'netted_banks',
+        'manual_ids': mids,
+        'row_ids': ids,
+        'group_key': gk,
+        'via': source,
+    }
+    for rid in ids:
+        _, _, _, _, row = _reconcile_find_row(sess, rid)
+        if row is None:
+            continue
+        row['manual_match'] = dict(mm)
+        row['transfer_pair'] = None
+    return gk
+
+
 def _reconcile_claimed_manual_ids(sess: dict) -> set[str]:
     out: set[str] = set()
     for _, _, _, _, row in _reconcile_iter_rows(sess):
@@ -5906,6 +5992,47 @@ def _reconcile_claimed_row_ids(sess: dict) -> set[str]:
     return out
 
 
+def _reconcile_payload_manual_ids(payload: dict) -> list[str]:
+    ids: list[str] = []
+    raw = payload.get('manual_ids') if isinstance(payload, dict) else None
+    if isinstance(raw, list):
+        ids.extend(str(x) for x in raw if str(x))
+    one = str((payload or {}).get('manual_id') or '')
+    if one and one not in ids:
+        ids.append(one)
+    return ids
+
+
+def _reconcile_exclude_manual_ids(sess: dict, ids: list[str]) -> None:
+    drop = [str(x) for x in ids if str(x)]
+    if not drop:
+        return
+    excluded = sess.setdefault('excluded_manual_ids', [])
+    for mid in drop:
+        if mid not in excluded:
+            excluded.append(mid)
+    kept = [str(x) for x in (sess.get('kept_manual_ids') or [])]
+    drop_set = set(drop)
+    sess['kept_manual_ids'] = [x for x in kept if x not in drop_set]
+
+
+def _reconcile_keep_manual_ids(sess: dict, ids: list[str], *, keep: bool = True) -> None:
+    id_list = [str(x) for x in ids if str(x)]
+    if not id_list:
+        return
+    id_set = set(id_list)
+    excluded = [str(x) for x in (sess.get('excluded_manual_ids') or [])]
+    sess['excluded_manual_ids'] = [x for x in excluded if x not in id_set]
+    kept = [str(x) for x in (sess.get('kept_manual_ids') or [])]
+    if keep:
+        for mid in id_list:
+            if mid not in kept:
+                kept.append(mid)
+        sess['kept_manual_ids'] = kept
+    else:
+        sess['kept_manual_ids'] = [x for x in kept if x not in id_set]
+
+
 def _reconcile_release_manual_ids(
     sess: dict, ids: set[str], *, keep_row_id: str | None = None,
 ) -> None:
@@ -5927,10 +6054,12 @@ def _reconcile_release_manual_ids(
 
 
 def _reconcile_apply_duplicate_marks(sess: dict, spending: dict, report_month: str) -> None:
+    # Only statement/ledger bank txs. Claimed manuals copy the bank fingerprint, and
+    # counting those as "already imported" zeros statement_count after Find matches.
     ledger_fps = {
         str(t.get('fingerprint'))
         for t in spending.get('transactions') or []
-        if t.get('fingerprint')
+        if t.get('fingerprint') and not _is_manual_spending_tx(t)
     }
     seen: set[str] = set()
     for _, _, _, _, row in _reconcile_iter_rows(sess):
@@ -5968,6 +6097,7 @@ def _reconcile_stage_row_from_tx(tx: dict) -> dict:
         'transfer_pair': None,
         'ledger_duplicate': False,
         'duplicate_reason': None,
+        'reconcile_mark': None,
     }
 
 
@@ -6143,17 +6273,12 @@ def _reconcile_run_auto_match(sess: dict, spending: dict) -> dict:
     for grp in _reconcile_suggest_netted_bank_groups(
         sess, spending, report_month, claimed_manuals=claimed_m, claimed_rows=claimed_rows,
     ):
-        gk = str(uuid.uuid4())
-        mm = {
-            'kind': 'netted_banks',
-            'manual_ids': [grp['manual_id']],
-            'row_ids': list(grp['row_ids']),
-            'group_key': gk,
-            'via': 'auto',
-        }
-        for _, _, _, _, row in _reconcile_iter_rows(sess):
-            if str(row.get('id') or '') in grp['row_ids']:
-                row['manual_match'] = dict(mm)
+        _reconcile_apply_netted_bank_group(
+            sess,
+            list(grp['row_ids']),
+            [grp['manual_id']],
+            via='auto',
+        )
         claimed_m.add(grp['manual_id'])
         stats['netted_bank_matches'] += 1
 
@@ -6229,18 +6354,35 @@ def _reconcile_compute_totals(sess: dict, spending: dict, report_month: str) -> 
     unmatched_bank_count = 0
     transfer_pair_count = 0
     statement_count = 0
+    bill_marked_count = 0
+    bill_marked_total = 0.0
+    unaccounted_bank_count = 0
+    unaccounted_bank_total = 0.0
+    incoming_count = 0
+    incoming_total = 0.0
+    ignored_bank_count = 0
     manual_by_id = {m['id']: m for m in _reconcile_manuals_for_month(spending, report_month)}
 
     for _, _, _, _, row in _reconcile_iter_rows(sess):
-        if not row.get('include', True) or row.get('ledger_duplicate'):
+        if row.get('ledger_duplicate'):
+            continue
+        if not row.get('include', True):
+            if str(row.get('direction') or '') == 'outgoing':
+                ignored_bank_count += 1
             continue
         statement_count += 1
-        if str(row.get('direction') or '') != 'outgoing':
-            continue
         try:
             amt = round(float(row.get('amount') or 0), 2)
         except (TypeError, ValueError):
             amt = 0.0
+        direction = str(row.get('direction') or '')
+        if direction == 'incoming':
+            if not (row.get('transfer_pair') or {}):
+                incoming_count += 1
+                incoming_total += amt
+            continue
+        if direction != 'outgoing':
+            continue
         bank_total += amt
         mm = row.get('manual_match') or {}
         tp = row.get('transfer_pair') or {}
@@ -6281,6 +6423,12 @@ def _reconcile_compute_totals(sess: dict, spending: dict, report_month: str) -> 
         else:
             unmatched_bank += amt
             unmatched_bank_count += 1
+            if str(row.get('reconcile_mark') or '') == 'bill':
+                bill_marked_count += 1
+                bill_marked_total += amt
+            else:
+                unaccounted_bank_count += 1
+                unaccounted_bank_total += amt
 
     for m in manual_by_id.values():
         if str(m.get('direction') or '') != 'outgoing':
@@ -6322,6 +6470,13 @@ def _reconcile_compute_totals(sess: dict, spending: dict, report_month: str) -> 
         'user_matched_count': user_matched_count,
         'transfer_pair_count': transfer_pair_count,
         'transfer_total': round(transfer_total, 2),
+        'bill_marked_count': bill_marked_count,
+        'bill_marked_total': round(bill_marked_total, 2),
+        'unaccounted_bank_count': unaccounted_bank_count,
+        'unaccounted_bank_total': round(unaccounted_bank_total, 2),
+        'incoming_count': incoming_count,
+        'incoming_total': round(incoming_total, 2),
+        'ignored_bank_count': ignored_bank_count,
     }
 
 
@@ -6345,7 +6500,13 @@ def _reconcile_build_queue(sess: dict) -> list[dict]:
                 continue
             seen_transfer.add(pk)
             peer_id = str(tp.get('peer_row_id') or '')
-            items.append({'kind': 'transfer', 'row_ids': [rid, peer_id], 'primary_row_id': rid})
+            items.append({
+                'kind': 'transfer',
+                'row_ids': [rid, peer_id],
+                'primary_row_id': rid,
+                'pair_key': pk,
+                'item_key': f'transfer:{pk or rid}',
+            })
             continue
         mm = row.get('manual_match') or {}
         if mm.get('kind') == 'netted_banks':
@@ -6357,14 +6518,21 @@ def _reconcile_build_queue(sess: dict) -> list[dict]:
                 'kind': 'netted_banks',
                 'row_ids': list(mm.get('row_ids') or []),
                 'manual_ids': list(mm.get('manual_ids') or []),
+                'group_key': gk,
                 'primary_row_id': rid,
+                'item_key': f'netted:{gk}',
             })
             continue
         if mm:
-            items.append({'kind': 'matched', 'row_id': rid, 'manual_ids': list(mm.get('manual_ids') or [])})
+            items.append({
+                'kind': 'matched',
+                'row_id': rid,
+                'manual_ids': list(mm.get('manual_ids') or []),
+                'item_key': f'matched:{rid}',
+            })
             continue
         if str(row.get('direction') or '') == 'outgoing':
-            items.append({'kind': 'unmatched', 'row_id': rid})
+            items.append({'kind': 'unmatched', 'row_id': rid, 'item_key': f'unmatched:{rid}'})
     return items
 
 
@@ -6383,13 +6551,16 @@ def _reconcile_session_payload(sess: dict, spending: dict) -> dict:
             and not r.get('transfer_pair')
             and str(r.get('direction') or '') == 'outgoing'
         ):
-            r['suggestions'] = _daily_budget_suggest_manual_matches(
-                spending,
-                date_str=str(r.get('date') or '')[:10],
-                amount=float(r.get('amount') or 0),
-                description=str(r.get('description') or ''),
-                direction='outgoing',
-                exclude_ids=_reconcile_claimed_manual_ids(sess),
+            r['suggestions'] = _reconcile_annotate_suggestions(
+                r,
+                _daily_budget_suggest_manual_matches(
+                    spending,
+                    date_str=str(r.get('date') or '')[:10],
+                    amount=float(r.get('amount') or 0),
+                    description=str(r.get('description') or ''),
+                    direction='outgoing',
+                    exclude_ids=_reconcile_claimed_manual_ids(sess),
+                ),
             )
         else:
             r['suggestions'] = []
@@ -6421,6 +6592,7 @@ def _reconcile_session_payload(sess: dict, spending: dict) -> dict:
         else:
             m['status'] = 'unclaimed'
 
+    expected_bills = _reconcile_expected_bills(spending)
     return {
         'report_month': report_month,
         'status': sess.get('status'),
@@ -6434,6 +6606,8 @@ def _reconcile_session_payload(sess: dict, spending: dict) -> dict:
         'excluded_manual_ids': list(excluded),
         'kept_manual_ids': list(kept),
         'reviewed_unclaimed': bool(sess.get('reviewed_unclaimed')),
+        'expected_bills': expected_bills,
+        'expected_bills_total': round(sum(b['amount'] for b in expected_bills), 2),
     }
 
 
@@ -6575,9 +6749,12 @@ def _reconcile_confirm_session(spending: dict, sess: dict) -> dict:
             existing_fingerprints.add(fp)
             cat = row.get('category')
             if direction == 'outgoing':
-                cat = str(cat or 'unclassified').strip().lower()
-                if cat not in SPENDING_CATEGORY_SET:
-                    cat = 'unclassified'
+                if str(row.get('reconcile_mark') or '') == 'bill':
+                    cat = _reconcile_bill_import_category(row, spending)
+                else:
+                    cat = str(cat or 'unclassified').strip().lower()
+                    if cat not in SPENDING_CATEGORY_SET:
+                        cat = 'unclassified'
             else:
                 cat = None
             tx = {
@@ -9144,6 +9321,29 @@ def reconcile_link_transfer(month):
     return _reconcile_api_json(spending, sess)
 
 
+@app.route('/api/spending/reconcile/<month>/relink-netted', methods=['POST'])
+@login_required
+def reconcile_relink_netted(month):
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    payload = request.get_json(silent=True) or {}
+    row_ids = [str(x) for x in (payload.get('row_ids') or []) if str(x)]
+    manual_ids = [str(x) for x in (payload.get('manual_ids') or []) if str(x)]
+    if len(row_ids) < 2 or not manual_ids:
+        return jsonify({'error': 'row_ids[] and manual_ids[] required'}), 400
+    via = str(payload.get('via') or 'user')
+    _reconcile_apply_netted_bank_group(
+        sess,
+        row_ids,
+        manual_ids,
+        group_key=str(payload.get('group_key') or '') or None,
+        via=via,
+    )
+    save_data(data)
+    return _reconcile_api_json(spending, sess)
+
+
 @app.route('/api/spending/reconcile/<month>/unlink-transfer', methods=['POST'])
 @login_required
 def reconcile_unlink_transfer(month):
@@ -9179,6 +9379,13 @@ def reconcile_patch_row(month, row_id):
         row['include'] = bool(payload.get('include'))
     if payload.get('direction') in ('incoming', 'outgoing'):
         row['direction'] = payload['direction']
+    if 'reconcile_mark' in payload:
+        mark = payload.get('reconcile_mark')
+        if mark in (None, '', False):
+            row['reconcile_mark'] = None
+        elif str(mark) == 'bill':
+            row['reconcile_mark'] = 'bill'
+            row['include'] = True
     save_data(data)
     return _reconcile_api_json(spending, sess)
 
@@ -9211,14 +9418,10 @@ def reconcile_exclude_manual(month):
     if err:
         return jsonify({'error': err}), 400
     payload = request.get_json(silent=True) or {}
-    manual_id = str(payload.get('manual_id') or '')
-    if not manual_id:
+    ids = _reconcile_payload_manual_ids(payload)
+    if not ids:
         return jsonify({'error': 'manual_id required'}), 400
-    excluded = sess.setdefault('excluded_manual_ids', [])
-    if manual_id not in excluded:
-        excluded.append(manual_id)
-    kept = sess.get('kept_manual_ids') or []
-    sess['kept_manual_ids'] = [x for x in kept if str(x) != manual_id]
+    _reconcile_exclude_manual_ids(sess, ids)
     save_data(data)
     return _reconcile_api_json(spending, sess)
 
@@ -9230,14 +9433,10 @@ def reconcile_keep_manual(month):
     if err:
         return jsonify({'error': err}), 400
     payload = request.get_json(silent=True) or {}
-    manual_id = str(payload.get('manual_id') or '')
-    if not manual_id:
+    ids = _reconcile_payload_manual_ids(payload)
+    if not ids:
         return jsonify({'error': 'manual_id required'}), 400
-    kept = sess.setdefault('kept_manual_ids', [])
-    if manual_id not in kept:
-        kept.append(manual_id)
-    excluded = sess.get('excluded_manual_ids') or []
-    sess['excluded_manual_ids'] = [x for x in excluded if str(x) != manual_id]
+    _reconcile_keep_manual_ids(sess, ids, keep=bool(payload.get('keep', True)))
     save_data(data)
     return _reconcile_api_json(spending, sess)
 
@@ -9261,12 +9460,12 @@ def reconcile_confirm(month):
     if err:
         return jsonify({'error': err}), 400
     if not sess.get('auto_match_ran'):
-        return jsonify({'error': 'Run auto-match before confirming.'}), 400
+        return jsonify({'error': 'Find matches before importing.'}), 400
     if sess.get('status') == 'imported':
         return jsonify({'error': 'Session already imported.'}), 400
     totals = _reconcile_compute_totals(sess, spending, str(sess.get('report_month') or ''))
     if totals.get('unmatched_manual_count', 0) > 0 and not sess.get('reviewed_unclaimed'):
-        return jsonify({'error': 'Review unclaimed manuals before confirming.'}), 400
+        return jsonify({'error': 'Check leftover spending before importing.'}), 400
     result = _reconcile_confirm_session(spending, sess)
     save_data(data)
     resp = _reconcile_api_json(spending, sess)

@@ -12,28 +12,40 @@
     <div class="app-shell">
         {% with active='reconcile' %}{% include 'partials/app_header.html' %}{% endwith %}
 
-        <section class="spending-section card reconcile-section" aria-labelledby="reconcile-heading">
+        <section class="spending-section card reconcile-section" aria-labelledby="reconcile-heading" data-step="upload">
             <header class="reconcile-top">
                 <div class="reconcile-top-copy">
                     <h2 class="spending-h2" id="reconcile-heading">Reconcile</h2>
-                    <p class="reconcile-lead" id="reconcile-lead">Upload every statement for the month, run auto-match, review the queue, then confirm.</p>
+                    <p class="reconcile-lead" id="reconcile-lead">Add every bank statement for this month.</p>
                 </div>
                 <div class="reconcile-top-meta">
                     <label class="reconcile-month-wrap" for="reconcile-month">
-                        <span class="sr-only">Stats month</span>
+                        <span class="sr-only">Month</span>
                         <input id="reconcile-month" type="month" class="reconcile-month" value="{{ report_month }}" />
                     </label>
-                    <span id="reconcile-status-chip" class="reconcile-status-chip" aria-live="polite">staging</span>
+                    <span id="reconcile-status-chip" class="reconcile-status-chip hidden" aria-live="polite"></span>
                 </div>
             </header>
 
-            <div class="reconcile-stage reconcile-panel--upload">
-                <div class="reconcile-stage-head">
-                    <h3 class="reconcile-stage-title">Statements</h3>
-                </div>
+            <ol class="reconcile-steps" id="reconcile-steps" aria-label="Progress">
+                <li class="reconcile-steps-item is-current" data-go-step="upload">
+                    <span class="reconcile-steps-num">1</span>
+                    <span class="reconcile-steps-label">Add files</span>
+                </li>
+                <li class="reconcile-steps-item" data-go-step="review">
+                    <span class="reconcile-steps-num">2</span>
+                    <span class="reconcile-steps-label">Review</span>
+                </li>
+                <li class="reconcile-steps-item" data-go-step="confirm">
+                    <span class="reconcile-steps-num">3</span>
+                    <span class="reconcile-steps-label">Import</span>
+                </li>
+            </ol>
+
+            <div id="reconcile-step-upload" class="reconcile-step">
                 <div class="reconcile-composer">
                     <label class="reconcile-field" for="reconcile-source">
-                        <span class="reconcile-field-label">Source <span class="reconcile-field-optional">optional</span></span>
+                        <span class="reconcile-field-label">Bank <span class="reconcile-field-optional">optional</span></span>
                         <input id="reconcile-source" type="text" class="reconcile-input" placeholder="e.g. Monzo, Amex" maxlength="80" list="reconcile-source-list" />
                         <datalist id="reconcile-source-list"></datalist>
                     </label>
@@ -48,17 +60,17 @@
                         </span>
                     </label>
                     <div class="reconcile-field reconcile-field--action">
-                        <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft">Add statement</button>
+                        <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft">Add file</button>
                     </div>
                 </div>
                 <button type="button" id="reconcile-range-toggle" class="reconcile-text-btn reconcile-range-toggle" aria-expanded="false" aria-controls="reconcile-range-fields">Adjust date range</button>
                 <div id="reconcile-range-fields" class="reconcile-range hidden">
                     <label class="reconcile-field" for="reconcile-period-start">
-                        <span class="reconcile-field-label">Period start</span>
+                        <span class="reconcile-field-label">From</span>
                         <input id="reconcile-period-start" type="date" class="reconcile-input" />
                     </label>
                     <label class="reconcile-field" for="reconcile-period-end">
-                        <span class="reconcile-field-label">Period end</span>
+                        <span class="reconcile-field-label">To</span>
                         <input id="reconcile-period-end" type="date" class="reconcile-input" />
                     </label>
                     <div class="reconcile-field reconcile-field--action">
@@ -66,61 +78,41 @@
                     </div>
                 </div>
                 <ul id="reconcile-upload-list" class="reconcile-upload-list" aria-label="Staged statements"></ul>
-                <p id="reconcile-status" class="reconcile-status hidden" role="status"></p>
-                <div class="reconcile-toolbar">
-                    <div class="reconcile-toolbar-start">
-                        <button type="button" id="reconcile-auto-match-btn" class="reconcile-btn reconcile-btn--soft" disabled>Run auto-match</button>
-                        <button type="button" id="reconcile-bulk-accept-btn" class="reconcile-btn reconcile-btn--ghost hidden">Accept all auto-matched</button>
-                    </div>
-                    <button type="button" id="reconcile-confirm-btn" class="reconcile-btn reconcile-btn--primary" disabled>Continue to review</button>
+                <div class="reconcile-step-foot">
+                    <button type="button" id="reconcile-auto-match-btn" class="reconcile-btn reconcile-btn--primary" disabled>Find matches</button>
                 </div>
             </div>
 
-            <div id="reconcile-tally" class="reconcile-tally hidden" aria-live="polite"></div>
-
-            <div id="reconcile-workspace" class="reconcile-work hidden">
-                <div class="reconcile-work-bar">
-                    <div id="reconcile-queue-progress" class="reconcile-queue-progress"></div>
-                    <div id="reconcile-unclaimed-chip-wrap" class="reconcile-alert hidden">
-                        <button type="button" id="reconcile-unclaimed-chip" class="reconcile-alert-chip"></button>
-                    </div>
-                    <div id="reconcile-view-all" class="reconcile-allrows">
-                        <button type="button" id="reconcile-view-all-toggle" class="reconcile-text-btn" aria-expanded="false" aria-controls="reconcile-view-all-panel">View all rows</button>
+            <div id="reconcile-step-review" class="reconcile-step hidden">
+                <div id="reconcile-recap" class="reconcile-recap"></div>
+                <p class="reconcile-step-nav">
+                    <button type="button" id="reconcile-back-to-files" class="reconcile-text-btn">← Add another file</button>
+                </p>
+                <div id="reconcile-workspace" class="reconcile-work">
+                    <div id="reconcile-phase-bank" class="reconcile-triage">
+                        <div id="reconcile-focus" class="reconcile-focus"></div>
+                        <div id="reconcile-suggestions" class="reconcile-suggestions"></div>
+                        <div class="reconcile-triage-foot">
+                            <div id="reconcile-actions" class="reconcile-actions"></div>
+                            <div id="reconcile-queue-nav" class="reconcile-queue-nav"></div>
+                        </div>
                     </div>
                 </div>
-
+                <div id="reconcile-view-all" class="reconcile-allrows">
+                    <button type="button" id="reconcile-view-all-toggle" class="reconcile-text-btn" aria-expanded="false" aria-controls="reconcile-view-all-panel">Show all statement rows</button>
+                </div>
                 <div id="reconcile-view-all-panel" class="reconcile-view-all-panel hidden"></div>
+            </div>
 
-                <div id="reconcile-phase-bank" class="reconcile-triage">
-                    <div id="reconcile-focus" class="reconcile-focus"></div>
-                    <div id="reconcile-suggestions" class="reconcile-suggestions"></div>
-                    <div class="reconcile-triage-foot">
-                        <div id="reconcile-actions" class="reconcile-actions"></div>
-                        <div id="reconcile-queue-nav" class="reconcile-queue-nav"></div>
-                    </div>
-                </div>
-
-                <div id="reconcile-phase-manuals" class="reconcile-panel reconcile-panel--manuals hidden">
-                    <h3 class="reconcile-panel-title">Manual entries with no bank row</h3>
-                    <p class="reconcile-panel-desc">All spending should appear on your statements — resolve or exclude each entry.</p>
-                    <ul id="reconcile-unclaimed-list" class="reconcile-unclaimed-list"></ul>
-                    <label class="reconcile-review-check">
-                        <input type="checkbox" id="reconcile-reviewed-unclaimed" />
-                        <span>I have reviewed unclaimed manuals</span>
-                    </label>
-                    <div class="reconcile-panel-footer">
-                        <button type="button" id="reconcile-to-summary-btn" class="reconcile-btn reconcile-btn--primary">Continue to summary</button>
-                    </div>
-                </div>
-
-                <div id="reconcile-phase-summary" class="reconcile-panel reconcile-panel--summary hidden">
-                    <h3 class="reconcile-panel-title">Ready to import</h3>
-                    <div id="reconcile-summary-body" class="reconcile-summary-body"></div>
-                    <div class="reconcile-panel-footer">
-                        <button type="button" id="reconcile-final-confirm-btn" class="reconcile-btn reconcile-btn--primary">Confirm import all</button>
-                    </div>
+            <div id="reconcile-step-confirm" class="reconcile-step hidden">
+                <div id="reconcile-summary-body" class="reconcile-summary-body"></div>
+                <div class="reconcile-step-foot reconcile-step-foot--split">
+                    <button type="button" id="reconcile-confirm-back" class="reconcile-btn reconcile-btn--ghost">← Back</button>
+                    <button type="button" id="reconcile-final-confirm-btn" class="reconcile-btn reconcile-btn--primary">Confirm import</button>
                 </div>
             </div>
+
+            <p id="reconcile-status" class="reconcile-status hidden" role="status"></p>
         </section>
     </div>
 

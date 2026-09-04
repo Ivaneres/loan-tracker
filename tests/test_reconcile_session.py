@@ -45,6 +45,7 @@ def _stage_row(**kwargs):
         'manual_match': kwargs.get('manual_match'),
         'transfer_pair': kwargs.get('transfer_pair'),
         'ledger_duplicate': False,
+        'reconcile_mark': kwargs.get('reconcile_mark'),
     }
 
 
@@ -113,6 +114,13 @@ class TestReconcileSessionHelpers(unittest.TestCase):
                         direction='incoming',
                         category=None,
                     ),
+                    _stage_row(
+                        id='r_pay',
+                        date='2024-06-01',
+                        amount=2000.0,
+                        description='PAYROLL',
+                        direction='incoming',
+                    ),
                 ],
             },
         ]
@@ -131,6 +139,32 @@ class TestReconcileSessionHelpers(unittest.TestCase):
         by_id = {r['id']: r for r in payload['rows']}
         self.assertEqual(by_id['r_out']['transfer_pair']['peer_row_id'], 'r_in')
         self.assertEqual(by_id['r_in']['transfer_pair']['peer_row_id'], 'r_out')
+        self.assertEqual(payload['totals']['incoming_count'], 1)
+        self.assertEqual(payload['totals']['incoming_total'], 2000.0)
+
+    def test_auto_match_ignores_manual_fingerprints_as_ledger_dupes(self):
+        spending = {
+            'transactions': [
+                _manual(
+                    id='m1',
+                    date='2024-06-05',
+                    amount=10.0,
+                    description='Lunch',
+                    fingerprint='2024-06|2024-06-05|outgoing|10.00|pret a manger',
+                ),
+            ],
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+        sess['uploads'] = [{
+            'id': 'u1',
+            'file_name': 'x.csv',
+            'rows': [_stage_row(id='r1', date='2024-06-05', amount=10.0, description='PRET A MANGER')],
+        }]
+        app_mod._reconcile_run_auto_match(sess, spending)
+        payload = app_mod._reconcile_session_payload(sess, spending)
+        self.assertEqual(payload['totals']['statement_count'], 1)
+        self.assertFalse(sess['uploads'][0]['rows'][0].get('ledger_duplicate'))
 
     def test_link_unlink_reassign(self):
         spending = {
@@ -157,6 +191,121 @@ class TestReconcileSessionHelpers(unittest.TestCase):
 
         app_mod._reconcile_clear_manual_match_on_row(row)
         self.assertEqual(app_mod._reconcile_claimed_manual_ids(sess), set())
+
+    def test_payload_expected_bills_and_exact_suggestions(self):
+        spending = {
+            'transactions': [
+                _manual(id='m1', date='2024-06-10', amount=4.75, description='Royal Mail'),
+                _manual(id='m2', date='2024-06-10', amount=3.10, description='Tube'),
+            ],
+            'daily_budget': {
+                'plan': {
+                    'bill_items': [
+                        {'label': 'Rent', 'amount': 800, 'category': 'housing', 'included': True},
+                    ],
+                },
+            },
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+        sess['uploads'] = [{
+            'id': 'u1',
+            'file_name': 'x.csv',
+            'rows': [
+                _stage_row(id='r1', date='2024-06-10', amount=4.75, description='ROYAL MAIL'),
+                _stage_row(id='r2', date='2024-06-10', amount=4.75, description='SOMETHING ELSE'),
+            ],
+        }]
+        payload = app_mod._reconcile_session_payload(sess, spending)
+        self.assertEqual(payload['expected_bills_total'], 800.0)
+        self.assertEqual(payload['expected_bills'][0]['label'], 'Rent')
+        by_id = {r['id']: r for r in payload['rows']}
+        exact = [s for s in by_id['r1']['suggestions'] if s.get('exact_amount')]
+        self.assertTrue(exact)
+        self.assertEqual(exact[0]['amount'], 4.75)
+        self.assertTrue(all(s.get('exact_amount') for s in exact))
+        queue_keys = {q.get('item_key') for q in payload['queue']}
+        self.assertIn('unmatched:r1', queue_keys)
+
+    def test_relink_netted_and_bill_mark_totals(self):
+        spending = {
+            'transactions': [_manual(id='m1', date='2024-06-10', amount=12.0, description='Shop')],
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+        sess['uploads'] = [{
+            'id': 'u1',
+            'file_name': 'x.csv',
+            'rows': [
+                _stage_row(id='r1', date='2024-06-10', amount=7.0, description='A'),
+                _stage_row(id='r2', date='2024-06-10', amount=5.0, description='B'),
+            ],
+        }]
+        gk = app_mod._reconcile_apply_netted_bank_group(sess, ['r1', 'r2'], ['m1'], group_key='g1', via='auto')
+        self.assertEqual(gk, 'g1')
+        q = app_mod._reconcile_build_queue(sess)
+        netted = [i for i in q if i['kind'] == 'netted_banks']
+        self.assertEqual(len(netted), 1)
+        self.assertEqual(netted[0]['item_key'], 'netted:g1')
+
+        app_mod._reconcile_clear_netted_bank_group(sess, 'g1')
+        self.assertFalse(any((r.get('manual_match') or {}) for r in sess['uploads'][0]['rows']))
+        app_mod._reconcile_apply_netted_bank_group(sess, ['r1', 'r2'], ['m1'], group_key='g1', via='auto')
+        self.assertEqual(sess['uploads'][0]['rows'][0]['manual_match']['group_key'], 'g1')
+
+        sess['uploads'][0]['rows'][0]['manual_match'] = None
+        sess['uploads'][0]['rows'][1]['manual_match'] = None
+        sess['uploads'][0]['rows'][0]['reconcile_mark'] = 'bill'
+        totals = app_mod._reconcile_compute_totals(sess, spending, '2024-06')
+        self.assertEqual(totals['bill_marked_count'], 1)
+        self.assertEqual(totals['bill_marked_total'], 7.0)
+        self.assertEqual(totals['unaccounted_bank_count'], 1)
+
+    def test_confirm_bill_mark_uses_bill_category(self):
+        spending = {
+            'transactions': [],
+            'statements': [],
+            'daily_budget': {
+                'plan': {
+                    'bill_items': [
+                        {'label': 'Council tax', 'amount': 120.0, 'category': 'housing', 'included': True},
+                    ],
+                },
+            },
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+        sess['auto_match_ran'] = True
+        sess['uploads'] = [{
+            'id': 'u1',
+            'file_name': 'x.csv',
+            'bank_source': 'Monzo',
+            'rows': [
+                _stage_row(
+                    id='r1',
+                    date='2024-06-10',
+                    amount=120.0,
+                    description='COUNCIL TAX',
+                    category='unclassified',
+                    reconcile_mark='bill',
+                ),
+            ],
+        }]
+        result = app_mod._reconcile_confirm_session(spending, sess)
+        self.assertEqual(result['imported_count'], 1)
+        tx = spending['transactions'][0]
+        self.assertEqual(tx['category'], 'housing')
+
+    def test_bulk_keep_and_exclude_manuals(self):
+        sess = {'excluded_manual_ids': ['m1'], 'kept_manual_ids': []}
+        app_mod._reconcile_keep_manual_ids(sess, ['m1', 'm2'], keep=True)
+        self.assertEqual(sess['excluded_manual_ids'], [])
+        self.assertEqual(sess['kept_manual_ids'], ['m1', 'm2'])
+        app_mod._reconcile_exclude_manual_ids(sess, ['m1', 'm2'])
+        self.assertEqual(set(sess['excluded_manual_ids']), {'m1', 'm2'})
+        self.assertEqual(sess['kept_manual_ids'], [])
+        self.assertEqual(app_mod._reconcile_payload_manual_ids({'manual_id': 'a'}), ['a'])
+        self.assertEqual(app_mod._reconcile_payload_manual_ids({'manual_ids': ['b', 'c']}), ['b', 'c'])
 
     def test_confirm_writes_bank_matched_and_statement_txs(self):
         spending = {
@@ -368,15 +517,20 @@ class TestReconcileUiPresence(unittest.TestCase):
             self.assertEqual(resp.status_code, 200)
             html = resp.get_data(as_text=True)
             self.assertIn('Reconcile', html)
-            self.assertIn('Run auto-match', html)
+            self.assertIn('Find matches', html)
             self.assertIn('Confirm import', html)
             self.assertIn('reconcile.js', html)
             self.assertIn('reconcile-composer', html)
             self.assertIn('reconcile-triage-foot', html)
             self.assertIn('id="reconcile-file-name"', html)
+            self.assertIn('id="reconcile-steps"', html)
+            self.assertIn('id="reconcile-summary-body"', html)
             css = (Path(app_mod.app.root_path) / 'static' / 'style.css').read_text(encoding='utf-8')
             self.assertIn('.reconcile-page .hidden {', css)
             self.assertIn('display: none !important;', css)
+            self.assertIn('.reconcile-actions .reconcile-btn--primary', css)
+            self.assertIn('flex-basis: 100%', css)
+            self.assertIn('.reconcile-unclaimed-item {\n        flex-direction: column;', css)
 
             home = self.client.get('/')
             home_html = home.get_data(as_text=True)
@@ -404,6 +558,27 @@ class TestReconcileUiPresence(unittest.TestCase):
         self.assertIn("fd.append('period_start'", js)
         self.assertIn('function renderReadonly(', js)
         self.assertIn('function syncRangeFromMonth(', js)
+        self.assertIn('function needsDecision(', js)
+        self.assertIn('function goStep(', js)
+        self.assertIn('Looks right', js)
+        self.assertIn('Not a match', js)
+        self.assertIn('This is a bill', js)
+        self.assertIn('data-mark-bill-row', js)
+        self.assertIn('Matched spending', js)
+        self.assertIn('Show all', js)
+        self.assertIn('reconcile-match-pair', js)
+        self.assertIn('amountDiff', js)
+        self.assertNotIn('bill-netted', js)
+        self.assertIn('data-queue-undo', js)
+        self.assertIn('exactSuggestions', js)
+        self.assertIn('Unmatched spending', js)
+        self.assertIn('Keep all', js)
+        self.assertIn('Ignore all', js)
+        self.assertIn('data-keep-all-manuals', js)
+        self.assertIn('Unaccounted statement rows', js)
+        self.assertIn('outgoing on statements', js)
+        self.assertIn('prettyDate: true', js)
+        self.assertIn('Unmatched spending kept', js)
 
 
 class TestHomeStatementMonths(unittest.TestCase):

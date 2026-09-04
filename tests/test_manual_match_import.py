@@ -227,10 +227,10 @@ class TestUnmatchedManualsSidebar(unittest.TestCase):
 
     def test_unclaimed_sidebar_assets_still_present(self):
         root = __import__('pathlib').Path(__file__).resolve().parents[1]
-        rec = (root / 'templates' / 'reconcile.html').read_text(encoding='utf-8')
+        recjs = (root / 'static' / 'reconcile.js').read_text(encoding='utf-8')
         js = (root / 'static' / 'spending.js').read_text(encoding='utf-8')
         css = (root / 'static' / 'style.css').read_text(encoding='utf-8')
-        self.assertIn('reconcile-unclaimed-list', rec)
+        self.assertIn('reconcile-unclaimed-list', recjs)
         self.assertIn('unmatched_manuals', js)
         self.assertIn('renderUnclaimedManuals', js)
         self.assertIn('import-unclaimed-manuals', css)
