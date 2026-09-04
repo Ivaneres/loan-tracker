@@ -175,6 +175,22 @@ class TestManualMatchSuggestions(unittest.TestCase):
         self.assertTrue(netted)
         self.assertEqual(sorted(netted[0]['ids']), ['a', 'b', 'c'])
 
+    def test_netted_rejects_parts_spread_across_the_month(self):
+        spending = {
+            'transactions': [
+                _manual_tx(id='early', date='2024-03-08', amount=11.5, description='Lunch'),
+                _manual_tx(id='late', date='2024-03-15', amount=3.5, description='Coffee'),
+            ],
+        }
+        suggestions = app_mod._daily_budget_suggest_manual_matches(
+            spending,
+            date_str='2024-03-15',
+            amount=15.0,
+            description='CARD PAYMENT',
+            direction='outgoing',
+        )
+        self.assertFalse(any(s.get('kind') == 'netted' for s in suggestions), suggestions)
+
 
 class TestUnmatchedManualsSidebar(unittest.TestCase):
     def test_lists_month_manuals_excluding_bank_matched(self):

@@ -150,6 +150,8 @@ DAILY_BUDGET_MANUAL_SUGGEST_LIMIT = 3
 # Netted multi-manual suggestions only when part amounts sum exactly to the statement.
 DAILY_BUDGET_MANUAL_SUGGEST_NET_MAX_PARTS = 3
 DAILY_BUDGET_MANUAL_SUGGEST_NET_POOL = 14
+# Netted combos (N banks ↔ 1 manual, or 1 bank ↔ N manuals) must also sit inside
+# the auto-match date slack — exact sums across a month are coincidence, not a group.
 # Statement row vs expected monthly bill_items (label + amount).
 SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
@@ -5142,6 +5144,37 @@ def _manual_match_dates_close(manual_date: str, statement_date: str) -> bool:
     return 0 <= delta <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
 
 
+def _iso_dates_span_days(dates: list[str]) -> int | None:
+    parsed = []
+    for raw in dates:
+        d = _parse_iso_date(str(raw or '')[:10])
+        if d is None:
+            return None
+        parsed.append(d)
+    if not parsed:
+        return None
+    return (max(parsed) - min(parsed)).days
+
+
+def _netted_combo_dates_ok(anchor_date: str, part_dates: list[str], *, parts_are_statements: bool) -> bool:
+    """Reject netted groups whose dates span more than the auto-match slack.
+
+    ``parts_are_statements``: bank rows vs one manual (statement on/after manual).
+    Otherwise manuals vs one statement (same orientation per part).
+    """
+    all_dates = [anchor_date, *part_dates]
+    span = _iso_dates_span_days(all_dates)
+    if span is None or span > DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS:
+        return False
+    for part in part_dates:
+        if parts_are_statements:
+            if not _manual_match_dates_close(anchor_date, part):
+                return False
+        elif not _manual_match_dates_close(part, anchor_date):
+            return False
+    return True
+
+
 def _manual_description_match_ratio(man_n: str, desc_n: str) -> float:
     if not man_n and not desc_n:
         return 1.0
@@ -5586,6 +5619,7 @@ def _daily_budget_suggest_netted_manual_matches(
     *,
     amount: float,
     description: str,
+    date_str: str,
     limit: int,
 ) -> list[dict]:
     """Combinations of 2+ manuals whose amounts sum exactly to the statement amount."""
@@ -5610,6 +5644,8 @@ def _daily_budget_suggest_netted_manual_matches(
         if abs(total - target) > 0.001:
             return
         ids = [str(p['id']) for p in parts]
+        if not _netted_combo_dates_ok(date_str, [p['date'] for p in parts], parts_are_statements=False):
+            return
         date_delta = max(int(p.get('date_delta_days') or 0) for p in parts)
         ratios = [
             _manual_description_match_ratio(_normalize_label(str(p.get('description') or '')), desc_n)
@@ -5726,7 +5762,7 @@ def _daily_budget_suggest_manual_matches(
 
     # Exact-sum netted combos are high-signal — prefer them in the shortlist.
     netted = _daily_budget_suggest_netted_manual_matches(
-        pool, amount=amount, description=description, limit=max_n,
+        pool, amount=amount, description=description, date_str=date_str, limit=max_n,
     )
     used_ids: set[str] = set()
     out: list[dict] = []
@@ -6172,7 +6208,12 @@ def _reconcile_suggest_netted_bank_groups(
         total = round(sum(p['amount'] for p in parts), 2)
         if abs(total - manual['amount']) > 0.001:
             return
-        score = len(parts) * 1.5
+        if not _netted_combo_dates_ok(
+            manual['date'], [p['date'] for p in parts], parts_are_statements=True,
+        ):
+            return
+        span = _iso_dates_span_days([manual['date'], *[p['date'] for p in parts]]) or 0
+        score = (len(parts) * 1.5) + (span * 0.35)
         found.append((score, {
             'manual_id': manual['id'],
             'manual': manual,

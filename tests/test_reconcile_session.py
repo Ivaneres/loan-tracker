@@ -166,6 +166,59 @@ class TestReconcileSessionHelpers(unittest.TestCase):
         self.assertEqual(payload['totals']['statement_count'], 1)
         self.assertFalse(sess['uploads'][0]['rows'][0].get('ledger_duplicate'))
 
+    def test_netted_banks_require_close_dates(self):
+        spending = {
+            'transactions': [
+                _manual(id='m-far', date='2024-07-31', amount=15.0, description='Combined lunch'),
+            ],
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-07')
+        sess['uploads'] = [
+            {
+                'id': 'u-hsbc',
+                'file_name': 'hsbc.csv',
+                'bank_source': 'HSBC',
+                'rows': [_stage_row(id='r-hsbc', date='2024-07-16', amount=11.5, description='PRET')],
+            },
+            {
+                'id': 'u-amex',
+                'file_name': 'amex.csv',
+                'bank_source': 'Amex',
+                'rows': [_stage_row(id='r-amex', date='2024-07-08', amount=3.5, description='COSTA')],
+            },
+        ]
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['netted_bank_matches'], 0)
+        groups = app_mod._reconcile_suggest_netted_bank_groups(
+            sess, spending, '2024-07', claimed_manuals=set(), claimed_rows=set(),
+        )
+        self.assertEqual(groups, [])
+
+        spending_near = {
+            'transactions': [
+                _manual(id='m-near', date='2024-07-08', amount=15.0, description='Lunch'),
+            ],
+            'reconcile_sessions': {},
+        }
+        sess_near = app_mod._reconcile_ensure_session(spending_near, '2024-07')
+        sess_near['uploads'] = [
+            {
+                'id': 'u1',
+                'file_name': 'hsbc.csv',
+                'bank_source': 'HSBC',
+                'rows': [_stage_row(id='r1', date='2024-07-08', amount=11.5, description='PRET')],
+            },
+            {
+                'id': 'u2',
+                'file_name': 'amex.csv',
+                'bank_source': 'Amex',
+                'rows': [_stage_row(id='r2', date='2024-07-09', amount=3.5, description='COSTA')],
+            },
+        ]
+        stats_near = app_mod._reconcile_run_auto_match(sess_near, spending_near)
+        self.assertEqual(stats_near['netted_bank_matches'], 1)
+
     def test_link_unlink_reassign(self):
         spending = {
             'transactions': [
