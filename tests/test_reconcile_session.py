@@ -166,6 +166,115 @@ class TestReconcileSessionHelpers(unittest.TestCase):
         self.assertEqual(payload['totals']['statement_count'], 1)
         self.assertFalse(sess['uploads'][0]['rows'][0].get('ledger_duplicate'))
 
+    def test_auto_match_second_pass_resolves_amount_collision(self):
+        """Ambiguous £3.10 pool on pass 1; after a unique claim, the leftover matches."""
+        spending = {
+            'transactions': [
+                _manual(id='m-tube', date='2024-07-23', amount=3.10, description='Tube'),
+                _manual(id='m-coffee', date='2024-07-22', amount=3.10, description='Coffee'),
+            ],
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-07')
+        # TFL first: both manuals sit in its 3-day window → no unique claim on pass 1.
+        # Costa second: only Coffee is on/before 22 Jul → unique claim unlocks Tube for TFL.
+        sess['uploads'] = [
+            {
+                'id': 'u-amex',
+                'file_name': 'amex.csv',
+                'bank_source': 'Amex',
+                'rows': [
+                    _stage_row(
+                        id='r-tfl',
+                        date='2024-07-24',
+                        amount=3.10,
+                        description='TFL TRAVEL CHARGE TFL.GOV.UK/CP',
+                    ),
+                ],
+            },
+            {
+                'id': 'u-hsbc',
+                'file_name': 'hsbc.csv',
+                'bank_source': 'HSBC',
+                'rows': [
+                    _stage_row(
+                        id='r-costa',
+                        date='2024-07-22',
+                        amount=3.10,
+                        description='COSTA COFFEE',
+                    ),
+                ],
+            },
+        ]
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['manual_auto_matches'], 2)
+        by_id = {r['id']: r for r in app_mod._reconcile_session_payload(sess, spending)['rows']}
+        self.assertEqual(by_id['r-tfl']['manual_match']['manual_ids'], ['m-tube'])
+        self.assertEqual(by_id['r-costa']['manual_match']['manual_ids'], ['m-coffee'])
+        # Exact singles are skipped in Review (needsDecision); they stay as matched queue entries.
+        queue_by_row = {i.get('row_id'): i for i in app_mod._reconcile_build_queue(sess) if i.get('row_id')}
+        self.assertEqual(queue_by_row['r-tfl']['kind'], 'matched')
+        self.assertNotEqual(queue_by_row['r-tfl']['kind'], 'unmatched')
+
+    def test_restart_match_clears_user_links_and_reruns(self):
+        spending = {
+            'transactions': [
+                _manual(id='m1', date='2024-06-10', amount=4.5, description='Coffee'),
+                _manual(id='m2', date='2024-06-11', amount=12.0, description='Lunch'),
+            ],
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+        sess['uploads'] = [{
+            'id': 'u1',
+            'file_name': 'a.csv',
+            'rows': [
+                _stage_row(id='r1', date='2024-06-10', amount=4.5, description='COSTA'),
+                _stage_row(id='r2', date='2024-06-11', amount=12.0, description='PRET'),
+                _stage_row(
+                    id='r-out', date='2024-06-12', amount=50.0, description='To Amex',
+                    direction='outgoing', category='other',
+                ),
+                _stage_row(
+                    id='r-in', date='2024-06-12', amount=50.0, description='From HSBC',
+                    direction='incoming',
+                ),
+            ],
+        }]
+        app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertTrue(sess['auto_match_ran'])
+
+        # Simulate user overrides: wrong link, bill mark, ignored row, leftover choices.
+        r1 = sess['uploads'][0]['rows'][0]
+        r2 = sess['uploads'][0]['rows'][1]
+        r1['manual_match'] = {'kind': 'single', 'manual_ids': ['m2'], 'via': 'user'}
+        r2['manual_match'] = None
+        r2['reconcile_mark'] = 'bill'
+        r2['include'] = False
+        sess['excluded_manual_ids'] = ['m2']
+        sess['kept_manual_ids'] = ['m1']
+        sess['reviewed_unclaimed'] = True
+
+        app_mod._reconcile_reset_session_matches(sess)
+        self.assertFalse(sess['auto_match_ran'])
+        self.assertEqual(sess['status'], 'staging')
+        self.assertEqual(sess['excluded_manual_ids'], [])
+        self.assertEqual(sess['kept_manual_ids'], [])
+        self.assertFalse(sess['reviewed_unclaimed'])
+        for row in sess['uploads'][0]['rows']:
+            self.assertIsNone(row.get('manual_match'))
+            self.assertIsNone(row.get('transfer_pair'))
+            self.assertIsNone(row.get('reconcile_mark'))
+            self.assertTrue(row.get('include', True))
+
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['manual_auto_matches'], 2)
+        self.assertGreaterEqual(stats['transfer_auto_pairs'], 1)
+        by_id = {r['id']: r for _, _, _, _, r in app_mod._reconcile_iter_rows(sess)}
+        self.assertEqual(by_id['r1']['manual_match']['manual_ids'], ['m1'])
+        self.assertEqual(by_id['r2']['manual_match']['manual_ids'], ['m2'])
+        self.assertIsNotNone(by_id['r-out'].get('transfer_pair'))
+
     def test_netted_banks_require_close_dates(self):
         spending = {
             'transactions': [
@@ -504,6 +613,35 @@ class TestReconcileApi(unittest.TestCase):
             man = next(t for t in spending['transactions'] if t['id'] == 'm1')
             self.assertTrue(man.get('bank_matched'))
 
+    def test_restart_match_api_discards_user_match_and_reruns(self):
+        self._login()
+        with mock.patch.object(app_mod, 'load_data', return_value=self._data), mock.patch.object(
+            app_mod, 'save_data'
+        ):
+            spending = self._data['users']['admin']['spending']
+            sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+            sess['uploads'] = [{
+                'id': 'u1',
+                'file_name': 't.csv',
+                'rows': [_stage_row(id='r1', amount=4.5, description='COSTA')],
+            }]
+            app_mod._reconcile_run_auto_match(sess, spending)
+            row = sess['uploads'][0]['rows'][0]
+            row['manual_match'] = None
+            row['reconcile_mark'] = 'bill'
+            sess['excluded_manual_ids'] = ['m1']
+
+            resp = self.client.post('/api/spending/reconcile/2024-06/restart-match', json={})
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertTrue(body.get('restarted'))
+            self.assertTrue(body['session']['auto_match_ran'])
+            self.assertEqual(body['session']['excluded_manual_ids'], [])
+            matched = body['session']['rows'][0]['manual_match']
+            self.assertEqual(matched['manual_ids'], ['m1'])
+            self.assertEqual(matched['via'], 'auto')
+            self.assertNotEqual(body['session']['rows'][0].get('reconcile_mark'), 'bill')
+
 
 class TestReconcileUpload(unittest.TestCase):
     def setUp(self):
@@ -571,6 +709,9 @@ class TestReconcileUiPresence(unittest.TestCase):
             html = resp.get_data(as_text=True)
             self.assertIn('Reconcile', html)
             self.assertIn('Find matches', html)
+            self.assertIn('Restart matching', html)
+            self.assertIn('id="reconcile-restart-match"', html)
+            self.assertIn('id="reconcile-restart-match-confirm"', html)
             self.assertIn('Confirm import', html)
             self.assertIn('reconcile.js', html)
             self.assertIn('reconcile-composer', html)
@@ -607,6 +748,8 @@ class TestReconcileUiPresence(unittest.TestCase):
         self.assertIn('refreshFromSession(data)', js)
         self.assertIn("api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload`", js)
         self.assertIn('function txRow(', js)
+        self.assertIn('function signedLedgerAmount(', js)
+        self.assertIn('signed: true', js)
         self.assertIn('function renderViewAll(', js)
         self.assertIn("fd.append('period_start'", js)
         self.assertIn('function renderReadonly(', js)
@@ -624,6 +767,8 @@ class TestReconcileUiPresence(unittest.TestCase):
         self.assertNotIn('bill-netted', js)
         self.assertIn('data-queue-undo', js)
         self.assertIn('exactSuggestions', js)
+        self.assertIn('Only match', js)
+        self.assertIn('matches — pick one', js)
         self.assertIn('Unmatched spending', js)
         self.assertIn('Keep all', js)
         self.assertIn('Ignore all', js)
@@ -631,6 +776,8 @@ class TestReconcileUiPresence(unittest.TestCase):
         self.assertIn('Unaccounted statement rows', js)
         self.assertIn('outgoing on statements', js)
         self.assertIn('prettyDate: true', js)
+        self.assertIn('function restartMatching(', js)
+        self.assertIn('/restart-match', js)
         self.assertIn('Unmatched spending kept', js)
 
 

@@ -5,9 +5,19 @@
     return document.getElementById(id);
   }
 
-  function formatMoney(amount) {
+  function formatMoney(amount, opts) {
     const n = Number(amount) || 0;
-    return `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const abs = Math.abs(n).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (opts && opts.signed) {
+      return `${n < 0 ? '−' : '+'}£${abs}`;
+    }
+    if (n < 0) return `−£${abs}`;
+    return `£${abs}`;
+  }
+
+  function signedLedgerAmount(amount, direction) {
+    const n = Math.abs(Number(amount) || 0);
+    return String(direction || '') === 'incoming' ? n : -n;
   }
 
   function round2(n) {
@@ -358,7 +368,7 @@
       <span class="reconcile-tx-role">${escapeHtml(role)}</span>
       <span class="reconcile-tx-name">${escapeHtml(name || '')}</span>
       <span class="reconcile-tx-meta">
-        <span class="reconcile-tx-amt${amtCls}">${formatMoney(amount)}</span>
+        <span class="reconcile-tx-amt${amtCls}">${formatMoney(amount, { signed: !!opts.signed })}</span>
         <span class="reconcile-tx-date${dateCls}">${escapeHtml(dateLabel)}</span>
         ${sourcePill(source)}
       </span>
@@ -407,8 +417,22 @@
       const legs = ids.map((id) => rows.get(String(id))).filter(Boolean);
       const title = item.kind === 'transfer' ? 'Looks like a transfer' : 'Several statement rows add up to this';
       const pretty = { prettyDate: true };
+      if (item.kind === 'transfer') {
+        // Outgoing first (−), then incoming (+), so the pair reads as money leaving / arriving.
+        legs.sort((a, b) => {
+          const ao = String(a.direction || '') === 'incoming' ? 1 : 0;
+          const bo = String(b.direction || '') === 'incoming' ? 1 : 0;
+          return ao - bo;
+        });
+      }
       focus.innerHTML = `<div class="reconcile-focus-title">${title}</div>${legs
-        .map((leg) => txRow('Bank', leg.description, leg.amount, leg.date, leg.bank_source, '', pretty))
+        .map((leg) => {
+          const amt = item.kind === 'transfer'
+            ? signedLedgerAmount(leg.amount, leg.direction)
+            : leg.amount;
+          const flags = item.kind === 'transfer' ? { prettyDate: true, signed: true } : pretty;
+          return txRow('Bank', leg.description, amt, leg.date, leg.bank_source, '', flags);
+        })
         .join('')}`;
       if (item.kind === 'netted_banks') {
         const mid = (item.manual_ids || [])[0];
@@ -432,18 +456,23 @@
            ${txRow('Bank', row.description, row.amount, row.date, row.bank_source, '', { prettyDate: true })}`
         : '';
       if (suggestions) {
-        suggestions.innerHTML = sugs.length
-          ? `<p class="reconcile-suggest-label">Your spending</p>${sugs
-              .map((s, i) => {
-                const netted = s.kind === 'netted';
-                const label = netted ? `${escapeHtml(s.description)} (combined)` : escapeHtml(s.description);
-                const sel = i === 0 ? ' reconcile-suggest-card--selected' : '';
-                return `<button type="button" class="reconcile-suggest-card${sel}" data-suggest-idx="${i}">
-                  ${label} · ${formatMoney(s.amount)} · ${escapeHtml(s.date || '')}
-                </button>`;
-              })
-              .join('')}`
-          : '';
+        if (!sugs.length) {
+          suggestions.innerHTML = '';
+        } else {
+          const heading = sugs.length === 1
+            ? 'Only match'
+            : `${sugs.length} matches — pick one`;
+          suggestions.innerHTML = `<p class="reconcile-suggest-label">${heading}</p>${sugs
+            .map((s, i) => {
+              const netted = s.kind === 'netted';
+              const label = netted ? `${escapeHtml(s.description)} (combined)` : escapeHtml(s.description);
+              const sel = i === 0 ? ' reconcile-suggest-card--selected' : '';
+              return `<button type="button" class="reconcile-suggest-card${sel}" data-suggest-idx="${i}">
+                ${label} · ${formatMoney(s.amount)} · ${escapeHtml(formatDay(s.date))}
+              </button>`;
+            })
+            .join('')}`;
+        }
       }
       if (actions) {
         actions.innerHTML = `
@@ -807,6 +836,11 @@
     }
     const backToFiles = $('reconcile-back-to-files');
     if (backToFiles) backToFiles.classList.toggle('hidden', step !== 'review');
+    const canRestart = !!(sessionData && sessionData.auto_match_ran && !sessionData.readonly);
+    const restartReview = $('reconcile-restart-match');
+    if (restartReview) restartReview.classList.toggle('hidden', !(canRestart && step === 'review'));
+    const restartConfirm = $('reconcile-restart-match-confirm');
+    if (restartConfirm) restartConfirm.classList.toggle('hidden', !(canRestart && step === 'confirm'));
     const viewAll = $('reconcile-view-all');
     if (viewAll) viewAll.classList.toggle('hidden', step !== 'review');
     renderChip();
@@ -818,6 +852,23 @@
     renderPhases();
     renderActionsBar();
     renderViewAll();
+  }
+
+  function restartMatching() {
+    if (!sessionData || sessionData.readonly || !(sessionData.uploads || []).length) return;
+    const ok = window.confirm(
+      'Restart matching from scratch? This discards every match, transfer, bill mark, and leftover Keep/Ignore choice, then runs Find matches again on the staged files.',
+    );
+    if (!ok) return;
+    setStatus('Restarting matching…');
+    postRaw('/restart-match')
+      .then((data) => {
+        resetReviewState();
+        sessionData = data && data.session ? data.session : data;
+        setStatus('Matching restarted.');
+        goStep(remainingEntries().length ? 'review' : 'confirm');
+      })
+      .catch((err) => setStatus(err.message || 'Restart failed', true));
   }
 
   function postRaw(path, body) {
@@ -1041,6 +1092,11 @@
           .catch((err) => setStatus(err.message || 'Matching failed', true));
       });
     }
+
+    ['reconcile-restart-match', 'reconcile-restart-match-confirm'].forEach((id) => {
+      const btn = $(id);
+      if (btn) btn.addEventListener('click', restartMatching);
+    });
 
     const steps = $('reconcile-steps');
     if (steps) {

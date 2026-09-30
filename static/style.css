@@ -6112,6 +6112,11 @@ body.home-page {
 }
 
 .reconcile-step-nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
     margin: 0 0 0.85rem;
 }
 
@@ -6126,6 +6131,14 @@ body.home-page {
 .reconcile-step-foot--split {
     justify-content: space-between;
     gap: 0.75rem;
+}
+
+.reconcile-step-foot-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
 }
 
 .reconcile-recap {
@@ -7182,7 +7195,9 @@ body.reconcile-readonly .reconcile-step-foot,
 body.reconcile-readonly .reconcile-range-toggle,
 body.reconcile-readonly .reconcile-range,
 body.reconcile-readonly .reconcile-triage,
-body.reconcile-readonly #reconcile-back-to-files {
+body.reconcile-readonly #reconcile-back-to-files,
+body.reconcile-readonly #reconcile-restart-match,
+body.reconcile-readonly #reconcile-restart-match-confirm {
     display: none !important;
 }
 
@@ -7367,6 +7382,12 @@ body.reconcile-readonly #reconcile-back-to-files {
     .reconcile-panel-footer .reconcile-btn--primary,
     .reconcile-field--action .reconcile-btn {
         width: 100%;
+    }
+
+    .reconcile-step-foot-actions {
+        width: 100%;
+        flex-direction: column-reverse;
+        align-items: stretch;
     }
 
     .reconcile-step-foot--split,

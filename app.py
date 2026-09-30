@@ -143,6 +143,9 @@ DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
 # Auto-match requires exact amounts (2dp); near-misses go to preview suggestions.
 # Statement date may post up to N days after manual (banks often lag); not the reverse.
 DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 3
+# Re-run single fuzzy auto-match until no new claims (or this cap). Later unique
+# claims free manuals that earlier rows skipped as ambiguous.
+RECONCILE_AUTO_MATCH_SINGLE_PASSES = 8
 # Preview suggestions for near-misses (looser than auto-match; UI-only exclude).
 DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS = 7
 DAILY_BUDGET_MANUAL_SUGGEST_AMOUNT_TOL = 5.0
@@ -5957,6 +5960,26 @@ def _reconcile_clear_manual_match_on_row(row: dict) -> None:
     row['manual_match'] = None
 
 
+def _reconcile_reset_session_matches(sess: dict) -> None:
+    """Clear all links / triage choices so Find matches can start from scratch.
+
+    Keeps staged uploads and extracted rows. Drops manual matches, transfers, bill
+    marks, leftover keep/ignore, and ignored-row flags — then callers re-run auto-match.
+    """
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not isinstance(row, dict):
+            continue
+        row['manual_match'] = None
+        row['transfer_pair'] = None
+        row['reconcile_mark'] = None
+        row['include'] = True
+    sess['excluded_manual_ids'] = []
+    sess['kept_manual_ids'] = []
+    sess['reviewed_unclaimed'] = False
+    sess['auto_match_ran'] = False
+    sess['status'] = 'staging'
+
+
 def _reconcile_clear_netted_bank_group(sess: dict, group_key: str) -> None:
     gk = str(group_key or '')
     if not gk:
@@ -6259,29 +6282,36 @@ def _reconcile_run_auto_match(sess: dict, spending: dict) -> dict:
         'transfer_auto_pairs': 0,
     }
 
-    for _, _, _, _, row in _reconcile_iter_rows(sess):
-        if not row.get('include', True) or row.get('ledger_duplicate'):
-            continue
-        if row.get('manual_match') or row.get('transfer_pair'):
-            continue
-        if str(row.get('direction') or '') != 'outgoing':
-            continue
-        match = _daily_budget_fuzzy_match_manual(
-            spending,
-            date_str=str(row.get('date') or '')[:10],
-            amount=float(row.get('amount') or 0),
-            description=str(row.get('description') or ''),
-            direction=str(row.get('direction') or 'outgoing'),
-            exclude_ids=claimed_m,
-        )
-        if match is None:
-            continue
-        mid = str(match.get('id') or '')
-        if not mid:
-            continue
-        row['manual_match'] = {'kind': 'single', 'manual_ids': [mid], 'via': 'auto'}
-        claimed_m.add(mid)
-        stats['manual_auto_matches'] += 1
+    # Multiple passes: a row that skipped an ambiguous date+amount pool can match
+    # once a later unique claim removes the competing manual(s).
+    for _ in range(max(1, int(RECONCILE_AUTO_MATCH_SINGLE_PASSES))):
+        made = 0
+        for _, _, _, _, row in _reconcile_iter_rows(sess):
+            if not row.get('include', True) or row.get('ledger_duplicate'):
+                continue
+            if row.get('manual_match') or row.get('transfer_pair'):
+                continue
+            if str(row.get('direction') or '') != 'outgoing':
+                continue
+            match = _daily_budget_fuzzy_match_manual(
+                spending,
+                date_str=str(row.get('date') or '')[:10],
+                amount=float(row.get('amount') or 0),
+                description=str(row.get('description') or ''),
+                direction=str(row.get('direction') or 'outgoing'),
+                exclude_ids=claimed_m,
+            )
+            if match is None:
+                continue
+            mid = str(match.get('id') or '')
+            if not mid:
+                continue
+            row['manual_match'] = {'kind': 'single', 'manual_ids': [mid], 'via': 'auto'}
+            claimed_m.add(mid)
+            stats['manual_auto_matches'] += 1
+            made += 1
+        if made == 0:
+            break
 
     for _, _, _, _, row in _reconcile_iter_rows(sess):
         if not row.get('include', True) or row.get('ledger_duplicate'):
@@ -9297,6 +9327,27 @@ def reconcile_auto_match(month):
     resp = _reconcile_api_json(spending, sess)
     body = resp.get_json()
     body['stats'] = stats
+    return jsonify(body)
+
+
+@app.route('/api/spending/reconcile/<month>/restart-match', methods=['POST'])
+@login_required
+def reconcile_restart_match(month):
+    """Discard all session matches / triage and re-run auto-match from staged uploads."""
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if not (sess.get('uploads') or []):
+        return jsonify({'error': 'Add at least one statement first.'}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported.'}), 400
+    _reconcile_reset_session_matches(sess)
+    stats = _reconcile_run_auto_match(sess, spending)
+    save_data(data)
+    resp = _reconcile_api_json(spending, sess)
+    body = resp.get_json()
+    body['stats'] = stats
+    body['restarted'] = True
     return jsonify(body)
 
 
