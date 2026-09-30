@@ -642,6 +642,43 @@ class TestReconcileApi(unittest.TestCase):
             self.assertEqual(matched['via'], 'auto')
             self.assertNotEqual(body['session']['rows'][0].get('reconcile_mark'), 'bill')
 
+    def test_link_manual_clears_keep_exclude_and_bill_mark(self):
+        self._login()
+        with mock.patch.object(app_mod, 'load_data', return_value=self._data), mock.patch.object(
+            app_mod, 'save_data'
+        ):
+            spending = self._data['users']['admin']['spending']
+            sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+            sess['uploads'] = [{
+                'id': 'u1',
+                'file_name': 't.csv',
+                'rows': [
+                    _stage_row(id='r1', amount=32.27, description="SAINSBURY'S SUPERMARKET"),
+                    _stage_row(id='r2', amount=4.5, description='COSTA'),
+                ],
+            }]
+            sess['auto_match_ran'] = True
+            sess['excluded_manual_ids'] = ['m1']
+            sess['kept_manual_ids'] = []
+            sess['uploads'][0]['rows'][0]['reconcile_mark'] = 'bill'
+
+            resp = self.client.post(
+                '/api/spending/reconcile/2024-06/link-manual',
+                json={'row_id': 'r1', 'manual_ids': ['m1']},
+            )
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            row = next(r for r in body['session']['rows'] if r['id'] == 'r1')
+            self.assertEqual(row['manual_match']['manual_ids'], ['m1'])
+            self.assertEqual(row['manual_match']['via'], 'user')
+            self.assertIsNone(row.get('reconcile_mark'))
+            self.assertTrue(row.get('include', True))
+            self.assertNotIn('m1', body['session']['excluded_manual_ids'])
+            man = next(m for m in body['session']['manuals'] if m['id'] == 'm1')
+            self.assertEqual(man['status'], 'matched')
+            self.assertEqual(body['session']['totals']['user_matched_count'], 1)
+            self.assertEqual(body['session']['totals']['unaccounted_bank_count'], 1)
+
 
 class TestReconcileUpload(unittest.TestCase):
     def setUp(self):
@@ -773,12 +810,114 @@ class TestReconcileUiPresence(unittest.TestCase):
         self.assertIn('Keep all', js)
         self.assertIn('Ignore all', js)
         self.assertIn('data-keep-all-manuals', js)
+        self.assertIn('data-match-manual', js)
+        self.assertIn('data-link-manual-to-row', js)
+        self.assertIn('leftoverMatchPickerHtml', js)
+        self.assertIn('bankCandidatesForManual', js)
         self.assertIn('Unaccounted statement rows', js)
+        self.assertIn('reconcile-unaccounted-filter', js)
+        self.assertIn('data-mark-visible-bills', js)
+        self.assertIn('data-undo-bill-marks', js)
+        self.assertIn('billMarkUndoStack', js)
+        self.assertIn('/mark-bills', js)
+        self.assertIn('bill_auto_marks', js)
         self.assertIn('outgoing on statements', js)
         self.assertIn('prettyDate: true', js)
         self.assertIn('function restartMatching(', js)
         self.assertIn('/restart-match', js)
         self.assertIn('Unmatched spending kept', js)
+
+
+class TestReconcileMarkBillsApi(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self._data = {
+            'users': {
+                'admin': {
+                    'spending': {
+                        'transactions': [],
+                        'statements': [],
+                        'monthly_insights': {},
+                        'classification_overrides': {},
+                        'classification_cache': {},
+                        'daily_budget': {
+                            'plan': {
+                                'bill_items': [
+                                    {'label': 'Rent', 'amount': 800.0, 'category': 'housing', 'included': True},
+                                ],
+                            },
+                        },
+                        'reconcile_sessions': {},
+                    }
+                }
+            },
+            'loans': {},
+        }
+
+    def _login(self):
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'admin'
+
+    def test_mark_bills_bulk_set_and_clear(self):
+        self._login()
+        with mock.patch.object(app_mod, 'load_data', return_value=self._data), mock.patch.object(
+            app_mod, 'save_data'
+        ):
+            spending = self._data['users']['admin']['spending']
+            sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+            sess['uploads'] = [{
+                'id': 'u1',
+                'file_name': 't.csv',
+                'rows': [
+                    _stage_row(id='r1', amount=50.0, description='WATER'),
+                    _stage_row(id='r2', amount=30.0, description='GAS'),
+                    _stage_row(id='r3', amount=10.0, description='SNACK'),
+                ],
+            }]
+            sess['auto_match_ran'] = True
+
+            resp = self.client.post(
+                '/api/spending/reconcile/2024-06/mark-bills',
+                json={'row_ids': ['r1', 'r2'], 'reconcile_mark': 'bill'},
+            )
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertEqual(body['updated'], 2)
+            by_id = {r['id']: r for r in body['session']['rows']}
+            self.assertEqual(by_id['r1']['reconcile_mark'], 'bill')
+            self.assertEqual(by_id['r2']['reconcile_mark'], 'bill')
+            self.assertIsNone(by_id['r3'].get('reconcile_mark'))
+            self.assertEqual(body['session']['totals']['bill_marked_count'], 2)
+
+            resp = self.client.post(
+                '/api/spending/reconcile/2024-06/mark-bills',
+                json={'row_ids': ['r1'], 'reconcile_mark': None},
+            )
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertEqual(body['updated'], 1)
+            by_id = {r['id']: r for r in body['session']['rows']}
+            self.assertIsNone(by_id['r1'].get('reconcile_mark'))
+            self.assertEqual(by_id['r2']['reconcile_mark'], 'bill')
+            self.assertEqual(body['session']['totals']['bill_marked_count'], 1)
+
+    def test_auto_match_api_returns_bill_auto_marks(self):
+        self._login()
+        with mock.patch.object(app_mod, 'load_data', return_value=self._data), mock.patch.object(
+            app_mod, 'save_data'
+        ):
+            spending = self._data['users']['admin']['spending']
+            sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+            sess['uploads'] = [{
+                'id': 'u1',
+                'file_name': 't.csv',
+                'rows': [_stage_row(id='r1', amount=800.0, description='RENT')],
+            }]
+            resp = self.client.post('/api/spending/reconcile/2024-06/auto-match', json={})
+            self.assertEqual(resp.status_code, 200)
+            body = resp.get_json()
+            self.assertEqual(body['stats']['bill_auto_marks'], 1)
+            self.assertEqual(body['session']['rows'][0]['reconcile_mark'], 'bill')
 
 
 class TestHomeStatementMonths(unittest.TestCase):

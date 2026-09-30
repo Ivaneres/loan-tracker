@@ -68,6 +68,10 @@
   let seenOrder = [];
   let decidedKeys = new Set();
   let undoStack = [];
+  let unaccountedFilterQuery = '';
+  let billMarkUndoStack = [];
+  let matchPickerManualId = null;
+  let matchPickerQuery = '';
 
   function api(path, opts) {
     const options = opts || {};
@@ -106,10 +110,21 @@
     undoStack = [];
     cursor = 0;
     selectedSuggestion = null;
+    unaccountedFilterQuery = '';
+    billMarkUndoStack = [];
+    matchPickerManualId = null;
+    matchPickerQuery = '';
   }
 
   function refreshFromSession(payload) {
     sessionData = payload && payload.session ? payload.session : payload;
+    if (matchPickerManualId) {
+      const still = unclaimedManuals().some((m) => String(m.id) === String(matchPickerManualId));
+      if (!still) {
+        matchPickerManualId = null;
+        matchPickerQuery = '';
+      }
+    }
     renderAll();
   }
 
@@ -132,6 +147,45 @@
 
   function leftoverCount() {
     return ((sessionData && sessionData.totals && sessionData.totals.unmatched_manual_count) || 0);
+  }
+
+  function unaccountedBankRows() {
+    return ((sessionData && sessionData.rows) || []).filter((r) => {
+      if (r.include === false || r.ledger_duplicate) return false;
+      if (String(r.direction || '') !== 'outgoing') return false;
+      if (r.manual_match || r.transfer_pair) return false;
+      if (String(r.reconcile_mark || '') === 'bill') return false;
+      return true;
+    });
+  }
+
+  function bankCandidatesForManual(manual) {
+    const manAmt = round2(manual && manual.amount);
+    const manDate = String((manual && manual.date) || '').slice(0, 10);
+    const q = String(matchPickerQuery || '').trim().toLowerCase();
+    return unaccountedBankRows()
+      .map((r) => {
+        const amtDiff = Math.abs(round2(r.amount) - manAmt);
+        let dayDiff = 9999;
+        try {
+          if (manDate && r.date) {
+            dayDiff = Math.abs(
+              (Date.parse(String(r.date).slice(0, 10)) - Date.parse(manDate)) / 86400000,
+            );
+          }
+        } catch (e) {
+          dayDiff = 9999;
+        }
+        return { row: r, amtDiff, dayDiff };
+      })
+      .filter((c) => {
+        if (!q) return true;
+        const r = c.row;
+        const hay = `${r.description || ''} ${r.amount} ${formatDay(r.date)} ${r.bank_source || ''}`.toLowerCase();
+        return hay.includes(q);
+      })
+      .sort((a, b) => (a.amtDiff - b.amtDiff) || (a.dayDiff - b.dayDiff))
+      .slice(0, 40);
   }
 
   function suggestionIsExact(row, s) {
@@ -498,8 +552,41 @@
     const kept = m.status === 'kept' || m.status === 'unclaimed';
     const keepCls = kept && !ignored ? ' is-selected' : '';
     const ignoreCls = ignored ? ' is-selected' : '';
-    return `<button type="button" class="reconcile-btn reconcile-btn--ghost reconcile-choice-btn${keepCls}" data-keep-manual="${escapeHtml(m.id)}">Keep</button>
+    const matching = String(matchPickerManualId || '') === String(m.id);
+    const canMatch = unaccountedBankRows().length > 0;
+    const matchCls = matching ? ' is-selected' : '';
+    return `<button type="button" class="reconcile-btn reconcile-btn--ghost reconcile-choice-btn${matchCls}" data-match-manual="${escapeHtml(m.id)}" ${canMatch ? '' : 'disabled'}>${matching ? 'Cancel' : 'Match'}</button>
+      <button type="button" class="reconcile-btn reconcile-btn--ghost reconcile-choice-btn${keepCls}" data-keep-manual="${escapeHtml(m.id)}">Keep</button>
       <button type="button" class="reconcile-btn reconcile-btn--danger reconcile-choice-btn${ignoreCls}" data-exclude-manual="${escapeHtml(m.id)}">Ignore</button>`;
+  }
+
+  function leftoverMatchPickerHtml(m) {
+    if (String(matchPickerManualId || '') !== String(m.id)) return '';
+    const candidates = bankCandidatesForManual(m);
+    const filterVal = escapeHtml(matchPickerQuery);
+    const list = candidates.length
+      ? `<ul class="reconcile-manual-match-list">${candidates
+          .map(({ row, amtDiff }) => {
+            const diffNote = amtDiff >= 0.005
+              ? ` · <span class="reconcile-amt-diff">${formatMoney(amtDiff)} off</span>`
+              : '';
+            return `<li>
+              <button type="button" class="reconcile-suggest-card" data-link-manual-to-row="${escapeHtml(row.id)}" data-manual-id="${escapeHtml(m.id)}">
+                <strong>${escapeHtml(row.description || '')}</strong>
+                <span>${formatMoney(row.amount)} · ${escapeHtml(formatDay(row.date))}${row.bank_source ? ` · ${escapeHtml(row.bank_source)}` : ''}${diffNote}</span>
+              </button>
+            </li>`;
+          })
+          .join('')}</ul>`
+      : '<p class="reconcile-suggest-empty">No matching statement rows. Try a different search, or leave this spending unmatched.</p>';
+    return `<div class="reconcile-manual-match-picker" data-match-picker-for="${escapeHtml(m.id)}">
+      <p class="reconcile-suggest-label">Pick a statement row</p>
+      <label class="reconcile-unaccounted-filter">
+        <span class="sr-only">Search statement rows</span>
+        <input type="search" class="reconcile-input" data-match-picker-filter placeholder="Search description, amount, bank…" value="${filterVal}" autocomplete="off" />
+      </label>
+      ${list}
+    </div>`;
   }
 
   function summaryLine(row, actionsHtml) {
@@ -599,13 +686,7 @@
     const markedRows = ((sessionData && sessionData.rows) || []).filter(
       (r) => r.include !== false && String(r.reconcile_mark || '') === 'bill',
     );
-    const unaccounted = ((sessionData && sessionData.rows) || []).filter((r) => {
-      if (r.include === false || r.ledger_duplicate) return false;
-      if (String(r.direction || '') !== 'outgoing') return false;
-      if (r.manual_match || r.transfer_pair) return false;
-      if (String(r.reconcile_mark || '') === 'bill') return false;
-      return true;
-    });
+    const unaccounted = unaccountedBankRows();
     const manuals = unclaimedManuals();
     const expectedList = bills.length
       ? `<ul class="reconcile-unclaimed-list">${bills
@@ -688,12 +769,13 @@
       : '';
     const leftoverList = manuals.length
       ? `<ul class="reconcile-unclaimed-list" id="reconcile-unclaimed-list">${manuals
-          .map((m) => `<li class="reconcile-unclaimed-item${m.status === 'excluded' ? ' is-ignored' : ' is-keep'}">
+          .map((m) => `<li class="reconcile-unclaimed-item${m.status === 'excluded' ? ' is-ignored' : ' is-keep'}${String(matchPickerManualId || '') === String(m.id) ? ' is-matching' : ''}">
             <span class="reconcile-unclaimed-copy">
               <strong>${escapeHtml(m.description)}</strong>
               <span class="reconcile-unclaimed-meta">${formatMoney(m.amount)} · ${escapeHtml(formatDay(m.date))}</span>
             </span>
             <span class="reconcile-unclaimed-actions">${leftoverChoiceButtons(m)}</span>
+            ${leftoverMatchPickerHtml(m)}
           </li>`)
           .join('')}</ul>`
       : '<p class="reconcile-unclaimed-empty">Nothing left unmatched — everything you logged was matched or ignored.</p>';
@@ -711,9 +793,24 @@
       ? `<p class="reconcile-recap-note${billDiff >= 0.01 && bills.length && markedRows.length ? ' reconcile-recap-note--warn' : ''}">Marked ${formatMoney(markedTotal)} · planned ${formatMoney(expectedTotal)}${billDiff >= 0.01 && bills.length ? ' — these don’t match yet' : ''}.</p>`
       : '';
 
+    const unaccountedBulk = unaccounted.length
+      ? `<div class="reconcile-bulk-actions">
+          <button type="button" class="reconcile-btn reconcile-btn--ghost" data-mark-visible-bills>Mark visible as bills</button>
+          <button type="button" class="reconcile-btn reconcile-btn--ghost" data-undo-bill-marks ${billMarkUndoStack.length ? '' : 'disabled'}>Undo</button>
+        </div>`
+      : '';
+    const filterVal = escapeHtml(unaccountedFilterQuery);
+    const unaccountedToolbar = unaccounted.length
+      ? `<label class="reconcile-unaccounted-filter">
+          <span class="sr-only">Search unaccounted rows</span>
+          <input type="search" id="reconcile-unaccounted-filter" class="reconcile-input" placeholder="Search description, amount, bank…" value="${filterVal}" autocomplete="off" />
+        </label>`
+      : '';
     const unaccountedList = unaccounted.length
-      ? `<ul class="reconcile-unclaimed-list">${unaccounted
-          .map((r) => `<li class="reconcile-unclaimed-item">
+      ? `<ul class="reconcile-unclaimed-list" id="reconcile-unaccounted-list">${unaccounted
+          .map((r) => {
+            const hay = `${r.description || ''} ${r.amount} ${formatDay(r.date)} ${r.bank_source || ''}`.toLowerCase();
+            return `<li class="reconcile-unclaimed-item" data-unaccounted-row="${escapeHtml(r.id)}" data-filter-text="${escapeHtml(hay)}">
             <span class="reconcile-unclaimed-copy">
               <strong>${escapeHtml(r.description)}</strong>
               <span class="reconcile-unclaimed-meta">${formatMoney(r.amount)} · ${escapeHtml(formatDay(r.date))}${r.bank_source ? ` · ${escapeHtml(r.bank_source)}` : ''}</span>
@@ -722,7 +819,8 @@
               <button type="button" class="reconcile-btn reconcile-btn--ghost" data-mark-bill-row="${escapeHtml(r.id)}">This is a bill</button>
               <button type="button" class="reconcile-btn reconcile-btn--ghost" data-ignore-row="${escapeHtml(r.id)}">Ignore</button>
             </span>
-          </li>`)
+          </li>`;
+          })
           .join('')}</ul>`
       : '<p class="reconcile-unclaimed-empty">Every leftover statement row is either matched, a transfer, or marked as a bill.</p>';
 
@@ -745,7 +843,7 @@
           <h4>Unmatched spending</h4>
           ${leftoverBulk}
         </div>
-        <p class="reconcile-panel-desc">You logged these, but they didn’t show up on the statements. Keep them, or ignore any that weren’t real.</p>
+        <p class="reconcile-panel-desc">You logged these, but they didn’t show up on the statements. Match one to a leftover bank row, keep it, or ignore any that weren’t real.</p>
         ${leftoverList}
       </section>
       <section class="reconcile-summary-block">
@@ -758,10 +856,43 @@
         </div>
       </section>
       <section class="reconcile-summary-block">
-        <h4>Unaccounted statement rows</h4>
-        <p class="reconcile-panel-desc">These weren’t matched to spending you logged. They’ll import as new, unless you mark them as a bill or ignore them.</p>
+        <div class="reconcile-summary-block-head">
+          <h4>Unaccounted statement rows</h4>
+          ${unaccountedBulk}
+        </div>
+        <p class="reconcile-panel-desc">These weren’t matched to spending you logged. They’ll import as new, unless you mark them as a bill or ignore them. Search to narrow the list, then mark all visible rows as bills.</p>
+        ${unaccountedToolbar}
         ${unaccountedList}
       </section>`;
+    applyUnaccountedFilter();
+  }
+
+  function applyUnaccountedFilter() {
+    const q = String(unaccountedFilterQuery || '').trim().toLowerCase();
+    const list = $('reconcile-unaccounted-list');
+    if (!list) return;
+    let visible = 0;
+    list.querySelectorAll('[data-unaccounted-row]').forEach((el) => {
+      const hay = String(el.getAttribute('data-filter-text') || '');
+      const show = !q || hay.includes(q);
+      el.classList.toggle('hidden', !show);
+      if (show) visible += 1;
+    });
+    const markBtn = document.querySelector('[data-mark-visible-bills]');
+    if (markBtn) {
+      markBtn.disabled = visible === 0;
+      markBtn.textContent = q
+        ? `Mark visible as bills (${visible})`
+        : 'Mark visible as bills';
+    }
+  }
+
+  function visibleUnaccountedRowIds() {
+    const list = $('reconcile-unaccounted-list');
+    if (!list) return [];
+    return [...list.querySelectorAll('[data-unaccounted-row]:not(.hidden)')]
+      .map((el) => el.getAttribute('data-unaccounted-row'))
+      .filter(Boolean);
   }
 
   function renderPhases() {
@@ -865,7 +996,12 @@
       .then((data) => {
         resetReviewState();
         sessionData = data && data.session ? data.session : data;
-        setStatus('Matching restarted.');
+        const bills = Number((data && data.stats && data.stats.bill_auto_marks) || 0);
+        setStatus(
+          bills
+            ? `Matching restarted — auto-marked ${bills} bill${bills === 1 ? '' : 's'}.`
+            : 'Matching restarted.',
+        );
         goStep(remainingEntries().length ? 'review' : 'confirm');
       })
       .catch((err) => setStatus(err.message || 'Restart failed', true));
@@ -1086,7 +1222,8 @@
           .then((data) => {
             resetReviewState();
             sessionData = data && data.session ? data.session : data;
-            setStatus('');
+            const bills = Number((data && data.stats && data.stats.bill_auto_marks) || 0);
+            setStatus(bills ? `Auto-marked ${bills} bill${bills === 1 ? '' : 's'} from Daily → Plan.` : '');
             goStep(remainingEntries().length ? 'review' : 'confirm');
           })
           .catch((err) => setStatus(err.message || 'Matching failed', true));
@@ -1231,7 +1368,90 @@
 
     const summaryBody = $('reconcile-summary-body');
     if (summaryBody) {
+      summaryBody.addEventListener('input', (ev) => {
+        const filter = ev.target.closest('#reconcile-unaccounted-filter');
+        if (filter) {
+          unaccountedFilterQuery = filter.value || '';
+          applyUnaccountedFilter();
+          return;
+        }
+        const matchFilter = ev.target.closest('[data-match-picker-filter]');
+        if (matchFilter) {
+          matchPickerQuery = matchFilter.value || '';
+          renderSummaryPhase();
+          const again = document.querySelector('[data-match-picker-filter]');
+          if (again) {
+            again.focus();
+            const len = again.value.length;
+            try { again.setSelectionRange(len, len); } catch (e) { /* ignore */ }
+          }
+        }
+      });
       summaryBody.addEventListener('click', (ev) => {
+        const toggleMatch = ev.target.closest('[data-match-manual]');
+        if (toggleMatch) {
+          const mid = toggleMatch.getAttribute('data-match-manual');
+          if (String(matchPickerManualId || '') === String(mid)) {
+            matchPickerManualId = null;
+            matchPickerQuery = '';
+          } else {
+            matchPickerManualId = mid;
+            matchPickerQuery = '';
+          }
+          renderSummaryPhase();
+          return;
+        }
+        const linkToRow = ev.target.closest('[data-link-manual-to-row]');
+        if (linkToRow) {
+          const rowId = linkToRow.getAttribute('data-link-manual-to-row');
+          const mid = linkToRow.getAttribute('data-manual-id');
+          if (!rowId || !mid) return;
+          postRaw('/link-manual', { row_id: rowId, manual_ids: [mid] })
+            .then((data) => {
+              matchPickerManualId = null;
+              matchPickerQuery = '';
+              refreshFromSession(data);
+              setStatus('Matched spending to statement row.');
+            })
+            .catch((err) => setStatus(err.message || 'Could not match', true));
+          return;
+        }
+        const markVisible = ev.target.closest('[data-mark-visible-bills]');
+        if (markVisible) {
+          const ids = visibleUnaccountedRowIds();
+          if (!ids.length) return;
+          billMarkUndoStack.push(ids.slice());
+          postRaw('/mark-bills', { row_ids: ids, reconcile_mark: 'bill' })
+            .then((data) => {
+              refreshFromSession(data);
+              setStatus(`Marked ${ids.length} row${ids.length === 1 ? '' : 's'} as bills.`);
+            })
+            .catch((err) => {
+              billMarkUndoStack.pop();
+              setStatus(err.message || 'Could not mark bills', true);
+              renderAll();
+            });
+          return;
+        }
+        const undoBills = ev.target.closest('[data-undo-bill-marks]');
+        if (undoBills) {
+          const ids = billMarkUndoStack.pop();
+          if (!ids || !ids.length) {
+            renderAll();
+            return;
+          }
+          postRaw('/mark-bills', { row_ids: ids, reconcile_mark: null })
+            .then((data) => {
+              refreshFromSession(data);
+              setStatus(`Undid bill mark on ${ids.length} row${ids.length === 1 ? '' : 's'}.`);
+            })
+            .catch((err) => {
+              billMarkUndoStack.push(ids);
+              setStatus(err.message || 'Undo failed', true);
+              renderAll();
+            });
+          return;
+        }
         const keepAll = ev.target.closest('[data-keep-all-manuals]');
         if (keepAll) {
           const ids = unclaimedManuals().map((m) => m.id).filter(Boolean);

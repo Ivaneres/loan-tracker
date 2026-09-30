@@ -5270,12 +5270,13 @@ def _match_expected_bill_item(
     bill_items: list,
     *,
     used_idxs: set[int] | None = None,
+    exact_amount: bool = False,
 ) -> int | None:
     """Return index into bill_items when statement line looks like a monthly expected bill."""
     used = used_idxs if used_idxs is not None else set()
     desc_n = _normalize_label(description)
     try:
-        amt = float(amount)
+        amt = round(float(amount), 2)
     except (TypeError, ValueError):
         return None
     best_j = None
@@ -5285,10 +5286,13 @@ def _match_expected_bill_item(
             continue
         label = str(b.get('label') or b.get('description') or '')
         try:
-            b_amt = float(b.get('amount') or 0)
+            b_amt = round(float(b.get('amount') or 0), 2)
         except (TypeError, ValueError):
             continue
-        if not _amounts_close_for_compare(amt, b_amt):
+        if exact_amount:
+            if abs(amt - b_amt) > 0.001:
+                continue
+        elif not _amounts_close_for_compare(amt, b_amt):
             continue
         sim = _manual_description_match_ratio(_normalize_label(label), desc_n)
         if sim > best_sim:
@@ -5297,6 +5301,51 @@ def _match_expected_bill_item(
     if best_j is None or best_sim < SPENDING_EXPECTED_BILL_SIM_THRESHOLD:
         return None
     return best_j
+
+
+def _reconcile_auto_mark_expected_bills(sess: dict, spending: dict) -> int:
+    """Mark leftover outgoing rows as bills when Daily → Plan label+amount match exactly.
+
+    One plan bill is claimed per statement row. Skips matched / transfer / ignored rows.
+    """
+    bills = _spending_included_bill_items(spending)
+    if not bills:
+        return 0
+    used: set[int] = set()
+    marked = 0
+    for _, _, _, _, row in _reconcile_iter_rows(sess):
+        if not row.get('include', True) or row.get('ledger_duplicate'):
+            continue
+        if row.get('manual_match') or row.get('transfer_pair'):
+            continue
+        if str(row.get('direction') or '') != 'outgoing':
+            continue
+        if str(row.get('reconcile_mark') or '') == 'bill':
+            # Still claim the plan slot so a second identical charge isn't double-marked.
+            already = _match_expected_bill_item(
+                str(row.get('description') or ''),
+                float(row.get('amount') or 0),
+                bills,
+                used_idxs=used,
+                exact_amount=True,
+            )
+            if already is not None:
+                used.add(already)
+            continue
+        idx = _match_expected_bill_item(
+            str(row.get('description') or ''),
+            float(row.get('amount') or 0),
+            bills,
+            used_idxs=used,
+            exact_amount=True,
+        )
+        if idx is None:
+            continue
+        used.add(idx)
+        row['reconcile_mark'] = 'bill'
+        row['include'] = True
+        marked += 1
+    return marked
 
 
 def _spending_unmatched_manuals(
@@ -6280,6 +6329,7 @@ def _reconcile_run_auto_match(sess: dict, spending: dict) -> dict:
         'netted_manual_matches': 0,
         'netted_bank_matches': 0,
         'transfer_auto_pairs': 0,
+        'bill_auto_marks': 0,
     }
 
     # Multiple passes: a row that skipped an ambiguous date+amount pool can match
@@ -6370,6 +6420,9 @@ def _reconcile_run_auto_match(sess: dict, spending: dict) -> dict:
         o['transfer_pair'] = {'peer_row_id': str(i.get('id') or ''), 'via': 'auto', 'pair_key': pk}
         i['transfer_pair'] = {'peer_row_id': str(o.get('id') or ''), 'via': 'auto', 'pair_key': pk}
         stats['transfer_auto_pairs'] += 1
+
+    # After spending/transfer claims: leftover exact Daily → Plan bills.
+    stats['bill_auto_marks'] = _reconcile_auto_mark_expected_bills(sess, spending)
 
     sess['auto_match_ran'] = True
     sess['status'] = 'matched'
@@ -9357,6 +9410,8 @@ def reconcile_link_manual(month):
     data, spending, sess, err = _reconcile_load_context(month)
     if err:
         return jsonify({'error': err}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported.'}), 400
     payload = request.get_json(silent=True) or {}
     row_id = str(payload.get('row_id') or '')
     manual_ids = payload.get('manual_ids') or []
@@ -9367,8 +9422,23 @@ def reconcile_link_manual(month):
         return jsonify({'error': 'Row not found'}), 404
     ids = [str(x) for x in manual_ids if str(x)]
     _reconcile_release_manual_ids(sess, set(ids), keep_row_id=row_id)
+    # Linking from Import leftover clears Keep/Ignore on those manuals.
+    _reconcile_keep_manual_ids(sess, ids, keep=False)
+    excluded = [str(x) for x in (sess.get('excluded_manual_ids') or [])]
+    drop = set(ids)
+    sess['excluded_manual_ids'] = [x for x in excluded if x not in drop]
+    # Bank row becomes a spending match — drop bill / transfer / ignore.
+    tp = row.get('transfer_pair') or {}
+    peer_id = str(tp.get('peer_row_id') or '')
+    if tp:
+        row['transfer_pair'] = None
+        _, _, _, _, peer = _reconcile_find_row(sess, peer_id)
+        if peer is not None:
+            peer['transfer_pair'] = None
     kind = 'netted_manuals' if len(ids) > 1 else 'single'
     row['manual_match'] = {'kind': kind, 'manual_ids': ids, 'via': 'user'}
+    row['reconcile_mark'] = None
+    row['include'] = True
     save_data(data)
     return _reconcile_api_json(spending, sess)
 
@@ -9480,6 +9550,45 @@ def reconcile_patch_row(month, row_id):
             row['include'] = True
     save_data(data)
     return _reconcile_api_json(spending, sess)
+
+
+@app.route('/api/spending/reconcile/<month>/mark-bills', methods=['POST'])
+@login_required
+def reconcile_mark_bills(month):
+    """Bulk set/clear reconcile_mark=bill on row_ids[] (Import unaccounted helper)."""
+    data, spending, sess, err = _reconcile_load_context(month)
+    if err:
+        return jsonify({'error': err}), 400
+    if sess.get('status') == 'imported':
+        return jsonify({'error': 'Session already imported.'}), 400
+    payload = request.get_json(silent=True) or {}
+    raw_ids = payload.get('row_ids') if isinstance(payload, dict) else None
+    if not isinstance(raw_ids, list):
+        return jsonify({'error': 'row_ids[] required'}), 400
+    ids = [str(x) for x in raw_ids if str(x)]
+    if not ids:
+        return jsonify({'error': 'row_ids[] required'}), 400
+    mark = payload.get('reconcile_mark')
+    as_bill = str(mark) == 'bill'
+    clear = mark in (None, '', False)
+    if not as_bill and not clear:
+        return jsonify({'error': 'reconcile_mark must be "bill" or null'}), 400
+    updated = 0
+    for rid in ids:
+        _, _, _, _, row = _reconcile_find_row(sess, rid)
+        if row is None:
+            continue
+        if as_bill:
+            row['reconcile_mark'] = 'bill'
+            row['include'] = True
+        else:
+            row['reconcile_mark'] = None
+        updated += 1
+    save_data(data)
+    resp = _reconcile_api_json(spending, sess)
+    body = resp.get_json()
+    body['updated'] = updated
+    return jsonify(body)
 
 
 @app.route('/api/spending/reconcile/<month>/suggestions', methods=['GET'])

@@ -483,5 +483,83 @@ class TestReconcileAutoMatchPriority(unittest.TestCase):
         self.assertEqual(sess['status'], 'matched')
 
 
+class TestReconcileAutoMarkBills(unittest.TestCase):
+    def _spending_with_bills(self, manuals, bill_items, uploads, month='2024-07'):
+        spending = {
+            'transactions': manuals,
+            'daily_budget': {'plan': {'bill_items': bill_items}},
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, month)
+        sess['uploads'] = uploads
+        return sess, spending
+
+    def test_exact_label_and_amount_auto_marks_bill(self):
+        sess, spending = self._spending_with_bills(
+            [],
+            [{'label': 'Netflix', 'amount': 15.99, 'category': 'subscriptions', 'included': True}],
+            [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
+                _row(id='r1', date='2024-07-05', amount=15.99, description='NETFLIX.COM'),
+                _row(id='r2', date='2024-07-06', amount=4.50, description='COFFEE'),
+            ]}],
+        )
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['bill_auto_marks'], 1)
+        by_id = {r['id']: r for r in sess['uploads'][0]['rows']}
+        self.assertEqual(by_id['r1'].get('reconcile_mark'), 'bill')
+        self.assertIsNone(by_id['r2'].get('reconcile_mark'))
+
+    def test_amount_must_match_exactly_for_auto_bill(self):
+        sess, spending = self._spending_with_bills(
+            [],
+            [{'label': 'Rent', 'amount': 800.0, 'category': 'housing', 'included': True}],
+            [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
+                _row(id='r1', date='2024-07-01', amount=801.0, description='RENT PAYMENT'),
+            ]}],
+        )
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['bill_auto_marks'], 0)
+        self.assertIsNone(sess['uploads'][0]['rows'][0].get('reconcile_mark'))
+
+    def test_weak_label_similarity_does_not_auto_mark(self):
+        sess, spending = self._spending_with_bills(
+            [],
+            [{'label': 'Council Tax', 'amount': 120.0, 'category': 'housing', 'included': True}],
+            [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
+                _row(id='r1', date='2024-07-01', amount=120.0, description='TESCO STORES'),
+            ]}],
+        )
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['bill_auto_marks'], 0)
+
+    def test_manual_match_wins_over_bill_auto_mark(self):
+        sess, spending = self._spending_with_bills(
+            [_manual(id='m1', date='2024-07-05', amount=15.99, description='Netflix')],
+            [{'label': 'Netflix', 'amount': 15.99, 'category': 'subscriptions', 'included': True}],
+            [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
+                _row(id='r1', date='2024-07-05', amount=15.99, description='NETFLIX.COM'),
+            ]}],
+        )
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['manual_auto_matches'], 1)
+        self.assertEqual(stats['bill_auto_marks'], 0)
+        self.assertEqual(_matched_ids(sess), {'r1': ['m1']})
+        self.assertIsNone(sess['uploads'][0]['rows'][0].get('reconcile_mark'))
+
+    def test_one_plan_bill_claimed_per_row(self):
+        sess, spending = self._spending_with_bills(
+            [],
+            [{'label': 'Spotify', 'amount': 10.99, 'category': 'subscriptions', 'included': True}],
+            [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
+                _row(id='r1', date='2024-07-01', amount=10.99, description='SPOTIFY'),
+                _row(id='r2', date='2024-07-15', amount=10.99, description='SPOTIFY PREMIUM'),
+            ]}],
+        )
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['bill_auto_marks'], 1)
+        marks = [r.get('reconcile_mark') for r in sess['uploads'][0]['rows']]
+        self.assertEqual(marks.count('bill'), 1)
+
+
 if __name__ == '__main__':
     unittest.main()
