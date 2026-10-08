@@ -4171,8 +4171,8 @@ def _daily_budget_allocate_day_leftover(
 ) -> tuple[float, float, float]:
     """Split one day's leftover into (repay, roll_forward, goals_filled_delta).
 
-    Debt repay is the only physical skim (reduces carry). ``roll_forward`` is also
-    the amount that counts toward underspend/goals after skimming.
+    Debt repay is the only physical skim (reduces carry). ``roll_forward`` is what
+    ``carry_surplus`` may roll to the next day after that skim.
     """
     raw = max(0.0, round(float(raw or 0), 2))
     debt_left = max(0.0, round(float(debt_left or 0), 2))
@@ -4646,11 +4646,10 @@ def _daily_budget_skim_totals(
     goals_capacity: float,
     priority: str,
 ) -> dict:
-    """Sum debt repay + post-skim underspend from daily leftovers through ``through``."""
+    """Sum debt repaid from daily leftovers through ``through``."""
     debt_left = max(0.0, round(float(debt_open or 0), 2))
     goals_filled = 0.0
     repaid = 0.0
-    saved = 0.0
     end = min(through, period_end)
     d = pacing_start
     while d <= end:
@@ -4658,7 +4657,7 @@ def _daily_budget_skim_totals(
         lim = float(limits.get(key, 0) or 0)
         spent = float(spend_by_date.get(key, 0) or 0)
         raw = max(0.0, round(lim - spent, 2))
-        repay, roll, filled_delta = _daily_budget_allocate_day_leftover(
+        repay, _roll, filled_delta = _daily_budget_allocate_day_leftover(
             raw,
             debt_left=debt_left,
             goals_filled=goals_filled,
@@ -4668,11 +4667,9 @@ def _daily_budget_skim_totals(
         debt_left = round(max(0.0, debt_left - repay), 2)
         goals_filled = round(goals_filled + filled_delta, 2)
         repaid = round(repaid + repay, 2)
-        saved = round(saved + roll, 2)
         d += timedelta(days=1)
     return {
         'repaid': repaid,
-        'goals_pot': saved,
         'balance': debt_left,
     }
 
@@ -5034,7 +5031,6 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         goals_capacity=goals_capacity,
         priority=priority,
     )
-    underspend_total = float(skim['goals_pot'])
     repaid_this_period = float(skim['repaid'])
     debt_balance = float(skim['balance'])
 
@@ -5115,7 +5111,6 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         # Unclamped period result for Goals leftover vs discretionary (negative when over).
         'period_net_saved': round(window_pool - spent_mtd, 2),
         'pace_projection': pace_projection,
-        'underspend_saved': underspend_total,
         'underspend_priority': priority,
         'overspend_debt': overspend_debt,
         'overspend_prompt': overspend_prompt,
@@ -11731,12 +11726,7 @@ def spending_daily_goals():
     goals = bucket.setdefault('goals', [])
 
     if request.method == 'GET':
-        status = _daily_budget_status(spending)
-        return jsonify({
-            'ok': True,
-            'goals': goals,
-            'underspend_saved': status.get('underspend_saved', 0),
-        })
+        return jsonify({'ok': True, 'goals': goals})
 
     payload = request.get_json(silent=True) or {}
     name = str(payload.get('name') or '').strip()[:120]
@@ -11754,8 +11744,7 @@ def spending_daily_goals():
     }
     goals.append(goal)
     save_data(data)
-    status = _daily_budget_status(spending)
-    return jsonify({'ok': True, 'goal': goal, 'goals': goals, 'underspend_saved': status.get('underspend_saved', 0)})
+    return jsonify({'ok': True, 'goal': goal, 'goals': goals})
 
 
 @app.route('/api/spending/daily/goals/<goal_id>', methods=['PATCH', 'DELETE'])
@@ -11789,8 +11778,7 @@ def spending_daily_goal_item(goal_id):
         except (TypeError, ValueError):
             return jsonify({'error': 'Invalid target_amount'}), 400
     save_data(data)
-    status = _daily_budget_status(spending)
-    return jsonify({'ok': True, 'goal': goal, 'goals': goals, 'underspend_saved': status.get('underspend_saved', 0)})
+    return jsonify({'ok': True, 'goal': goal, 'goals': goals})
 
 
 @app.route('/api/spending/daily/overspend/decision', methods=['POST'])

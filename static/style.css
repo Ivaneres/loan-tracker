@@ -3010,7 +3010,7 @@ body.db-page {
 
 .db-hero-meta {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 0.5rem;
 }
 
@@ -3025,10 +3025,6 @@ body.db-page {
 .db-meta-value {
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-}
-
-.db-meta-value--accent {
-    color: #a7f3d0;
 }
 
 .db-lead--tight {
@@ -4225,25 +4221,6 @@ body.db-page button.db-today-del:hover {
     border-radius: 999px;
     overflow: hidden;
     background: rgba(15, 28, 26, 0.08);
-}
-
-.db-alloc-underspend {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 0.75rem;
-    margin: 0 0 1.1rem;
-    padding: 0.7rem 0.85rem;
-    border-radius: 0.85rem;
-    background: rgba(13, 122, 98, 0.08);
-    border: 1px solid var(--db-line);
-    font-size: 0.88rem;
-    color: var(--db-muted);
-}
-
-.db-alloc-underspend strong {
-    font-family: var(--font-money);
-    color: var(--db-accent-deep);
 }
 
 .db-goal-form {

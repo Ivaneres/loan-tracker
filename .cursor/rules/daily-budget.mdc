@@ -13,7 +13,7 @@ Server logic: `_daily_budget_*` helpers and `/api/spending/daily/*` routes in `@
 
 - **Today** — hero (left/limit/spent/saved), add-spend form, spends list
 - **Plan** — income, bills, savings %, pay day, tracking from, daily mode
-- **Goals** — income allocation bar (discretionary / savings / expenses), cycle picker, goals, day chart, pace math
+- **Goals** — income allocation bar (discretionary / savings / expenses), cycle picker, goals (name + target only), day chart, pace math. Do not show a cumulative per-day underspend total (`max(0, limit − spent)` summed across days). That figure ignores overspend days. Net cycle result is `period_net_saved` (window pool − spent) and is not that sum.
 
 ## Entry date vs view date (important)
 

@@ -175,7 +175,7 @@ class TestDailyBudgetTrackingFrom(unittest.TestCase):
             date(2024, 2, 1),
         )
 
-    def test_status_excludes_pre_tracking_days_from_underspend(self):
+    def test_status_excludes_pre_tracking_days(self):
         spending = {
             'daily_budget': {
                 'plan': {
@@ -200,8 +200,6 @@ class TestDailyBudgetTrackingFrom(unittest.TestCase):
         self.assertEqual(status['period_end'], '2024-01-31')
         self.assertEqual(status['daily_limit'], 10.0)
         self.assertEqual(status['remaining_today'], 7.0)
-        # Only day 15 counts — not 14 phantom clear days × £10
-        self.assertEqual(status['underspend_saved'], 7.0)
         self.assertEqual(status['day_insights']['days_elapsed'], 1)
         self.assertEqual(len(status['days']), 1)
         # Pro-rated remaining pool: 17/31 * 310 − 3
@@ -353,7 +351,7 @@ class TestDailyBudgetStatus(unittest.TestCase):
         self.assertEqual(proj['remaining_after_today'], 310.0)
         self.assertEqual(proj['projected_daily'], round(310.0 / 29, 2))
 
-    def test_underspend_saved_sums_daily_leftover(self):
+    def test_period_net_saved_is_window_pool_minus_spend(self):
         spending = {
             'daily_budget': {
                 'plan': {
@@ -372,10 +370,9 @@ class TestDailyBudgetStatus(unittest.TestCase):
             'monthly_insights': {},
         }
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
-        # limit 10/day; leftover 8+8
-        self.assertEqual(status['underspend_saved'], 16.0)
         # Net = discretionary − spent_mtd; Jan has 31 days → pool 310, spent 4.
         self.assertEqual(status['period_net_saved'], 306.0)
+        self.assertNotIn('underspend_saved', status)
 
     def test_period_net_saved_goes_negative_when_over_discretionary(self):
         spending = {
@@ -396,8 +393,6 @@ class TestDailyBudgetStatus(unittest.TestCase):
         }
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 2))
         self.assertEqual(status['period_net_saved'], -90.0)
-        # Daily leftover sum stays non-negative (day 2 clear under limit).
-        self.assertGreaterEqual(status['underspend_saved'], 0.0)
 
     def test_day_insights_track_under_over_clear_and_streak(self):
         spending = {
@@ -1184,10 +1179,9 @@ class TestOverspendDebt(unittest.TestCase):
         }
         spending['daily_budget']['plan']['income_monthly'] = 290
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 2))
-        # 2 days × (£10 − £2) = £16 leftover; debt 15 → fully repaid; saved £1.
+        # 2 days × (£10 − £2) = £16 leftover; debt 15 → fully repaid.
         self.assertEqual(status['overspend_debt']['balance'], 0.0)
         self.assertEqual(status['overspend_debt']['repaid_this_period'], 15.0)
-        self.assertEqual(status['underspend_saved'], 1.0)
 
     def test_goals_first_protects_goal_capacity_before_debt(self):
         spending = {
@@ -1217,7 +1211,6 @@ class TestOverspendDebt(unittest.TestCase):
         # Almost full leftover ~£9.99/day × 2 ≈ £19.98.
         # Goals protect £12; remainder ~£7.98 skims to debt.
         status = app_mod._daily_budget_status(spending, as_of=date(2024, 2, 2))
-        self.assertGreaterEqual(status['underspend_saved'], 12.0)
         self.assertAlmostEqual(status['overspend_debt']['repaid_this_period'], 7.98, places=2)
         self.assertAlmostEqual(status['overspend_debt']['balance'], 12.02, places=2)
 

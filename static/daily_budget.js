@@ -475,7 +475,6 @@
     $('db-remaining').classList.toggle('db-hero-value--over', remaining < 0);
     $('db-daily-limit').textContent = money(limit);
     $('db-spent-today').textContent = money(spent);
-    $('db-underspend').textContent = money(status.underspend_saved);
     const pct = limit > 0 ? Math.min(100, Math.max(0, (spent / limit) * 100)) : spent > 0 ? 100 : 0;
     const bar = $('db-remaining-bar');
     if (bar) {
@@ -1491,10 +1490,6 @@
     renderCyclePicker(status);
     renderAllocBar(status.allocation || {});
     renderAllocRows(status.allocation || {});
-    const underEl = $('goals-underspend');
-    if (underEl) {
-      underEl.textContent = money(Math.max(0, Number(status.underspend_saved) || 0));
-    }
     renderGoalsOverspendPrompt(status);
     renderDebtCard(status);
     const goals = status.goals || [];
@@ -1502,20 +1497,15 @@
     const empty = $('goals-empty');
     list.innerHTML = '';
     empty.classList.toggle('hidden', goals.length > 0);
-    const saved = Math.max(0, Number(status.underspend_saved) || 0);
     goals.forEach((g) => {
-      const target = Number(g.target_amount) || 1;
-      const pct = Math.min(100, Math.round((saved / target) * 1000) / 10);
+      const target = Number(g.target_amount) || 0;
       const li = document.createElement('li');
       li.className = 'db-goal-card';
       li.innerHTML =
         '<div class="db-goal-top"><strong></strong><button type="button" class="db-today-del" aria-label="Delete goal">×</button></div>' +
-        '<div class="db-goal-targets"><span></span><span></span></div>' +
-        '<div class="db-goal-bar"><div class="db-goal-bar-fill"></div></div>';
+        '<div class="db-goal-targets"><span></span></div>';
       li.querySelector('strong').textContent = g.name;
-      li.querySelector('.db-goal-targets').children[0].textContent = money(saved) + ' of ' + money(target);
-      li.querySelector('.db-goal-targets').children[1].textContent = pct + '%';
-      li.querySelector('.db-goal-bar-fill').style.width = pct + '%';
+      li.querySelector('.db-goal-targets').children[0].textContent = 'Target ' + money(target);
       li.querySelector('button').addEventListener('click', () => deleteGoal(g.id));
       list.appendChild(li);
     });

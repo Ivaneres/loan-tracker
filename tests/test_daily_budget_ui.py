@@ -171,7 +171,9 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
             self.assertIn(needle, js)
         self.assertIn('id="goals-alloc-bar"', html)
         self.assertIn('id="goals-cycle-chips"', html)
-        self.assertIn('id="goals-underspend"', html)
+        self.assertNotIn('id="goals-underspend"', html)
+        self.assertNotIn('Underspend toward goals', html)
+        self.assertNotIn('id="db-underspend"', html)
 
 
 if __name__ == '__main__':
