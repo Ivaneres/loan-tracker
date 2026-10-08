@@ -160,6 +160,11 @@ SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
     c for c in SPENDING_ALLOWED_CATEGORIES if c not in ('unclassified',)
 ]
+# One-tap chips on the daily entry screen. Suggestions are manual spends seen
+# at least twice; the user can still pin a title that has never been logged.
+USUAL_SPEND_MAX = 12
+USUAL_SUGGEST_LIMIT = 8
+USUAL_SUGGEST_MIN_COUNT = 2
 
 
 def _sanitize_note(raw) -> str:
@@ -582,6 +587,8 @@ def _ensure_daily_budget(spending: dict) -> tuple[dict, bool]:
     decisions = bucket.get('overspend_decisions')
     if not isinstance(decisions, dict):
         bucket['overspend_decisions'] = {}
+        changed = True
+    if _normalize_usual_spends_in_bucket(bucket):
         changed = True
     return bucket, changed
 
@@ -4963,6 +4970,165 @@ def _daily_budget_common_titles(spending: dict, limit: int = 3) -> dict:
     return out
 
 
+def _usual_spend_title(raw) -> str:
+    return str(raw or '').strip()[:200]
+
+
+def _coerce_usual_amount(raw) -> float | None:
+    try:
+        amount = round(float(raw), 2)
+    except (TypeError, ValueError):
+        return None
+    if amount != amount or amount <= 0:
+        return None
+    return amount
+
+
+def _coerce_usual_category(raw) -> str:
+    category = str(raw or 'other').strip().lower()
+    if category not in DAILY_ENTRY_CATEGORIES:
+        return 'other'
+    return category
+
+
+def _clean_usual_spends(raw) -> list[dict]:
+    """Drop invalid pins and duplicate titles (first one wins)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        title = _usual_spend_title(item.get('title'))
+        amount = _coerce_usual_amount(item.get('amount'))
+        norm = _normalize_label(title)
+        if not title or not norm or amount is None or norm in seen:
+            continue
+        pin_id = str(item.get('id') or '').strip() or str(uuid.uuid4())
+        seen.add(norm)
+        out.append({
+            'id': pin_id,
+            'title': title,
+            'amount': amount,
+            'category': _coerce_usual_category(item.get('category')),
+        })
+    return out
+
+
+def _normalize_usual_spends_in_bucket(bucket: dict) -> bool:
+    if 'usual_spends' not in bucket:
+        return False
+    raw = bucket.get('usual_spends')
+    cleaned = _clean_usual_spends(raw if isinstance(raw, list) else [])
+    if raw != cleaned:
+        bucket['usual_spends'] = cleaned
+        return True
+    return False
+
+
+def _daily_budget_frequent_manuals(
+    spending: dict,
+    *,
+    exclude_norms: set[str] | None = None,
+    limit: int = USUAL_SUGGEST_LIMIT,
+    min_count: int = USUAL_SUGGEST_MIN_COUNT,
+) -> list[dict]:
+    """Manual spends logged at least ``min_count`` times, most frequent first.
+
+    Amount is the most common amount (ties: most recent). Category and title
+    casing follow the same rule. Statement imports and bare category labels
+    (the form's autofill) are ignored. Already-pinned titles are omitted.
+    """
+    exclude = {_normalize_label(str(n or '')) for n in (exclude_norms or set())}
+    exclude.discard('')
+    groups: dict[str, dict] = {}
+    entry_cats = set(DAILY_ENTRY_CATEGORIES)
+    for t in spending.get('transactions') or []:
+        if str(t.get('source') or '') != 'manual':
+            continue
+        if t.get('direction') != 'outgoing':
+            continue
+        if _spending_excluded_from_insight_metrics(t):
+            continue
+        cat = str(t.get('category') or '').strip().lower()
+        if cat not in entry_cats:
+            continue
+        raw = str(t.get('description') or '').strip()[:200]
+        norm = _normalize_label(raw)
+        if not norm or norm == _normalize_label(cat.replace('_', ' ')):
+            continue
+        amount = _coerce_usual_amount(t.get('amount'))
+        if amount is None:
+            continue
+        d_str = str(t.get('date') or '')[:10]
+        group = groups.get(norm)
+        if group is None:
+            group = {
+                'count': 0,
+                'displays': Counter(),
+                'categories': Counter(),
+                'amounts': Counter(),
+                'last_date': '',
+                'last_display': raw,
+                'amount_last': {},
+                'category_last': {},
+            }
+            groups[norm] = group
+        group['count'] += 1
+        group['displays'][raw] += 1
+        group['categories'][cat] += 1
+        group['amounts'][amount] += 1
+        if d_str >= group['amount_last'].get(amount, ''):
+            group['amount_last'][amount] = d_str
+        if d_str >= group['category_last'].get(cat, ''):
+            group['category_last'][cat] = d_str
+        if d_str >= group['last_date']:
+            group['last_date'] = d_str
+            group['last_display'] = raw
+
+    ranked = []
+    for norm, group in groups.items():
+        if norm in exclude or group['count'] < max(1, int(min_count)):
+            continue
+        display = max(
+            group['displays'].items(),
+            key=lambda kv: (kv[1], kv[0] == group['last_display'], kv[0]),
+        )[0]
+        amount = max(
+            group['amounts'].items(),
+            key=lambda kv: (kv[1], group['amount_last'].get(kv[0], ''), kv[0]),
+        )[0]
+        category = max(
+            group['categories'].items(),
+            key=lambda kv: (kv[1], group['category_last'].get(kv[0], ''), kv[0]),
+        )[0]
+        ranked.append({
+            'title': display,
+            'amount': amount,
+            'category': category,
+            'times': group['count'],
+            '_last': group['last_date'],
+            '_norm': norm,
+        })
+    ranked.sort(key=lambda row: (row['times'], row['_last'], row['_norm']), reverse=True)
+    return [
+        {
+            'title': row['title'],
+            'amount': row['amount'],
+            'category': row['category'],
+            'times': row['times'],
+        }
+        for row in ranked[: max(0, int(limit))]
+    ]
+
+
+def _daily_budget_usual_lists(spending: dict, bucket: dict) -> tuple[list, list]:
+    spends = bucket.get('usual_spends') if isinstance(bucket.get('usual_spends'), list) else []
+    exclude = {_normalize_label(str(item.get('title') or '')) for item in spends}
+    return spends, _daily_budget_frequent_manuals(spending, exclude_norms=exclude)
+
+
 def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     bucket, _ = _ensure_daily_budget(spending)
     plan = bucket.get('plan') or {}
@@ -5086,6 +5252,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         days_in_period=days_in_period,
     )
     cycles = _daily_budget_list_cycles(plan, spending, live_today)
+    usual_spends, usual_suggestions = _daily_budget_usual_lists(spending, bucket)
     return {
         'as_of': today_key,
         'month': today.strftime('%Y-%m'),
@@ -5119,6 +5286,8 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'transactions_today': txs_today,
         'goals': goals,
         'common_titles_by_category': _daily_budget_common_titles(spending, limit=3),
+        'usual_spends': usual_spends,
+        'usual_suggestions': usual_suggestions,
     }
 
 
@@ -11586,6 +11755,66 @@ def spending_daily_entry_delete(tx_id):
     save_data(data)
     status = _daily_budget_status(spending)
     return jsonify({'ok': True, 'status': status})
+
+
+def _usual_lists_payload(spending: dict, bucket: dict) -> dict:
+    spends, suggestions = _daily_budget_usual_lists(spending, bucket)
+    return {'ok': True, 'usual_spends': spends, 'usual_suggestions': suggestions}
+
+
+@app.route('/api/spending/daily/usual', methods=['POST'])
+@login_required
+def spending_daily_usual_create():
+    payload = request.get_json(silent=True) or {}
+    title = _usual_spend_title(payload.get('title'))
+    norm = _normalize_label(title)
+    if not title or not norm:
+        return jsonify({'error': 'Title is required'}), 400
+    amount = _coerce_usual_amount(payload.get('amount'))
+    if amount is None:
+        return jsonify({'error': 'Amount must be positive'}), 400
+    category = _coerce_usual_category(payload.get('category'))
+
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    bucket, _ = _ensure_daily_budget(spending)
+    spends = _clean_usual_spends(bucket.get('usual_spends'))
+    if any(_normalize_label(item['title']) == norm for item in spends):
+        return jsonify({'error': 'Already pinned'}), 400
+    if len(spends) >= USUAL_SPEND_MAX:
+        return jsonify({'error': f'You can pin up to {USUAL_SPEND_MAX} usual spends'}), 400
+    spends.append({
+        'id': str(uuid.uuid4()),
+        'title': title,
+        'amount': amount,
+        'category': category,
+    })
+    bucket['usual_spends'] = spends
+    save_data(data)
+    return jsonify(_usual_lists_payload(spending, bucket))
+
+
+@app.route('/api/spending/daily/usual/<pin_id>', methods=['DELETE'])
+@login_required
+def spending_daily_usual_delete(pin_id):
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    if changed:
+        save_data(data)
+    bucket, _ = _ensure_daily_budget(spending)
+    spends = _clean_usual_spends(bucket.get('usual_spends'))
+    kept = [item for item in spends if item['id'] != str(pin_id)]
+    if len(kept) == len(spends):
+        return jsonify({'error': 'Usual spend not found'}), 404
+    if kept:
+        bucket['usual_spends'] = kept
+    else:
+        bucket.pop('usual_spends', None)
+    save_data(data)
+    bucket, _ = _ensure_daily_budget(spending)
+    return jsonify(_usual_lists_payload(spending, bucket))
 
 
 @app.route('/api/spending/daily/plan', methods=['GET', 'PUT'])

@@ -51,6 +51,32 @@
 
             <p id="db-debt-note" class="db-debt-note hidden" hidden></p>
 
+            <div class="db-today-compose">
+            <section class="db-usual" aria-label="Usual spends">
+                <div class="db-usual-head">
+                    <span class="db-usual-label">Usual</span>
+                    <button type="button" id="db-usual-edit" class="db-usual-edit hidden" hidden>Edit</button>
+                </div>
+                <div id="db-usual-chips" class="db-usual-chips" role="group" aria-label="Pinned usual spends"></div>
+                <div id="db-usual-sheet" class="db-usual-sheet hidden" hidden>
+                    <span class="db-usual-label">Often logged</span>
+                    <div id="db-usual-suggests" class="db-usual-suggests"></div>
+                    <p id="db-usual-suggest-empty" class="db-hint db-hint--tight hidden" hidden>Nothing else shows up often.</p>
+                    <button type="button" id="db-usual-manual-toggle" class="db-usual-edit db-usual-manual-toggle">Enter your own</button>
+                    <div id="db-usual-manual" class="db-usual-manual hidden" hidden>
+                        <input id="db-usual-title" type="text" maxlength="200" placeholder="What for?" autocomplete="off">
+                        <input id="db-usual-amount" type="text" inputmode="decimal" placeholder="0.00" aria-label="Usual amount">
+                        <select id="db-usual-category" class="db-select" aria-label="Usual category"></select>
+                        <button type="button" id="db-usual-save" class="db-cta">Pin it</button>
+                    </div>
+                </div>
+                <p class="db-usual-note">Logs for <span id="db-usual-when">today</span>.</p>
+                <div id="db-usual-toast" class="db-usual-toast hidden" hidden role="status">
+                    <span id="db-usual-toast-text"></span>
+                    <button type="button" id="db-usual-undo">Undo</button>
+                </div>
+            </section>
+
             <form id="db-entry-form" class="db-entry" autocomplete="off">
                 <label class="db-entry-amount-wrap">
                     <span class="db-entry-currency">£</span>
@@ -88,6 +114,7 @@
                 </fieldset>
                 <button type="submit" class="db-cta" id="db-add-btn">Add spend</button>
             </form>
+            </div>
 
             <div class="db-today-list-wrap">
                 <h2 class="db-section-title" id="db-today-list-title">Spends</h2>

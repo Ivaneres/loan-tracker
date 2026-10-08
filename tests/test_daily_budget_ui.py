@@ -140,6 +140,37 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
+    def test_usual_spend_hooks_present(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/spending/daily')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        for needle in (
+            'id="db-usual-chips"',
+            'id="db-usual-sheet"',
+            'id="db-usual-suggests"',
+            'Enter your own',
+            'Often logged',
+        ):
+            self.assertIn(needle, html)
+
+        js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        for needle in (
+            'renderUsual',
+            'usual_suggestions',
+            'logUsual',
+            '/api/spending/daily/usual',
+            'db-usual-undo',
+        ):
+            self.assertIn(needle, js)
+
+        css = (ROOT / 'static' / 'style.css').read_text(encoding='utf-8')
+        self.assertIn('.db-usual-chip', css)
+        self.assertIn('.db-usual-suggest', css)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
     def test_overspend_debt_ui_hooks_present(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()

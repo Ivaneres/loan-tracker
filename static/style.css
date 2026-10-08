@@ -3216,6 +3216,228 @@ body.db-page button.db-title-chip--selected {
     color: #f4faf7;
 }
 
+.db-usual {
+    background: var(--db-surface);
+    border: 1px solid var(--db-line);
+    border-radius: 1.35rem;
+    padding: 0.95rem 1rem 0.85rem;
+    margin-bottom: 0.85rem;
+    box-shadow: 0 10px 30px rgba(15, 40, 34, 0.06);
+}
+
+.db-usual-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+.db-usual-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--db-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.db-usual-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.db-usual-chip {
+    border: 1px solid var(--db-line);
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 0.75rem;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--db-ink);
+    text-align: left;
+    line-height: 1.2;
+    cursor: pointer;
+}
+
+.db-usual-chip small {
+    display: block;
+    margin-top: 0.1rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--db-muted);
+}
+
+.db-usual-chip--add {
+    border-style: dashed;
+    color: var(--db-accent);
+    background: transparent;
+}
+
+.db-usual-x {
+    margin-left: 0.35rem;
+    color: var(--db-warn);
+}
+
+.db-usual-sheet {
+    margin-top: 0.65rem;
+    padding: 0.7rem;
+    border-radius: 0.9rem;
+    background: var(--db-surface-solid);
+    border: 1px solid var(--db-line);
+}
+
+.db-usual-sheet > .db-usual-label {
+    display: block;
+    margin-bottom: 0.4rem;
+}
+
+.db-usual-suggests {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 0.45rem;
+}
+
+.db-usual-suggest {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
+    border: 1px solid var(--db-line);
+    background: #fff;
+    border-radius: 0.75rem;
+    padding: 0.55rem 0.7rem;
+    text-align: left;
+    cursor: pointer;
+    color: var(--db-ink);
+}
+
+.db-usual-suggest > span:first-child {
+    min-width: 0;
+}
+
+.db-usual-suggest strong {
+    display: block;
+    font-size: 0.9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.db-usual-suggest small {
+    color: var(--db-muted);
+    font-weight: 600;
+    font-size: 0.7rem;
+}
+
+.db-usual-suggest-amt {
+    font-family: var(--font-money);
+    font-weight: 600;
+    font-size: 1rem;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+}
+
+.db-usual-manual-toggle {
+    margin-bottom: 0.55rem;
+}
+
+.db-usual-manual input,
+.db-usual-manual select {
+    width: 100%;
+    border: 1px solid var(--db-line);
+    background: var(--db-surface-solid);
+    border-radius: 0.85rem;
+    padding: 0.7rem 0.8rem;
+    font: inherit;
+    font-size: 0.95rem;
+    color: var(--db-ink);
+    margin-bottom: 0.55rem;
+    min-height: 2.75rem;
+}
+
+.db-usual-manual .db-cta {
+    margin-top: 0.1rem;
+    padding: 0.8rem 1rem;
+    font-size: 0.95rem;
+}
+
+.db-usual-note {
+    margin: 0.55rem 0 0;
+    font-size: 0.78rem;
+    color: var(--db-muted);
+    line-height: 1.4;
+}
+
+.db-usual-toast {
+    margin-top: 0.55rem;
+    background: var(--db-ink);
+    color: #f4faf7;
+    border-radius: 0.85rem;
+    padding: 0.55rem 0.7rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+}
+
+body.db-page button.db-usual-edit {
+    background: transparent;
+    color: var(--db-accent);
+    border: 0;
+    padding: 0.2rem 0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    border-radius: 0;
+}
+
+body.db-page button.db-usual-edit:hover,
+body.db-page button.db-usual-edit:focus-visible {
+    background: transparent;
+    color: var(--db-accent-deep);
+}
+
+body.db-page button.db-usual-chip {
+    background: rgba(255, 255, 255, 0.85);
+    color: var(--db-ink);
+    padding: 0.55rem 0.7rem;
+}
+
+body.db-page button.db-usual-chip:hover,
+body.db-page button.db-usual-chip:focus-visible {
+    background: #fff;
+    color: var(--db-ink);
+}
+
+body.db-page button.db-usual-chip--add,
+body.db-page button.db-usual-chip--add:hover,
+body.db-page button.db-usual-chip--add:focus-visible {
+    background: transparent;
+    color: var(--db-accent);
+}
+
+body.db-page button.db-usual-suggest,
+body.db-page button.db-usual-suggest:hover,
+body.db-page button.db-usual-suggest:focus-visible {
+    background: #fff;
+    color: var(--db-ink);
+    padding: 0.55rem 0.7rem;
+}
+
+body.db-page button.db-usual-undo,
+body.db-page button.db-usual-undo:hover,
+body.db-page button.db-usual-undo:focus-visible {
+    background: transparent;
+    color: #a7f3d0;
+    border: 0;
+    padding: 0.2rem 0.15rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
 .db-field input,
 .db-select,
 .db-bill-add input {
@@ -4560,6 +4782,17 @@ body.db-page button.db-today-del:hover {
     }
 
     #panel-today .db-entry {
+        margin-bottom: 0;
+    }
+
+    #panel-today .db-today-compose {
+        display: flex;
+        flex-direction: column;
+        gap: 0.85rem;
+        min-width: 0;
+    }
+
+    #panel-today .db-today-compose .db-usual {
         margin-bottom: 0;
     }
 

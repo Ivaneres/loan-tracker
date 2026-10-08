@@ -89,6 +89,12 @@
   let entryDate = '';
   let viewDate = '';
   let goalsAsOf = '';
+  let usualEditing = false;
+  let usualSheetOpen = false;
+  let usualManualOpen = false;
+  let usualBusy = false;
+  let usualUndoId = '';
+  let usualUndoTimer = null;
 
   const BillDiff = window.DbBillDiff || {};
   const billAmount = BillDiff.billAmount || ((b) => Number(b && b.amount) || 0);
@@ -259,6 +265,237 @@
     const hidden = $('db-entry-date-value');
     if (hidden) hidden.value = entryDate;
     updateAddButtonLabel();
+    updateUsualWhen();
+  }
+
+  function updateUsualWhen() {
+    const el = $('db-usual-when');
+    if (!el) return;
+    el.textContent = dateOffsetLabel(entryDate || localISODate());
+  }
+
+  function hideUsualToast() {
+    const toast = $('db-usual-toast');
+    if (!toast) return;
+    toast.hidden = true;
+    toast.classList.add('hidden');
+  }
+
+  function showUsualUndo(tx) {
+    usualUndoId = tx && tx.id ? String(tx.id) : '';
+    const toast = $('db-usual-toast');
+    const undo = $('db-usual-undo');
+    const text = $('db-usual-toast-text');
+    if (!usualUndoId || !toast || !text) return;
+    text.textContent = 'Added ' + (tx.description || 'spend') + ' · ' + money(tx.amount);
+    if (undo) undo.hidden = false;
+    toast.hidden = false;
+    toast.classList.remove('hidden');
+    clearTimeout(usualUndoTimer);
+    usualUndoTimer = setTimeout(() => {
+      usualUndoId = '';
+      hideUsualToast();
+    }, 5000);
+  }
+
+  function showUsualUndone() {
+    const toast = $('db-usual-toast');
+    const undo = $('db-usual-undo');
+    const text = $('db-usual-toast-text');
+    if (!toast || !text) return;
+    text.textContent = 'Undone';
+    if (undo) undo.hidden = true;
+    toast.hidden = false;
+    toast.classList.remove('hidden');
+    clearTimeout(usualUndoTimer);
+    usualUndoTimer = setTimeout(hideUsualToast, 1500);
+  }
+
+  function setUsualVisible(el, on) {
+    if (!el) return;
+    el.hidden = !on;
+    el.classList.toggle('hidden', !on);
+  }
+
+  function applyUsualLists(payload) {
+    if (!state) state = {};
+    state.usual_spends = (payload && payload.usual_spends) || [];
+    state.usual_suggestions = (payload && payload.usual_suggestions) || [];
+    renderUsual();
+  }
+
+  function fillUsualCategorySelect() {
+    const sel = $('db-usual-category');
+    const grid = $('db-cat-grid');
+    if (!sel || !grid || sel.options.length) return;
+    grid.querySelectorAll('.db-cat').forEach((btn) => {
+      const value = btn.dataset.category || '';
+      if (!value) return;
+      const opt = document.createElement('option');
+      opt.value = value;
+      const label = String(btn.textContent || value).trim();
+      opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+      sel.appendChild(opt);
+    });
+  }
+
+  function renderUsual() {
+    const chips = $('db-usual-chips');
+    if (!chips) return;
+    const pins = (state && state.usual_spends) || [];
+    const suggestions = (state && state.usual_suggestions) || [];
+    chips.innerHTML = '';
+    pins.forEach((pin) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'db-usual-chip';
+      btn.dataset.usualId = pin.id;
+      const title = document.createElement('span');
+      title.textContent = pin.title || 'Spend';
+      if (usualEditing) {
+        const x = document.createElement('span');
+        x.className = 'db-usual-x';
+        x.setAttribute('aria-hidden', 'true');
+        x.textContent = '×';
+        title.appendChild(x);
+        btn.setAttribute('aria-label', 'Remove ' + (pin.title || 'spend'));
+      } else {
+        btn.setAttribute('aria-label', 'Log ' + (pin.title || 'spend') + ' ' + money(pin.amount));
+      }
+      const meta = document.createElement('small');
+      meta.textContent = usualEditing
+        ? money(pin.amount)
+        : money(pin.amount) + ' · ' + (pin.category || 'other');
+      btn.appendChild(title);
+      btn.appendChild(meta);
+      chips.appendChild(btn);
+    });
+    if (usualEditing || usualSheetOpen || !pins.length) {
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'db-usual-chip db-usual-chip--add';
+      add.dataset.usualAdd = '1';
+      add.textContent = '+ Pin';
+      chips.appendChild(add);
+    }
+    const edit = $('db-usual-edit');
+    setUsualVisible(edit, pins.length > 0 || usualEditing);
+    if (edit) edit.textContent = usualEditing ? 'Done' : 'Edit';
+    setUsualVisible($('db-usual-sheet'), usualSheetOpen);
+    const suggestBox = $('db-usual-suggests');
+    if (suggestBox) {
+      suggestBox.innerHTML = '';
+      suggestions.forEach((item) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'db-usual-suggest';
+        btn.dataset.suggestTitle = item.title || '';
+        const text = document.createElement('span');
+        const strong = document.createElement('strong');
+        strong.textContent = item.title || 'Spend';
+        const small = document.createElement('small');
+        const times = Number(item.times) || 0;
+        small.textContent = times + (times === 1 ? ' time' : ' times') + ' · ' + (item.category || 'other');
+        text.appendChild(strong);
+        text.appendChild(small);
+        const amt = document.createElement('span');
+        amt.className = 'db-usual-suggest-amt';
+        amt.textContent = money(item.amount);
+        btn.appendChild(text);
+        btn.appendChild(amt);
+        suggestBox.appendChild(btn);
+      });
+    }
+    setUsualVisible($('db-usual-suggest-empty'), suggestions.length === 0);
+    setUsualVisible($('db-usual-manual'), usualManualOpen);
+    const manualToggle = $('db-usual-manual-toggle');
+    if (manualToggle) manualToggle.textContent = usualManualOpen ? 'Hide manual entry' : 'Enter your own';
+  }
+
+  async function postEntry(payload) {
+    const spendDate = clampToToday(payload.date || entryDate || localISODate());
+    const data = await api('/api/spending/daily/entry', {
+      method: 'POST',
+      body: JSON.stringify({
+        amount: payload.amount,
+        title: payload.title,
+        category: payload.category || 'other',
+        date: spendDate,
+      }),
+    });
+    entryDate = spendDate;
+    viewDate = (data.status && data.status.as_of) || spendDate;
+    applyTodayStatus(data.status);
+    await refreshGoals(goalsAsOf || localISODate());
+    syncDateControls();
+    return data;
+  }
+
+  async function logUsual(pin) {
+    if (usualBusy || !pin) return;
+    usualBusy = true;
+    try {
+      const data = await postEntry({
+        amount: pin.amount,
+        title: pin.title,
+        category: pin.category || 'other',
+        date: entryDate || localISODate(),
+      });
+      if (data.transaction) showUsualUndo(data.transaction);
+    } catch (e) {
+      flash(e.message, 'error');
+    } finally {
+      usualBusy = false;
+    }
+  }
+
+  async function saveUsualPin(body) {
+    if (usualBusy) return false;
+    usualBusy = true;
+    try {
+      const data = await api('/api/spending/daily/usual', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      applyUsualLists(data);
+      return true;
+    } catch (e) {
+      flash(e.message, 'error');
+      return false;
+    } finally {
+      usualBusy = false;
+    }
+  }
+
+  async function removeUsual(id) {
+    if (usualBusy || !id) return;
+    usualBusy = true;
+    try {
+      const data = await api('/api/spending/daily/usual/' + encodeURIComponent(id), { method: 'DELETE' });
+      applyUsualLists(data);
+    } catch (e) {
+      flash(e.message, 'error');
+    } finally {
+      usualBusy = false;
+    }
+  }
+
+  async function undoUsual() {
+    const id = usualUndoId;
+    if (!id || usualBusy) return;
+    usualBusy = true;
+    usualUndoId = '';
+    clearTimeout(usualUndoTimer);
+    hideUsualToast();
+    try {
+      await api('/api/spending/daily/entry/' + encodeURIComponent(id), { method: 'DELETE' });
+      await refreshAll();
+      showUsualUndone();
+    } catch (e) {
+      flash(e.message, 'error');
+    } finally {
+      usualBusy = false;
+    }
   }
 
   function syncViewDateControls() {
@@ -491,6 +728,7 @@
     renderTodayOverspendPrompt(status);
     renderDebtNote(status);
     renderTitleSuggestions();
+    renderUsual();
 
     const list = $('db-today-list');
     const empty = $('db-today-empty');
@@ -1628,6 +1866,91 @@
   }
 
   function bind() {
+    fillUsualCategorySelect();
+    renderUsual();
+
+    const usualEdit = $('db-usual-edit');
+    if (usualEdit) {
+      usualEdit.addEventListener('click', () => {
+        usualEditing = !usualEditing;
+        if (!usualEditing) {
+          usualSheetOpen = false;
+          usualManualOpen = false;
+        }
+        renderUsual();
+      });
+    }
+    const usualChips = $('db-usual-chips');
+    if (usualChips) {
+      usualChips.addEventListener('click', (ev) => {
+        const add = ev.target.closest('[data-usual-add]');
+        if (add) {
+          usualSheetOpen = !usualSheetOpen;
+          if (!usualSheetOpen) usualManualOpen = false;
+          renderUsual();
+          return;
+        }
+        const chip = ev.target.closest('[data-usual-id]');
+        if (!chip) return;
+        const pin = ((state && state.usual_spends) || []).find((item) => item.id === chip.dataset.usualId);
+        if (!pin) return;
+        if (usualEditing) removeUsual(pin.id);
+        else logUsual(pin);
+      });
+    }
+    const suggestBox = $('db-usual-suggests');
+    if (suggestBox) {
+      suggestBox.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-suggest-title]');
+        if (!btn) return;
+        const item = ((state && state.usual_suggestions) || []).find(
+          (row) => row.title === btn.dataset.suggestTitle
+        );
+        if (!item) return;
+        saveUsualPin({
+          title: item.title,
+          amount: item.amount,
+          category: item.category || 'other',
+        });
+      });
+    }
+    const manualToggle = $('db-usual-manual-toggle');
+    if (manualToggle) {
+      manualToggle.addEventListener('click', () => {
+        usualManualOpen = !usualManualOpen;
+        if (usualManualOpen) {
+          const sel = $('db-usual-category');
+          const current = ($('db-category') && $('db-category').value) || 'dining';
+          if (sel && current) sel.value = current;
+        }
+        renderUsual();
+      });
+    }
+    const usualSave = $('db-usual-save');
+    if (usualSave) {
+      usualSave.addEventListener('click', () => {
+        const title = String(($('db-usual-title') && $('db-usual-title').value) || '').trim();
+        const raw = String(($('db-usual-amount') && $('db-usual-amount').value) || '').replace(/,/g, '').trim();
+        const amount = Number(raw);
+        if (!title) {
+          flash('Add a short title', 'error');
+          return;
+        }
+        if (!Number.isFinite(amount) || amount <= 0) {
+          flash('Enter a valid amount', 'error');
+          return;
+        }
+        const category = ($('db-usual-category') && $('db-usual-category').value) || 'other';
+        saveUsualPin({ title, amount, category }).then((ok) => {
+          if (!ok) return;
+          if ($('db-usual-title')) $('db-usual-title').value = '';
+          if ($('db-usual-amount')) $('db-usual-amount').value = '';
+        });
+      });
+    }
+    const usualUndo = $('db-usual-undo');
+    if (usualUndo) usualUndo.addEventListener('click', () => undoUsual());
+
     const cycleRow = $('goals-cycle-chips');
     if (cycleRow) {
       cycleRow.addEventListener('click', async (ev) => {
@@ -1781,21 +2104,12 @@
       const btn = $('db-add-btn');
       btn.disabled = true;
       try {
-        const data = await api('/api/spending/daily/entry', {
-          method: 'POST',
-          body: JSON.stringify({
-            amount,
-            title,
-            category: $('db-category').value || 'other',
-            date: spendDate,
-          }),
+        await postEntry({
+          amount,
+          title,
+          category: $('db-category').value || 'other',
+          date: spendDate,
         });
-        entryDate = spendDate;
-        // Jump the spends viewer to the day just logged so the new item is visible.
-        viewDate = (data.status && data.status.as_of) || spendDate;
-        applyTodayStatus(data.status);
-        await refreshGoals(goalsAsOf || localISODate());
-        syncDateControls();
         $('db-amount').value = '';
         lastAutoTitle = categoryTitle($('db-category').value);
         setTitle(lastAutoTitle);

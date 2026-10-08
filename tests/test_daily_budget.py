@@ -838,6 +838,148 @@ class TestDailyCommonTitles(unittest.TestCase):
         )
 
 
+class TestUsualSpends(unittest.TestCase):
+    def test_frequent_manuals_rank_mode_amount_and_skip_one_offs(self):
+        spending = {
+            'transactions': [
+                _tx(id='1', description='coffee', category='dining', date='2024-01-01', amount=3.4),
+                _tx(id='2', description='Coffee', category='dining', date='2024-01-02', amount=3.4),
+                _tx(id='3', description='Coffee', category='dining', date='2024-01-03', amount=5),
+                _tx(id='4', description='Lunch', category='dining', date='2024-01-04', amount=8.5),
+                _tx(id='5', description='Commute', category='transport', date='2024-01-02', amount=4.8),
+                _tx(id='6', description='Commute', category='transport', date='2024-01-05', amount=4.8),
+                _tx(id='7', description='Dining', category='dining', date='2024-01-06', amount=1),
+                _tx(id='8', description='Dining', category='dining', date='2024-01-07', amount=1),
+                _tx(id='9', description='Pret', category='dining', date='2024-01-08', amount=6.2, source='statement'),
+                _tx(id='10', description='Pret', category='dining', date='2024-01-09', amount=6.2, source='statement'),
+                _tx(id='11', description='Bus', category='transport', date='2024-01-01', amount=2, insights_excluded=True),
+                _tx(id='12', description='Bus', category='transport', date='2024-01-02', amount=2, insights_excluded=True),
+            ],
+        }
+        rows = app_mod._daily_budget_frequent_manuals(spending)
+        self.assertEqual(
+            [(row['title'], row['amount'], row['category'], row['times']) for row in rows],
+            [('Coffee', 3.4, 'dining', 3), ('Commute', 4.8, 'transport', 2)],
+        )
+
+    def test_amount_tie_prefers_the_more_recent_price(self):
+        spending = {
+            'transactions': [
+                _tx(id='1', description='Commute', category='transport', date='2024-01-01', amount=4.8),
+                _tx(id='2', description='Commute', category='transport', date='2024-01-02', amount=5.1),
+                _tx(id='3', description='Commute', category='transport', date='2024-01-03', amount=4.8),
+                _tx(id='4', description='Commute', category='transport', date='2024-01-04', amount=5.1),
+            ],
+        }
+        rows = app_mod._daily_budget_frequent_manuals(spending)
+        self.assertEqual(rows[0]['amount'], 5.1)
+        self.assertEqual(rows[0]['times'], 4)
+
+    def test_suggestions_omit_pinned_titles(self):
+        spending = {
+            'transactions': [
+                _tx(id='1', description='Coffee', category='dining', date='2024-01-01', amount=3.4),
+                _tx(id='2', description='Coffee', category='dining', date='2024-01-02', amount=3.4),
+            ],
+            'daily_budget': {
+                'plan': {'income_monthly': 0, 'savings_percent': 0, 'daily_mode': 'fixed', 'bill_items': []},
+                'goals': [],
+                'usual_spends': [{
+                    'id': 'pin-1',
+                    'title': 'coffee',
+                    'amount': 3.4,
+                    'category': 'dining',
+                }],
+            },
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 10))
+        self.assertEqual(status['usual_spends'][0]['title'], 'coffee')
+        self.assertEqual(status['usual_suggestions'], [])
+
+
+class TestUsualSpendApi(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self.spending = {
+            'transactions': [
+                _tx(id='1', description='Coffee', category='dining', date='2024-01-01', amount=3.4),
+                _tx(id='2', description='Coffee', category='dining', date='2024-01-02', amount=3.4),
+                _tx(id='3', description='Commute', category='transport', date='2024-01-03', amount=4.8),
+                _tx(id='4', description='Commute', category='transport', date='2024-01-04', amount=4.8),
+            ],
+            'statements': [],
+            'monthly_insights': {},
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 3100,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+        }
+        self.data = {'users': {'ivan': {'spending': self.spending}}, 'loans': {}}
+
+    def _login(self):
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'ivan'
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_pin_hides_suggestion_and_delete_restores_it(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        created = self.client.post('/api/spending/daily/usual', json={
+            'title': 'Coffee',
+            'amount': 3.4,
+            'category': 'dining',
+        })
+        self.assertEqual(created.status_code, 200)
+        body = created.get_json()
+        self.assertEqual(len(body['usual_spends']), 1)
+        self.assertEqual(body['usual_spends'][0]['amount'], 3.4)
+        self.assertEqual([row['title'] for row in body['usual_suggestions']], ['Commute'])
+        pin_id = body['usual_spends'][0]['id']
+
+        dup = self.client.post('/api/spending/daily/usual', json={
+            'title': ' coffee ',
+            'amount': 9,
+            'category': 'dining',
+        })
+        self.assertEqual(dup.status_code, 400)
+
+        bad = self.client.post('/api/spending/daily/usual', json={
+            'title': 'Gym',
+            'amount': 0,
+            'category': 'health',
+        })
+        self.assertEqual(bad.status_code, 400)
+
+        other = self.client.post('/api/spending/daily/usual', json={
+            'title': 'Misc',
+            'amount': 2,
+            'category': 'not-a-category',
+        })
+        self.assertEqual(other.status_code, 200)
+        self.assertEqual(other.get_json()['usual_spends'][-1]['category'], 'other')
+
+        removed = self.client.delete('/api/spending/daily/usual/' + pin_id)
+        self.assertEqual(removed.status_code, 200)
+        titles = [row['title'] for row in removed.get_json()['usual_suggestions']]
+        self.assertEqual(titles, ['Commute', 'Coffee'])
+        self.assertEqual(len(removed.get_json()['usual_spends']), 1)
+
+        missing = self.client.delete('/api/spending/daily/usual/' + pin_id)
+        self.assertEqual(missing.status_code, 404)
+
+        status = self.client.get('/api/spending/daily/status')
+        self.assertEqual(status.status_code, 200)
+        self.assertIn('usual_spends', status.get_json())
+        self.assertIn('usual_suggestions', status.get_json())
+
+
 class TestDailyEntryCreate(unittest.TestCase):
     def setUp(self):
         self.client = app_mod.app.test_client()
