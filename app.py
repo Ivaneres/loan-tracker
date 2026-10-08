@@ -160,8 +160,8 @@ SPENDING_EXPECTED_BILL_SIM_THRESHOLD = 0.75
 DAILY_ENTRY_CATEGORIES = [
     c for c in SPENDING_ALLOWED_CATEGORIES if c not in ('unclassified',)
 ]
-# One-tap chips on the daily entry screen. Suggestions are manual spends seen
-# at least twice; the user can still pin a title that has never been logged.
+# One-tap chips on the daily entry screen. Suggestions are manual title+amount
+# pairs seen at least twice (Tube £3.10 and Tube £3.00 stay separate).
 USUAL_SPEND_MAX = 12
 USUAL_SUGGEST_LIMIT = 8
 USUAL_SUGGEST_MIN_COUNT = 2
@@ -4991,22 +4991,27 @@ def _coerce_usual_category(raw) -> str:
     return category
 
 
+def _usual_pin_key(title: str, amount: float) -> tuple[str, float]:
+    return (_normalize_label(title), round(float(amount), 2))
+
+
 def _clean_usual_spends(raw) -> list[dict]:
-    """Drop invalid pins and duplicate titles (first one wins)."""
+    """Drop invalid pins and duplicate title+amount pairs (first one wins)."""
     if not isinstance(raw, list):
         return []
     out: list[dict] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, float]] = set()
     for item in raw:
         if not isinstance(item, dict):
             continue
         title = _usual_spend_title(item.get('title'))
         amount = _coerce_usual_amount(item.get('amount'))
         norm = _normalize_label(title)
-        if not title or not norm or amount is None or norm in seen:
+        key = (norm, amount) if amount is not None else None
+        if not title or not norm or amount is None or key in seen:
             continue
         pin_id = str(item.get('id') or '').strip() or str(uuid.uuid4())
-        seen.add(norm)
+        seen.add(key)
         out.append({
             'id': pin_id,
             'title': title,
@@ -5030,19 +5035,19 @@ def _normalize_usual_spends_in_bucket(bucket: dict) -> bool:
 def _daily_budget_frequent_manuals(
     spending: dict,
     *,
-    exclude_norms: set[str] | None = None,
+    exclude_keys: set[tuple[str, float]] | None = None,
     limit: int = USUAL_SUGGEST_LIMIT,
     min_count: int = USUAL_SUGGEST_MIN_COUNT,
 ) -> list[dict]:
-    """Manual spends logged at least ``min_count`` times, most frequent first.
+    """Manual title+amount pairs logged at least ``min_count`` times.
 
-    Amount is the most common amount (ties: most recent). Category and title
-    casing follow the same rule. Statement imports and bare category labels
-    (the form's autofill) are ignored. Already-pinned titles are omitted.
+    Tube £3.10 and Tube £3.00 are separate rows. Title casing and category
+    follow the most common value in that pair (ties: most recent). Statement
+    imports and bare category labels are ignored. An already-pinned pair is
+    omitted; the other amount of the same title stays.
     """
-    exclude = {_normalize_label(str(n or '')) for n in (exclude_norms or set())}
-    exclude.discard('')
-    groups: dict[str, dict] = {}
+    exclude = exclude_keys or set()
+    groups: dict[tuple[str, float], dict] = {}
     entry_cats = set(DAILY_ENTRY_CATEGORIES)
     for t in spending.get('transactions') or []:
         if str(t.get('source') or '') != 'manual':
@@ -5062,25 +5067,21 @@ def _daily_budget_frequent_manuals(
         if amount is None:
             continue
         d_str = str(t.get('date') or '')[:10]
-        group = groups.get(norm)
+        key = (norm, amount)
+        group = groups.get(key)
         if group is None:
             group = {
                 'count': 0,
                 'displays': Counter(),
                 'categories': Counter(),
-                'amounts': Counter(),
                 'last_date': '',
                 'last_display': raw,
-                'amount_last': {},
                 'category_last': {},
             }
-            groups[norm] = group
+            groups[key] = group
         group['count'] += 1
         group['displays'][raw] += 1
         group['categories'][cat] += 1
-        group['amounts'][amount] += 1
-        if d_str >= group['amount_last'].get(amount, ''):
-            group['amount_last'][amount] = d_str
         if d_str >= group['category_last'].get(cat, ''):
             group['category_last'][cat] = d_str
         if d_str >= group['last_date']:
@@ -5088,16 +5089,12 @@ def _daily_budget_frequent_manuals(
             group['last_display'] = raw
 
     ranked = []
-    for norm, group in groups.items():
-        if norm in exclude or group['count'] < max(1, int(min_count)):
+    for (norm, amount), group in groups.items():
+        if (norm, amount) in exclude or group['count'] < max(1, int(min_count)):
             continue
         display = max(
             group['displays'].items(),
             key=lambda kv: (kv[1], kv[0] == group['last_display'], kv[0]),
-        )[0]
-        amount = max(
-            group['amounts'].items(),
-            key=lambda kv: (kv[1], group['amount_last'].get(kv[0], ''), kv[0]),
         )[0]
         category = max(
             group['categories'].items(),
@@ -5111,7 +5108,10 @@ def _daily_budget_frequent_manuals(
             '_last': group['last_date'],
             '_norm': norm,
         })
-    ranked.sort(key=lambda row: (row['times'], row['_last'], row['_norm']), reverse=True)
+    ranked.sort(
+        key=lambda row: (row['times'], row['_last'], row['_norm'], row['amount']),
+        reverse=True,
+    )
     return [
         {
             'title': row['title'],
@@ -5125,8 +5125,12 @@ def _daily_budget_frequent_manuals(
 
 def _daily_budget_usual_lists(spending: dict, bucket: dict) -> tuple[list, list]:
     spends = bucket.get('usual_spends') if isinstance(bucket.get('usual_spends'), list) else []
-    exclude = {_normalize_label(str(item.get('title') or '')) for item in spends}
-    return spends, _daily_budget_frequent_manuals(spending, exclude_norms=exclude)
+    exclude = {
+        _usual_pin_key(str(item.get('title') or ''), item.get('amount'))
+        for item in spends
+        if _coerce_usual_amount(item.get('amount')) is not None
+    }
+    return spends, _daily_budget_frequent_manuals(spending, exclude_keys=exclude)
 
 
 def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
@@ -11781,7 +11785,7 @@ def spending_daily_usual_create():
         save_data(data)
     bucket, _ = _ensure_daily_budget(spending)
     spends = _clean_usual_spends(bucket.get('usual_spends'))
-    if any(_normalize_label(item['title']) == norm for item in spends):
+    if any(_usual_pin_key(item['title'], item['amount']) == (norm, amount) for item in spends):
         return jsonify({'error': 'Already pinned'}), 400
     if len(spends) >= USUAL_SPEND_MAX:
         return jsonify({'error': f'You can pin up to {USUAL_SPEND_MAX} usual spends'}), 400

@@ -859,21 +859,29 @@ class TestUsualSpends(unittest.TestCase):
         rows = app_mod._daily_budget_frequent_manuals(spending)
         self.assertEqual(
             [(row['title'], row['amount'], row['category'], row['times']) for row in rows],
-            [('Coffee', 3.4, 'dining', 3), ('Commute', 4.8, 'transport', 2)],
+            [('Commute', 4.8, 'transport', 2), ('Coffee', 3.4, 'dining', 2)],
         )
 
-    def test_amount_tie_prefers_the_more_recent_price(self):
+    def test_same_title_keeps_each_amount(self):
         spending = {
             'transactions': [
-                _tx(id='1', description='Commute', category='transport', date='2024-01-01', amount=4.8),
-                _tx(id='2', description='Commute', category='transport', date='2024-01-02', amount=5.1),
-                _tx(id='3', description='Commute', category='transport', date='2024-01-03', amount=4.8),
-                _tx(id='4', description='Commute', category='transport', date='2024-01-04', amount=5.1),
+                _tx(id='1', description='Tube', category='transport', date='2024-01-01', amount=3.1),
+                _tx(id='2', description='Tube', category='transport', date='2024-01-02', amount=3.0),
+                _tx(id='3', description='Tube', category='transport', date='2024-01-03', amount=3.1),
+                _tx(id='4', description='Tube', category='transport', date='2024-01-04', amount=3.0),
+                _tx(id='5', description='Tube', category='transport', date='2024-01-05', amount=3.5),
             ],
         }
         rows = app_mod._daily_budget_frequent_manuals(spending)
-        self.assertEqual(rows[0]['amount'], 5.1)
-        self.assertEqual(rows[0]['times'], 4)
+        self.assertEqual(
+            [(row['title'], row['amount'], row['times']) for row in rows],
+            [('Tube', 3.0, 2), ('Tube', 3.1, 2)],
+        )
+        pinned = app_mod._daily_budget_frequent_manuals(
+            spending,
+            exclude_keys={app_mod._usual_pin_key('Tube', 3.1)},
+        )
+        self.assertEqual([(row['amount'], row['times']) for row in pinned], [(3.0, 2)])
 
     def test_suggestions_omit_pinned_titles(self):
         spending = {
@@ -943,9 +951,17 @@ class TestUsualSpendApi(unittest.TestCase):
         self.assertEqual([row['title'] for row in body['usual_suggestions']], ['Commute'])
         pin_id = body['usual_spends'][0]['id']
 
+        other_amount = self.client.post('/api/spending/daily/usual', json={
+            'title': ' coffee ',
+            'amount': 4.5,
+            'category': 'dining',
+        })
+        self.assertEqual(other_amount.status_code, 200)
+        self.assertEqual(len(other_amount.get_json()['usual_spends']), 2)
+
         dup = self.client.post('/api/spending/daily/usual', json={
             'title': ' coffee ',
-            'amount': 9,
+            'amount': 3.4,
             'category': 'dining',
         })
         self.assertEqual(dup.status_code, 400)
@@ -969,7 +985,7 @@ class TestUsualSpendApi(unittest.TestCase):
         self.assertEqual(removed.status_code, 200)
         titles = [row['title'] for row in removed.get_json()['usual_suggestions']]
         self.assertEqual(titles, ['Commute', 'Coffee'])
-        self.assertEqual(len(removed.get_json()['usual_spends']), 1)
+        self.assertEqual(len(removed.get_json()['usual_spends']), 2)
 
         missing = self.client.delete('/api/spending/daily/usual/' + pin_id)
         self.assertEqual(missing.status_code, 404)

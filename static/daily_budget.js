@@ -390,6 +390,7 @@
         btn.type = 'button';
         btn.className = 'db-usual-suggest';
         btn.dataset.suggestTitle = item.title || '';
+        btn.dataset.suggestAmount = Number(item.amount).toFixed(2);
         const text = document.createElement('span');
         const strong = document.createElement('strong');
         strong.textContent = item.title || 'Spend';
@@ -1905,6 +1906,7 @@
         if (!btn) return;
         const item = ((state && state.usual_suggestions) || []).find(
           (row) => row.title === btn.dataset.suggestTitle
+            && Number(row.amount).toFixed(2) === btn.dataset.suggestAmount
         );
         if (!item) return;
         saveUsualPin({
