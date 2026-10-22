@@ -46,7 +46,7 @@ def main() -> int:
     sys.path.insert(0, str(ROOT))
 
     parser = argparse.ArgumentParser(
-        description='Extract text / hints from a bank PDF using Finance Tracker spending code.',
+        description='Extract text / hints from a bank PDF using Tally spending code.',
     )
     parser.add_argument('pdf', type=Path, help='Path to a .pdf file')
     parser.add_argument(

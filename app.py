@@ -9164,7 +9164,7 @@ def _send_bill_reminder_email(loan_id: str, loan: dict) -> bool:
     base = os.getenv('PUBLIC_BASE_URL', '').strip().rstrip('/')
     link = f'{base}/loan/{loan_id}' if base else f'/loan/{loan_id}'
     msg = EmailMessage()
-    msg['Subject'] = f'Finance tracker: upload statement for "{name}"'
+    msg['Subject'] = f'Tally: upload statement for "{name}"'
     msg['From'] = cfg['mail_from']
     msg['To'] = to_addr
     msg.set_content(

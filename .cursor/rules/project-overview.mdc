@@ -1,11 +1,11 @@
 ---
-description: Repo map, stack, auth, data, and how to run/test this finance tracker
+description: Repo map, stack, auth, data, and how to run/test Tally
 alwaysApply: true
 ---
 
 # Project overview
 
-Flask monolith finance tracker (loans + spending + daily budget). No separate frontend framework.
+Flask monolith named **Tally** (daily budget, spending, statement reconcile, loans). No separate frontend framework. The git repo remains `loan-tracker`.
 
 ## Layout
 
