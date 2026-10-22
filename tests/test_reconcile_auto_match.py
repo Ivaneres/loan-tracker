@@ -93,33 +93,57 @@ class TestReconcileAutoMatchSingles(unittest.TestCase):
         self.assertEqual(stats['manual_auto_matches'], 1)
         self.assertEqual(_matched_ids(sess), {'r1': ['m1']})
 
-    def test_date_slack_boundary_accepts_plus_three_rejects_plus_four(self):
+    def test_date_slack_boundary_accepts_plus_minus_three_rejects_four(self):
         manuals = [_manual(id='m1', date='2024-07-10', amount=12.0, description='Shop')]
-        ok_sess, ok_sp = _session(
+        ok_after, ok_after_sp = _session(
             '2024-07', manuals,
             [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
                 _row(id='r-ok', date='2024-07-13', amount=12.0, description='TESCO'),
             ]}],
         )
-        far_sess, far_sp = _session(
+        ok_before, ok_before_sp = _session(
+            '2024-07',
+            [_manual(id='m1', date='2024-07-10', amount=12.0, description='Shop')],
+            [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
+                _row(id='r-before', date='2024-07-07', amount=12.0, description='TESCO'),
+            ]}],
+        )
+        far_after, far_after_sp = _session(
             '2024-07',
             [_manual(id='m1', date='2024-07-10', amount=12.0, description='Shop')],
             [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
                 _row(id='r-far', date='2024-07-14', amount=12.0, description='TESCO'),
             ]}],
         )
-        self.assertEqual(app_mod._reconcile_run_auto_match(ok_sess, ok_sp)['manual_auto_matches'], 1)
-        self.assertEqual(app_mod._reconcile_run_auto_match(far_sess, far_sp)['manual_auto_matches'], 0)
-
-    def test_statement_before_manual_never_auto_matches(self):
-        sess, spending = _session(
+        far_before, far_before_sp = _session(
             '2024-07',
-            [_manual(id='m1', date='2024-07-10', amount=8.0, description='Lunch')],
+            [_manual(id='m1', date='2024-07-10', amount=12.0, description='Shop')],
             [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
-                _row(id='r1', date='2024-07-09', amount=8.0, description='PRET'),
+                _row(id='r-far-before', date='2024-07-06', amount=12.0, description='TESCO'),
             ]}],
         )
-        self.assertEqual(app_mod._reconcile_run_auto_match(sess, spending)['manual_auto_matches'], 0)
+        self.assertEqual(app_mod._reconcile_run_auto_match(ok_after, ok_after_sp)['manual_auto_matches'], 1)
+        self.assertEqual(app_mod._reconcile_run_auto_match(ok_before, ok_before_sp)['manual_auto_matches'], 1)
+        self.assertEqual(app_mod._reconcile_run_auto_match(far_after, far_after_sp)['manual_auto_matches'], 0)
+        self.assertEqual(app_mod._reconcile_run_auto_match(far_before, far_before_sp)['manual_auto_matches'], 0)
+
+    def test_amex_charge_day_before_logged_spend_auto_matches(self):
+        """Card purchase date often precedes when the user logged the spend."""
+        sess, spending = _session(
+            '2026-07',
+            [_manual(id='m1', date='2026-07-26', amount=18.98, description='Phone case')],
+            [{'id': 'u1', 'file_name': 'amex.csv', 'bank_source': 'Amex', 'rows': [
+                _row(
+                    id='r1',
+                    date='2026-07-25',
+                    amount=18.98,
+                    description='AMZNMKTPLACE*6IOKP9OR5 AMAZON.CO.UK',
+                ),
+            ]}],
+        )
+        stats = app_mod._reconcile_run_auto_match(sess, spending)
+        self.assertEqual(stats['manual_auto_matches'], 1)
+        self.assertEqual(_matched_ids(sess), {'r1': ['m1']})
 
     def test_amount_must_be_exact(self):
         sess, spending = _session(
@@ -283,7 +307,7 @@ class TestReconcileAutoMatchMultiPass(unittest.TestCase):
         self.assertEqual(_matched_ids(sess), {'r-costa': ['m-coffee']})
 
     def test_three_pass_cascade_unlocks_chain(self):
-        """Each bank row starts ambiguous; unique day-1 claim cascades through later days."""
+        """Title-unique claims free a leftover ambiguous bank row on a later pass."""
         sess, spending = _session(
             '2024-07',
             [
@@ -292,11 +316,10 @@ class TestReconcileAutoMatchMultiPass(unittest.TestCase):
                 _manual(id='m-c', date='2024-07-03', amount=5.0, description='Gamma'),
             ],
             [{'id': 'u1', 'file_name': 'a.csv', 'rows': [
-                # Sees all three manuals in the 3-day window → ambiguous until later passes.
+                # Weak title — ambiguous across ±3 days until Alpha/Beta are claimed.
                 _row(id='r3', date='2024-07-03', amount=5.0, description='CARD 3'),
-                _row(id='r2', date='2024-07-02', amount=5.0, description='CARD 2'),
-                # Only m-a is on/before 01 Jul → unique unlock.
-                _row(id='r1', date='2024-07-01', amount=5.0, description='CARD 1'),
+                _row(id='r2', date='2024-07-02', amount=5.0, description='BETA STORE'),
+                _row(id='r1', date='2024-07-01', amount=5.0, description='ALPHA PAYMENT'),
             ]}],
         )
         stats = app_mod._reconcile_run_auto_match(sess, spending)

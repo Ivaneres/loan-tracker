@@ -558,7 +558,7 @@ class TestManualImportDedup(unittest.TestCase):
         self.assertIsNotNone(match)
         self.assertEqual(match['id'], 'm1')
 
-    def test_fuzzy_match_rejects_statement_older_than_manual(self):
+    def test_fuzzy_match_allows_statement_up_to_three_days_before_manual(self):
         spending = {
             'transactions': [
                 _tx(
@@ -578,7 +578,17 @@ class TestManualImportDedup(unittest.TestCase):
             description='TESCO STORES 1234',
             direction='outgoing',
         )
-        self.assertIsNone(match)
+        self.assertIsNotNone(match)
+        self.assertEqual(match['id'], 'm1')
+        self.assertIsNone(
+            app_mod._daily_budget_fuzzy_match_manual(
+                spending,
+                date_str='2024-05-01',
+                amount=25.0,
+                description='TESCO STORES 1234',
+                direction='outgoing',
+            )
+        )
 
     def test_fuzzy_match_rejects_statement_more_than_three_days_after_manual(self):
         spending = {

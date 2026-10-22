@@ -91,8 +91,9 @@ BOUNDARY_CASES = [
     ('date', '+2 days', {'date': '2024-01-10'}, {'date': '2024-01-12'}, True, 'Δ+2'),
     ('date', '+3 days (max slack)', {'date': '2024-01-10'}, {'date': '2024-01-13'}, True, 'Δ+3 boundary'),
     ('date', '+4 days (over slack)', {'date': '2024-01-10'}, {'date': '2024-01-14'}, False, 'Δ+4 rejected'),
-    ('date', '−1 day (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-09'}, False, 'backward rejected'),
-    ('date', '−3 days (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-07'}, False, 'backward rejected'),
+    ('date', '−1 day (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-09'}, True, 'Δ−1 within slack'),
+    ('date', '−3 days (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-07'}, True, 'Δ−3 boundary'),
+    ('date', '−4 days (stmt before manual)', {'date': '2024-01-10'}, {'date': '2024-01-06'}, False, 'Δ−4 rejected'),
     # Amount boundaries (same date) — auto-match is exact only; near-misses are suggestions
     ('amount', 'exact', {'amount': 10.0}, {'amount': 10.0}, True, '£0.00'),
     ('amount', '£0.15 drift (was old tol)', {'amount': 10.0}, {'amount': 10.15}, False, 'not exact — use dropdown'),
@@ -221,13 +222,13 @@ class TestManualMatchBoundaryIntegration(unittest.TestCase):
 
     def test_manual_match_dates_close_boundaries(self):
         base = '2024-01-10'
-        for delta in range(0, 4):
+        for delta in range(-3, 4):
             self.assertTrue(
                 app_mod._manual_match_dates_close(base, _shift_date(base, delta)),
-                f'+{delta} should match',
+                f'{delta:+d} should match',
             )
         self.assertFalse(app_mod._manual_match_dates_close(base, _shift_date(base, 4)))
-        self.assertFalse(app_mod._manual_match_dates_close(base, _shift_date(base, -1)))
+        self.assertFalse(app_mod._manual_match_dates_close(base, _shift_date(base, -4)))
 
     def test_manual_match_amounts_close_exact_only(self):
         self.assertTrue(app_mod._manual_match_amounts_close(10.0, 10.0))

@@ -141,7 +141,8 @@ DAILY_BUDGET_MODES = frozenset({'fixed', 'envelope', 'carry_surplus'})
 DAILY_BUDGET_UNDERSPEND_PRIORITIES = frozenset({'debt_first', 'goals_first'})
 DAILY_BUDGET_MANUAL_MATCH_RATIO = 0.72
 # Auto-match requires exact amounts (2dp); near-misses go to preview suggestions.
-# Statement date may post up to N days after manual (banks often lag); not the reverse.
+# Dates may differ by up to N days either way (bank lag after logging, or Amex
+# purchase date before the user logged the spend).
 DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS = 3
 # Re-run single fuzzy auto-match until no new claims (or this cap). Later unique
 # claims free manuals that earlier rows skipped as ambiguous.
@@ -5306,13 +5307,13 @@ def _manual_match_amounts_close(a: float, b: float) -> bool:
 
 
 def _manual_match_dates_close(manual_date: str, statement_date: str) -> bool:
-    """True when the statement posts on or up to N days after the manual entry date."""
+    """True when manual and statement dates are within ±N days (either order)."""
     dm = _parse_iso_date(str(manual_date or '')[:10])
     ds = _parse_iso_date(str(statement_date or '')[:10])
     if dm is None or ds is None:
         return str(manual_date or '')[:10] == str(statement_date or '')[:10]
-    delta = (ds - dm).days
-    return 0 <= delta <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
+    delta = abs((ds - dm).days)
+    return delta <= DAILY_BUDGET_MANUAL_MATCH_DATE_SLACK_DAYS
 
 
 def _iso_dates_span_days(dates: list[str]) -> int | None:
@@ -5330,8 +5331,8 @@ def _iso_dates_span_days(dates: list[str]) -> int | None:
 def _netted_combo_dates_ok(anchor_date: str, part_dates: list[str], *, parts_are_statements: bool) -> bool:
     """Reject netted groups whose dates span more than the auto-match slack.
 
-    ``parts_are_statements``: bank rows vs one manual (statement on/after manual).
-    Otherwise manuals vs one statement (same orientation per part).
+    Each part must also sit within ±slack of the anchor (same window as singles).
+    ``parts_are_statements``: bank rows vs one manual; otherwise manuals vs one statement.
     """
     all_dates = [anchor_date, *part_dates]
     span = _iso_dates_span_days(all_dates)
@@ -5580,8 +5581,8 @@ def _daily_budget_fuzzy_match_manual(
 ) -> dict | None:
     """Find a manual ledger row that likely duplicates an incoming statement line.
 
-    Matching prioritises date (statement on or up to a few days after manual) and
-    amount (tight tolerance). When that pair uniquely identifies one unmatched manual
+    Matching prioritises date (within ± a few days either way) and
+    amount (exact). When that pair uniquely identifies one unmatched manual
     entry, different payment references / titles are ignored. Description similarity
     is used to break ties when several manuals share a near date and amount.
     """
@@ -5791,7 +5792,7 @@ def _daily_budget_manual_suggest_pool(
     direction: str,
     exclude_ids: set[str] | None = None,
 ) -> list[dict]:
-    """Unmatched manuals in the suggestion date window (statement on/after manual)."""
+    """Unmatched manuals in the suggestion date window (± suggest slack days)."""
     exclude = exclude_ids if exclude_ids is not None else set()
     stmt_d = _parse_iso_date(str(date_str or '')[:10])
     out = []
@@ -5813,7 +5814,7 @@ def _daily_budget_manual_suggest_pool(
             date_delta = 0
         else:
             date_delta = (stmt_d - man_d).days
-            if date_delta < 0 or date_delta > DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS:
+            if abs(date_delta) > DAILY_BUDGET_MANUAL_SUGGEST_DATE_SLACK_DAYS:
                 continue
         try:
             man_amt = round(float(t.get('amount') or 0), 2)
@@ -5830,7 +5831,7 @@ def _daily_budget_manual_suggest_pool(
             'category': str(t.get('category') or '') or None,
             'date_delta_days': date_delta,
         })
-    out.sort(key=lambda x: (x['date_delta_days'], x['date'], x['description'].lower()))
+    out.sort(key=lambda x: (abs(int(x['date_delta_days'])), x['date'], x['description'].lower()))
     return out
 
 
