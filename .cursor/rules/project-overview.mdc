@@ -13,7 +13,7 @@ Flask monolith named **Tally** (daily budget, spending, statement reconcile, loa
 - `templates/` — Jinja pages (`daily_budget.html`, `spending.html`, `spending_search.html`, `loans.html`, …)
 - `static/` — vanilla JS/CSS (`daily_budget.js`, `spending.js`, `spending_search.js`, `script.js`, `style.css`)
 - `tests/` — `unittest` modules (not pytest-first; run with `python -m unittest …`)
-- `data.json` — local persistence (gitignored); production has its own copy + `.env`
+- `data.json` — local persistence (gitignored). Production uses `DATA_PATH=data/ledger.json` under `/var/www/tally/backend/data/` (also gitignored; deploys must not delete it). `data/.gitkeep` is the only tracked file in that directory.
 - `.cursor/rules/` — agent context; keep learnings here for future agents
 
 ## Stack / runtime
@@ -95,7 +95,7 @@ Import preview mobile cards (loan): `@.cursor/rules/import-mobile-native.mdc`.
 
 ## Production
 
-Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`.
+Only deploy when the user explicitly asks. Follow `@.cursor/rules/production-deployment.mdc`. Host config is `deploy.conf` (`tally.ereshchenko.com`, systemd `tally-api`).
 
 ## Keeping agent context fresh
 

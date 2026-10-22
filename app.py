@@ -419,7 +419,38 @@ def login_required(f):
     return decorated_function
 
 scheduler = BackgroundScheduler()
-scheduler.start()
+
+# Ledger file. Local and tests keep using ./data.json. Production sets
+# DATA_PATH=data/ledger.json so deploys can exclude it from rsync.
+DATA_PATH = os.getenv('DATA_PATH', 'data.json').strip() or 'data.json'
+
+
+def bootstrap_schedules():
+    """Arm interest, recurring payments, and bill reminders from the ledger.
+
+    Gunicorn only runs this in the worker that holds data/scheduler.lock.
+    `python app.py` calls it from __main__.
+    """
+    if not scheduler.running:
+        scheduler.start()
+    data = load_data()
+    for loan_id, loan in data['loans'].items():
+        if not isinstance(loan, dict):
+            continue
+        interest_day = loan.get('interest_day')
+        try:
+            interest_day = int(interest_day)
+        except (TypeError, ValueError):
+            logger.warning('skipping interest schedule for %s: no interest_day', loan_id)
+        else:
+            try:
+                schedule_interest_task(loan_id, interest_day)
+            except ValueError:
+                logger.warning('skipping interest schedule for %s: invalid day %s', loan_id, interest_day)
+        if loan.get('recurring_payments'):
+            schedule_recurring_payments(loan_id)
+    schedule_bill_reminders_job()
+
 
 def load_data():
     default_data = {
@@ -427,7 +458,7 @@ def load_data():
         'users': {},
     }
     try:
-        with open('data.json', 'r') as f:
+        with open(DATA_PATH, 'r') as f:
             content = f.read().strip()
             if not content:  # Handle empty file
                 save_data(default_data)
@@ -459,7 +490,10 @@ def load_data():
         return default_data
 
 def save_data(data):
-    with open('data.json', 'w') as f:
+    parent = os.path.dirname(DATA_PATH)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(DATA_PATH, 'w') as f:
         json.dump(data, f, indent=2)
 
 
@@ -12121,13 +12155,7 @@ def spending_daily_overspend_write_off():
 
 
 if __name__ == '__main__':
-    # Schedule initial interest tasks and recurring payment processing for all loans
-    data = load_data()
-    for loan_id, loan in data['loans'].items():
-        schedule_interest_task(loan_id, loan['interest_day'])
-        if 'recurring_payments' in loan and loan['recurring_payments']:
-            schedule_recurring_payments(loan_id)
-    schedule_bill_reminders_job()
+    bootstrap_schedules()
     host = os.getenv('HOST', '0.0.0.0').strip() or '0.0.0.0'
     try:
         port = int(os.getenv('PORT', '5000') or '5000')
