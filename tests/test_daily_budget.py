@@ -261,6 +261,31 @@ class TestDailyBudgetStatus(unittest.TestCase):
         self.assertEqual(status['daily_limit'], 100.0)
         self.assertEqual(status['remaining_today'], 50.0)
 
+    def test_is_bill_flag_excluded_from_daily_spend(self):
+        """A bill-marked import keeps its truthful category but is not discretionary."""
+        spending = {
+            'daily_budget': {
+                'plan': {
+                    'income_monthly': 3100,
+                    'bills_monthly': 0,
+                    'savings_percent': 0,
+                    'daily_mode': 'fixed',
+                    'bill_items': [],
+                },
+                'goals': [],
+            },
+            'transactions': [
+                _tx(id='1', date='2024-01-15', amount=50, category='dining'),
+                _tx(id='2', date='2024-01-15', amount=900, category='transport', is_bill=True),
+            ],
+            'monthly_insights': {},
+        }
+        status = app_mod._daily_budget_status(spending, as_of=date(2024, 1, 15))
+        self.assertEqual(status['spent_today'], 50.0)
+        self.assertFalse(app_mod._daily_budget_is_discretionary_tx(
+            {'direction': 'outgoing', 'category': 'transport', 'is_bill': True}
+        ))
+
     def test_pace_projection_envelope_tightens_after_overspend(self):
         spending = {
             'daily_budget': {
@@ -688,6 +713,19 @@ class TestManualImportDedup(unittest.TestCase):
         app_mod._daily_budget_claim_manual_match(manual, row, 'stmt-1', fp)
         self.assertEqual(manual['amount'], 10.35)
         self.assertEqual(manual['manual_amount'], 10.0)
+
+    def test_claim_merges_bank_and_manual_payment_refs(self):
+        manual = _tx(id='m1', date='2024-02-05', amount=4.5, description='Lunch', source='manual')
+        row = {'date': '2024-02-05', 'amount': 4.5, 'description': 'PRET A MANGER LONDON', 'direction': 'outgoing'}
+        app_mod._daily_budget_claim_manual_match(manual, row, 'stmt-1', 'fp')
+        self.assertEqual(manual['description'], 'PRET A MANGER LONDON · Lunch')
+        self.assertNotIn('bank_description', manual)
+
+    def test_claim_uses_bank_ref_when_manual_title_generic(self):
+        manual = _tx(id='m1', date='2024-02-05', amount=4.5, description='Spend', source='manual')
+        row = {'date': '2024-02-05', 'amount': 4.5, 'description': 'PRET A MANGER LONDON', 'direction': 'outgoing'}
+        app_mod._daily_budget_claim_manual_match(manual, row, 'stmt-1', 'fp')
+        self.assertEqual(manual['description'], 'PRET A MANGER LONDON')
 
     def test_preview_marks_manual_missed_and_expected_bill(self):
         spending = {

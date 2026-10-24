@@ -246,7 +246,7 @@ class TestUnmatchedManualsSidebar(unittest.TestCase):
         recjs = (root / 'static' / 'reconcile.js').read_text(encoding='utf-8')
         js = (root / 'static' / 'spending.js').read_text(encoding='utf-8')
         css = (root / 'static' / 'style.css').read_text(encoding='utf-8')
-        self.assertIn('reconcile-unclaimed-list', recjs)
+        self.assertIn('rc-leftover', recjs)
         self.assertIn('unmatched_manuals', js)
         self.assertIn('renderUnclaimedManuals', js)
         self.assertIn('import-unclaimed-manuals', css)

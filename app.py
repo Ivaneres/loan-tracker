@@ -4056,6 +4056,10 @@ def _daily_budget_is_discretionary_tx(t: dict) -> bool:
         return False
     if _spending_excluded_from_insight_metrics(t):
         return False
+    # First-class bill flag (set at statement reconcile import) — the durable
+    # signal, independent of the transaction's truthful category.
+    if t.get('is_bill'):
+        return False
     cat = str(t.get('category') or 'other').strip().lower()
     if cat in DAILY_BUDGET_BILL_CATEGORIES or cat in DAILY_BUDGET_IGNORE_CATEGORIES:
         return False
@@ -5431,8 +5435,15 @@ def _reconcile_expected_bills(spending: dict) -> list[dict]:
 
 
 def _reconcile_bill_import_category(row: dict, spending: dict) -> str:
+    """Category for a bill-marked statement row.
+
+    The row is excluded from daily discretionary spend by its persisted
+    ``is_bill`` flag, so the category is free to stay truthful: prefer the
+    row's own category, else the matching Daily → Plan bill item's category,
+    else 'other'.
+    """
     existing = str(row.get('category') or '').strip().lower()
-    if existing in DAILY_BUDGET_BILL_CATEGORIES:
+    if existing in SPENDING_CATEGORY_SET and existing != 'unclassified':
         return existing
     bills = _spending_included_bill_items(spending)
     try:
@@ -5444,7 +5455,7 @@ def _reconcile_bill_import_category(row: dict, spending: dict) -> str:
         cat = str(bills[matched].get('category') or '').strip().lower()
         if cat in SPENDING_CATEGORY_SET:
             return cat
-    return 'utilities'
+    return 'other'
 
 
 def _reconcile_annotate_suggestions(row: dict, suggestions: list) -> list[dict]:
@@ -5671,6 +5682,22 @@ def _daily_budget_fuzzy_match_manual(
     return pool[0][2]
 
 
+def _merge_payment_refs(bank_desc: str, manual_desc: str) -> str:
+    """Final payment reference = bank statement reference + the user's own reference."""
+    b = str(bank_desc or '').strip()
+    m = str(manual_desc or '').strip()
+    if not b:
+        return m[:500]
+    if not m:
+        return b[:500]
+    low_b, low_m = b.lower(), m.lower()
+    if low_m in low_b:
+        return b[:500]
+    if low_b in low_m:
+        return m[:500]
+    return f'{b} · {m}'[:500]
+
+
 def _daily_budget_claim_manual_match(
     manual_tx: dict,
     row: dict,
@@ -5684,11 +5711,13 @@ def _daily_budget_claim_manual_match(
     manual_tx['fingerprint'] = fingerprint
     bank_desc = str(row.get('description') or '').strip()
     if bank_desc:
-        manual_tx['bank_description'] = bank_desc[:500]
-        # Prefer richer bank label when manual title is empty/generic
+        # The ledger row keeps the bank reference, with the user's own note appended
+        # (or the bank label alone when the manual title is empty/generic).
         man = str(manual_tx.get('description') or '').strip()
         if not man or man.lower() in ('spend', 'expense', 'purchase'):
             manual_tx['description'] = bank_desc[:500]
+        else:
+            manual_tx['description'] = _merge_payment_refs(bank_desc, man)
     # Bank amount is ground truth when reconciling slight differences (single match).
     # Skip for netted multi-manual claims — each part keeps its own amount.
     if adjust_amount_to_bank:
@@ -7074,9 +7103,10 @@ def _reconcile_confirm_session(spending: dict, sess: dict) -> dict:
             if fp in existing_fingerprints:
                 continue
             existing_fingerprints.add(fp)
+            is_bill = direction == 'outgoing' and str(row.get('reconcile_mark') or '') == 'bill'
             cat = row.get('category')
             if direction == 'outgoing':
-                if str(row.get('reconcile_mark') or '') == 'bill':
+                if is_bill:
                     cat = _reconcile_bill_import_category(row, spending)
                 else:
                     cat = str(cat or 'unclassified').strip().lower()
@@ -7098,6 +7128,8 @@ def _reconcile_confirm_session(spending: dict, sess: dict) -> dict:
                 'created_at': now_iso,
                 'fingerprint': fp,
             }
+            if is_bill:
+                tx['is_bill'] = True
             if bank_source:
                 tx['bank_source'] = bank_source
             tx_store.append(tx)
@@ -7224,13 +7256,15 @@ def _build_hybrid_bill_estimate(spending: dict, month_key: str, *, use_llm: bool
         # Prefer bill-like category if any tx in the group has one
         if cat in DAILY_BUDGET_BILL_CATEGORIES:
             slot['category'] = cat
+        if t.get('is_bill'):
+            slot['is_bill'] = True
 
     bill_items = []
     seen_norms: set[str] = set()
     # Prefer merchant-level lines for bill categories (avoids double-counting with signals)
     for slot in sorted(merchant_totals.values(), key=lambda s: -float(s.get('amount') or 0)):
         cat = slot['category']
-        if cat not in DAILY_BUDGET_BILL_CATEGORIES:
+        if cat not in DAILY_BUDGET_BILL_CATEGORIES and not slot.get('is_bill'):
             continue
         # Avoid combining a delayed prior cycle with this month's charge into one total.
         amt = _representative_monthly_bill_amount(slot.get('charges') or [])

@@ -791,7 +791,7 @@ class TestSpendingPairing(unittest.TestCase):
         self.assertIn('preview-review-pill', css)
         self.assertIn('preview-tx-row', js)
         self.assertIn('preview-tx-row--open', css)
-        self.assertIn('reconcile-unclaimed-list', recjs)
+        self.assertIn('rc-leftover', recjs)
 
     def test_insight_extended_fields_with_prior_month(self):
         """MoM deltas, trailing averages, category_trends, budget_action_items shape."""

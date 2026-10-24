@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept 3 — Card inbox · Statement import redesign</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="mockup.css">
+<style>
+  .phone-screen { }
+  .sticky-foot { padding: 0.9rem 0.2rem 0.2rem; }
+  .leftover-mini { font-size: 0.78rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="app-header">
+    <span class="app-brand">Tally</span>
+    <nav class="app-nav">
+      <a href="#">Home</a><a href="#">Daily</a><a href="#">Monthly</a><a href="#">Search</a>
+      <a class="active" href="#">Reconcile</a><a href="#">Loans</a>
+    </nav>
+    <div class="app-user">Signed in as ivan <button>Log out</button></div>
+  </header>
+
+  <div class="concept-banner">
+    <span class="tag">Concept 3</span>
+    <span><b>Card inbox.</b> A 50-row statement collapses to “<b>5 left to sort</b>”. The 45 auto-settled rows are never shown as tasks; each of the 5 is a single decision card. Ends on an explicit “balanced” state.</span>
+  </div>
+
+  <div class="row wrap" style="gap:2rem;justify-content:center;align-items:flex-start">
+
+    <!-- Phone A: triage -->
+    <div>
+      <p class="kicker" style="text-align:center;margin-bottom:0.6rem">Step · 5 left to sort</p>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-notch"><span></span></div>
+          <div class="phone-inner">
+            <div class="row between" style="margin-bottom:0.9rem">
+              <div>
+                <p class="muted" style="font-size:0.78rem" id="c3-read">June 2024 · 50 rows read</p>
+                <p class="h2">Sort June</p>
+              </div>
+              <button class="btn ghost sm">Done later</button>
+            </div>
+
+            <div class="card" style="padding:0.9rem;margin-bottom:0.9rem">
+              <div class="progress-ring">
+                <span class="ring" id="c3-ring"><span class="ring-label" id="c3-ring-label">45/50</span></span>
+                <div>
+                  <p class="h3" id="c3-ring-title">45 of 50 sorted automatically</p>
+                  <p class="muted" style="font-size:0.82rem" id="c3-ring-sub">—</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="row between" style="margin-bottom:0.5rem">
+              <p class="kicker">Needs a decision <span id="c3-askcount">(5)</span></p>
+              <button class="btn ghost sm">Sort all rest as new</button>
+            </div>
+            <div id="c3-cards"></div>
+
+            <div class="sticky-foot">
+              <button class="btn primary lg block">Import 50 rows →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phone B: done -->
+    <div>
+      <p class="kicker" style="text-align:center;margin-bottom:0.6rem">Step · Ready to import</p>
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-notch"><span></span></div>
+          <div class="phone-inner">
+            <div class="row between" style="margin-bottom:0.9rem">
+              <div>
+                <p class="muted" style="font-size:0.78rem">June 2024</p>
+                <p class="h2">Sort June</p>
+              </div>
+              <button class="btn ghost sm">Back</button>
+            </div>
+
+            <div class="success-card" style="margin-bottom:0.9rem">
+              <p style="font-size:1.6rem;line-height:1">✓</p>
+              <p class="h3" style="margin-top:0.2rem">June is balanced</p>
+              <p class="muted" style="font-size:0.83rem">All 50 statement rows are matched, a bill, a transfer, or new. Nothing left to sort.</p>
+            </div>
+
+            <div class="card" style="padding:0.9rem;margin-bottom:0.9rem" id="c3-summary"></div>
+
+            <div class="card" style="padding:0.9rem;margin-bottom:0.9rem">
+              <p class="h3" style="margin-bottom:0.3rem">2 logged entries stayed unmatched</p>
+              <p class="muted" style="font-size:0.83rem">“Farmers market” £12.50 and “Cash withdrawal” £20.00 — kept. They stay in your daily budget.</p>
+              <button class="btn ghost sm" style="margin-top:0.4rem">Change to Ignored</button>
+            </div>
+
+            <div class="big-actions">
+              <button class="btn primary lg block">Import 50 rows into June</button>
+              <button class="btn ghost block">Review all 50 rows first</button>
+            </div>
+            <p class="muted" style="font-size:0.75rem;text-align:center;margin-top:0.6rem">Reversible from Home → June.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="mockup-data.js"></script>
+<script>
+(function () {
+  var M = window.MOCK, t = M.totals(), money = M.money;
+
+  document.getElementById('c3-read').textContent = M.month + ' · ' + t.statementCount + ' rows read';
+  document.getElementById('c3-ring-label').textContent = t.sortedCount + '/' + t.statementCount;
+  document.getElementById('c3-ring').style.background =
+    'conic-gradient(var(--accent) 0 ' + Math.round(t.sortedCount / t.statementCount * 100) + '%, rgba(15,28,26,0.1) ' +
+    Math.round(t.sortedCount / t.statementCount * 100) + '% 100%)';
+  document.getElementById('c3-ring-title').textContent = t.sortedCount + ' of ' + t.statementCount + ' sorted automatically';
+  document.getElementById('c3-ring-sub').textContent =
+    t.matchedCount + ' matched · ' + t.billCount + ' bills · ' + t.transferCount + ' transfers · ' + t.newCount + ' new · ' + t.incomingCount + ' in';
+  document.getElementById('c3-askcount').textContent = '(' + t.askCount + ')';
+
+  document.getElementById('c3-cards').innerHTML = M.asks.map(function (a) {
+    if (a.type === 'near') {
+      var c = a.candidates[0];
+      return '<div class="card-decision">' +
+        '<div class="row between" style="margin-bottom:0.5rem"><span class="pill warn">Close — ' + Math.round((a.amt - c.amt) * 100) + 'p apart</span>' +
+        '<span class="muted" style="font-size:0.75rem">' + M.shortDay(a.d) + '</span></div>' +
+        '<p class="h3">' + a.desc + ' <span class="money">' + money(a.amt) + '</span></p>' +
+        '<p class="muted" style="font-size:0.83rem">You logged “' + c.desc + '” <span class="money">' + money(c.amt) + '</span> on ' + M.shortDay(c.d) + '.</p>' +
+        '<div class="big-actions"><button class="btn primary block">Match to “' + c.desc + '”</button>' +
+        '<button class="btn block">Not the same — import as new</button></div></div>';
+    }
+    var opts = a.candidates.map(function (c) {
+      return '<button class="btn block" style="justify-content:space-between"><span>' + c.desc + '</span><span class="money">' + money(c.amt) + ' · ' + M.shortDay(c.d) + '</span></button>';
+    }).join('');
+    return '<div class="card-decision">' +
+      '<div class="row between" style="margin-bottom:0.5rem"><span class="pill warn">' + a.candidates.length + ' exact matches</span>' +
+      '<span class="muted" style="font-size:0.75rem">' + M.shortDay(a.d) + '</span></div>' +
+      '<p class="h3">' + a.desc + ' <span class="money">' + money(a.amt) + '</span></p>' +
+      '<p class="muted" style="font-size:0.83rem">' + a.candidates.length + ' of your entries fit this exactly.</p>' +
+      '<div class="big-actions">' + opts + '<button class="btn ghost block">None of these — import as new</button></div></div>';
+  }).join('');
+
+  function line(k, v, cls) {
+    return '<div class="effect-line"><span class="k">' + k + '</span><span class="v money' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
+  }
+  document.getElementById('c3-summary').innerHTML =
+    line('Statement spend', money(t.bankTotal)) +
+    line('Matched to logged', money(t.matchedPlusDefaults)) +
+    line('New spending', money(t.newTotal)) +
+    line('Bills (not daily)', money(t.billTotal)) +
+    line('Money in', '+' + money(t.incomingTotal + t.transferInTotal), 'amt--pos');
+})();
+</script>
+</body>
+</html>

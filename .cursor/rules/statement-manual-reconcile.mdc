@@ -79,25 +79,30 @@ Each upload: `{ id, file_name, bank_source, period_start, period_end, rows[] }`.
 
 - Duplicate detection (`_reconcile_apply_duplicate_marks`) ignores fingerprints on **manual** txs. Claimed manuals copy the bank fingerprint; counting those as already-imported would zero `statement_count` after Find matches / a rematch.
 
-## UI (`@templates/reconcile.html`, `@static/reconcile.js`, `@static/style.css`)
+## UI — effect-first cockpit (`@templates/reconcile.html`, `@static/reconcile.js`, `@static/style.css`)
 
-Linear 3-step wizard (one screen at a time): **Add files** → **Review** → **Import**.
+Single scrolling screen (no wizard steps, no one-at-a-time carousel). Composer + staged uploads at the top, then one **grid** of every statement row plus a sticky **After import** panel. Classes are prefixed `rc-`.
 
-- `.reconcile-page .hidden { display: none !important }` — required because steps/triage/footers use `display: flex`/`grid`/`inline-flex`, which otherwise beat Tailwind `.hidden`.
-- Composer only on step 1. Custom file control (`#reconcile-file-name`). Collapsed **Adjust date range** (`#reconcile-range-toggle`). One primary CTA: **Find matches**.
-- **Restart matching** (`POST .../restart-match`) on Review and Import: clears every `manual_match` / `transfer_pair` / `reconcile_mark`, resets `include` to true, clears leftover keep/ignore + `reviewed_unclaimed`, then re-runs auto-match on the staged uploads (confirm dialog in UI). Hidden when readonly/imported. Does not delete uploads.
-- After auto-match, skip exact matches and unmatched rows with **no exact-amount suggestion** (fuzzy ±£5 near-misses wait until import as unaccounted + leftover manuals). Review queue is transfers, netted bank groups, and unmatched rows with an **exact** amount suggestion. Exact unmatched are shown first. Recap is the current task only plus a quiet matched count — progress **N of M** lives in the nav.
-- **N of M** uses stable `item_key`s (`transfer:<pair_key>`, `netted:<group_key>`, `unmatched:<row_id>`). Decided keys stay decided even when “not a match” unlinks a netted group and new legs appear — those new items **append**, so the counter goes to 2 of 19 rather than resetting to 1. Undo replaces Prev when an undo is available (`POST .../relink-netted` restores a netted group).
-- Actions are **Looks right** / **Not a match** on transfers, netted groups, and exact unmatched. **This is a bill** is only on **individual unmatched bank rows** (review card or Import → unaccounted) — never on net groups. Bills are not logged as manuals; they live on Daily → Plan. PATCH `/row/<id>` accepts `reconcile_mark: "bill"` (or null to unmark). Confirm imports bill-marked rows with a Daily bill category via `_reconcile_bill_import_category`.
-- Exact-match suggestion list label: **Only match** when there is one candidate; **N matches — pick one** when several exact-amount manuals are offered (tap a card to select). Near-misses stay off the Review card and wait until Import.
-- Leftover spending (per-row **Match** / Keep / Ignore plus **Keep all** / **Ignore all**; `POST .../keep-manual` and `.../exclude-manual` accept `manual_ids[]`). **Match** opens a picker of remaining unaccounted bank rows (searchable, sorted by amount then date proximity; amount diffs shown) and calls `POST .../link-manual` (`via: user`), clearing Keep/Ignore on that manual. Matched spending sample (5 rows, `<details>` to show all; each row is a Bank vs Spending comparison, amber amount/date when they differ), bill comparison, and unaccounted bank rows are on the **Import** page. Unaccounted rows can be ignored or marked as a bill. Import also has a **search** (`#reconcile-unaccounted-filter`) plus **Mark visible as bills** / **Undo** (`POST .../mark-bills`; client `billMarkUndoStack`). Confirm auto-POSTs `reviewed_unclaimed`. Payload includes `expected_bills` / `expected_bills_total` from Daily → Plan `bill_items`. Totals: `bill_marked_*`, `unaccounted_bank_*`.
-- Do not use a status chip as navigation.
-- `status == imported` is read-only (`session.readonly`, `body.reconcile-readonly`) — composer and import CTA hidden; summary lists files, outgoing, incoming (non-transfer), transfers, matches, bills, new outgoing, leftover kept, and ignored. Totals include `incoming_count` / `incoming_total` / `ignored_bank_count`.
-- Match rows are a comparison grid (role · name · amount · date · source). Actions live in `.reconcile-triage-foot`.
-- Transfer review legs show **signed** amounts (`−£…` outgoing, `+£…` incoming) so the pair is visibly money out / money in; other match rows stay unsigned abs amounts.
-- **Mobile (≤768px):** primary review action is full width, secondary actions share the next row; leftover/unaccounted Keep/Ignore sit under the copy (not a side column); month picker stretches; reconcile buttons are 44px tall. Nav is a 3×2 grid (Home/Daily/Monthly · Search/Reconcile/Loans); ≥768px is a single nowrap row.
-- `#reconcile-view-all-toggle` expands a row table under Review.
+- `.reconcile-page .hidden { display: none !important }` is required (panels use flex/grid and would otherwise beat Tailwind `.hidden`). The reconcile shell is widened: `.reconcile-page .app-shell { max-width: 1320px }`.
+- Composer + **Adjust date range** (`#reconcile-range-toggle`, `#reconcile-period-start/end`) + staged uploads + **Find matches** (`#reconcile-auto-match-btn`) are unchanged from the pre-cockpit design.
+- **Grid columns:** include checkbox · Bank row · Status · Matched entry · Amount · Actions (`#reconcile-rows`). Filters (`#reconcile-seg`): **To review** (asks + `NEW`, the default) / All / Matched / Bills / New / Transfers.
+- **Status** (`kindOf`): quiet text labels for matched/bill/transfer/in; `NEW` is a solid blue pill; asks show `Near` or `N exact`. `NEW` rows are tinted blue; ask rows tinted amber.
+- **Matched entry** shows the *logged entry being compared* (manual description + amount · date); bills show "Bill — not daily spending", transfers "↔ transfer". Clicking it opens an **inline resolver** (`data-resolve`): suggested candidates first (with `Np off`), then the full pool of `unclaimed` manuals, plus **Import as new** (`data-import-new`, client-only `state.decided`).
+- **Row actions** (`rc-act`): **Unmatch** (`data-unmatch`) on matched rows; **Make bill** (`data-makebill`) on matched/new/ask. Unmatch/relink call `POST .../unlink-manual` / `.../link-manual`.
+- **Reference grouping:** rows sharing the first two description tokens get a `×N` badge (`rc-ref-badge`). Clicking opens an inline group panel listing the affected dates/amounts with **Make all N bills** (`data-group-bill`, uses `POST .../mark-bills`) or Cancel. Badges are recomputed from current row kinds on every render.
+- **Leftover** ("Logged, not on statements"): manuals with status `unclaimed`/`kept`/`excluded`; **Keep** / **Ignore** only (`POST .../keep-manual`, `.../exclude-manual`) — no Match (matching is driven from the bank-row side). Grid is `1fr auto` so the pills align in a right column.
+- **After import panel** (`#reconcile-effect`, `#reconcile-daily`): Statement spend · Matched · New · Bills (with **Expected** from `expected_bills_total` and an under/over delta) · Transfers · Money in; then Logged entries · Unmatched · Ledger rows. Confirm CTA label counts *included* rows.
+- **Undo toast** (`#reconcile-toast`, 7s): snapshot-free — the Undo handler replays the inverse calls (`mark-bills` null + `link-manual`, or `link-manual`). Covers Make bill / bulk Make bills / Unmatch.
+- **Confirm** (`POST .../review-unclaimed` then `.../confirm`) — the review-unclaimed POST satisfies the server guard when unclaimed manuals remain.
+- `status == imported` is read-only: composer + cockpit hidden, `#reconcile-readonly` summary shown (files · statement rows · outgoing · matched · bills · new).
 - `bank_matched_via`: `reconcile_auto` | `reconcile_user`. Excluded manuals get `reconcile_excluded_month` on confirm.
+
+## Backend invariants (bill flag + payment ref)
+
+- **`is_bill`** is persisted on imported statement txs that were marked as bills (`_reconcile_confirm_session`). `_daily_budget_is_discretionary_tx` excludes `is_bill` (and bill/ignore categories). This is the durable bill signal — the category stays *truthful*.
+- `_reconcile_bill_import_category` prefers the row's own valid category, else the matching Daily → Plan bill item's category, else `'other'` (no more `'utilities'` fallback).
+- `_daily_budget_estimate_bills_for_month` also treats `is_bill` merchant slots as bill candidates (so explicitly-marked bills still surface when re-estimating the Plan).
+- **Matched payment ref:** on claim, the ledger description becomes **bank ref · manual ref** via `_merge_payment_refs` (bank-only when the manual title is empty/generic). The write-only `bank_description` field was removed.
 
 ## Tests
 

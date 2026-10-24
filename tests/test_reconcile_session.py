@@ -457,6 +457,38 @@ class TestReconcileSessionHelpers(unittest.TestCase):
         self.assertEqual(result['imported_count'], 1)
         tx = spending['transactions'][0]
         self.assertEqual(tx['category'], 'housing')
+        self.assertTrue(tx.get('is_bill'))
+
+    def test_confirm_bill_mark_keeps_truthful_category_and_flags_is_bill(self):
+        spending = {
+            'transactions': [],
+            'statements': [],
+            'daily_budget': {'plan': {'bill_items': []}},
+            'reconcile_sessions': {},
+        }
+        sess = app_mod._reconcile_ensure_session(spending, '2024-06')
+        sess['auto_match_ran'] = True
+        sess['uploads'] = [{
+            'id': 'u1',
+            'file_name': 'x.csv',
+            'bank_source': 'Monzo',
+            'rows': [
+                _stage_row(
+                    id='r1',
+                    date='2024-06-10',
+                    amount=2.80,
+                    description='TFL TRAVEL CH',
+                    category='transport',
+                    reconcile_mark='bill',
+                ),
+            ],
+        }]
+        result = app_mod._reconcile_confirm_session(spending, sess)
+        self.assertEqual(result['imported_count'], 1)
+        tx = spending['transactions'][0]
+        self.assertEqual(tx['category'], 'transport')
+        self.assertTrue(tx.get('is_bill'))
+        self.assertFalse(app_mod._daily_budget_is_discretionary_tx(tx))
 
     def test_bulk_keep_and_exclude_manuals(self):
         sess = {'excluded_manual_ids': ['m1'], 'kept_manual_ids': []}
@@ -748,20 +780,20 @@ class TestReconcileUiPresence(unittest.TestCase):
             self.assertIn('Find matches', html)
             self.assertIn('Restart matching', html)
             self.assertIn('id="reconcile-restart-match"', html)
-            self.assertIn('id="reconcile-restart-match-confirm"', html)
-            self.assertIn('Confirm import', html)
             self.assertIn('reconcile.js', html)
             self.assertIn('reconcile-composer', html)
-            self.assertIn('reconcile-triage-foot', html)
             self.assertIn('id="reconcile-file-name"', html)
-            self.assertIn('id="reconcile-steps"', html)
-            self.assertIn('id="reconcile-summary-body"', html)
+            self.assertIn('id="reconcile-rows"', html)
+            self.assertIn('id="reconcile-effect"', html)
+            self.assertIn('id="reconcile-leftover"', html)
+            self.assertIn('rc-cockpit', html)
+            self.assertIn('Matched entry', html)
+            self.assertIn('To review', html)
             css = (Path(app_mod.app.root_path) / 'static' / 'style.css').read_text(encoding='utf-8')
             self.assertIn('.reconcile-page .hidden {', css)
             self.assertIn('display: none !important;', css)
-            self.assertIn('.reconcile-actions .reconcile-btn--primary', css)
-            self.assertIn('flex-basis: 100%', css)
-            self.assertIn('.reconcile-unclaimed-item {\n        flex-direction: column;', css)
+            self.assertIn('.rc-two-col', css)
+            self.assertIn('.rc-toast', css)
 
             home = self.client.get('/')
             home_html = home.get_data(as_text=True)
@@ -780,52 +812,36 @@ class TestReconcileUiPresence(unittest.TestCase):
             nav_daily = self.client.get('/spending/daily')
             self.assertIn('>Reconcile</a>', nav_daily.get_data(as_text=True))
 
-    def test_reconcile_js_refreshes_after_upload(self):
+    def test_reconcile_js_cockpit_present(self):
         js = (Path(app_mod.app.root_path) / 'static' / 'reconcile.js').read_text(encoding='utf-8')
-        self.assertIn('refreshFromSession(data)', js)
-        self.assertIn("api(`/api/spending/reconcile/${encodeURIComponent(month)}/upload`", js)
-        self.assertIn('function txRow(', js)
-        self.assertIn('function signedLedgerAmount(', js)
-        self.assertIn('signed: true', js)
-        self.assertIn('function renderViewAll(', js)
+        self.assertIn('function api(', js)
+        self.assertIn('/upload', js)
         self.assertIn("fd.append('period_start'", js)
-        self.assertIn('function renderReadonly(', js)
-        self.assertIn('function syncRangeFromMonth(', js)
-        self.assertIn('function needsDecision(', js)
-        self.assertIn('function goStep(', js)
-        self.assertIn('Looks right', js)
-        self.assertIn('Not a match', js)
-        self.assertIn('This is a bill', js)
-        self.assertIn('data-mark-bill-row', js)
-        self.assertIn('Matched spending', js)
-        self.assertIn('Show all', js)
-        self.assertIn('reconcile-match-pair', js)
-        self.assertIn('amountDiff', js)
-        self.assertNotIn('bill-netted', js)
-        self.assertIn('data-queue-undo', js)
-        self.assertIn('exactSuggestions', js)
-        self.assertIn('Only match', js)
-        self.assertIn('matches — pick one', js)
-        self.assertIn('Unmatched spending', js)
-        self.assertIn('Keep all', js)
-        self.assertIn('Ignore all', js)
-        self.assertIn('data-keep-all-manuals', js)
-        self.assertIn('data-match-manual', js)
-        self.assertIn('data-link-manual-to-row', js)
-        self.assertIn('leftoverMatchPickerHtml', js)
-        self.assertIn('bankCandidatesForManual', js)
-        self.assertIn('Unaccounted statement rows', js)
-        self.assertIn('reconcile-unaccounted-filter', js)
-        self.assertIn('data-mark-visible-bills', js)
-        self.assertIn('data-undo-bill-marks', js)
-        self.assertIn('billMarkUndoStack', js)
-        self.assertIn('/mark-bills', js)
-        self.assertIn('bill_auto_marks', js)
-        self.assertIn('outgoing on statements', js)
-        self.assertIn('prettyDate: true', js)
+        self.assertIn('function kindOf(', js)
+        self.assertIn('function renderGrid(', js)
+        self.assertIn('function renderEffect(', js)
+        self.assertIn('function renderLeftover(', js)
+        self.assertIn('function resolverHtml(', js)
+        self.assertIn('function makeBills(', js)
+        self.assertIn('function unmatch(', js)
+        self.assertIn('function linkManual(', js)
         self.assertIn('function restartMatching(', js)
-        self.assertIn('/restart-match', js)
-        self.assertIn('Unmatched spending kept', js)
+        self.assertIn('function showToast(', js)
+        self.assertIn('function doUndo(', js)
+        self.assertIn('data-resolve', js)
+        self.assertIn('data-import-new', js)
+        self.assertIn('data-makebill', js)
+        self.assertIn('data-unmatch', js)
+        self.assertIn('data-link', js)
+        self.assertIn('data-keep', js)
+        self.assertIn('data-ignore', js)
+        self.assertIn('rc-ref-badge', js)
+        self.assertIn('rc-group-panel', js)
+        self.assertIn('/mark-bills', js)
+        self.assertIn('/unlink-manual', js)
+        self.assertIn('/link-manual', js)
+        self.assertIn('Import as new', js)
+        self.assertIn('Expected ', js)
 
 
 class TestReconcileMarkBillsApi(unittest.TestCase):

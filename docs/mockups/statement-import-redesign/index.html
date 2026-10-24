@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Statement import — redesign concepts</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<div class="shell">
+  <header class="app-header">
+    <span class="app-brand">Tally</span>
+    <nav class="app-nav">
+      <a href="#">Home</a><a href="#">Daily</a><a href="#">Monthly</a><a href="#">Search</a>
+      <a class="active" href="#">Reconcile</a><a href="#">Loans</a>
+    </nav>
+    <div class="app-user">Signed in as ivan <button>Log out</button></div>
+  </header>
+
+  <section class="card">
+    <p class="kicker">Design exploration</p>
+    <h1 class="h1" style="margin:0.2rem 0 0.6rem">Statement import — three redesign concepts</h1>
+    <p class="lead">
+      Today's flow asks for a lot of small confirmations and never shows the user the <em>result</em> of importing
+      until after it's done. These three concepts keep the matching engine as-is — exact-date-and-amount matches,
+      ambiguity stays manual, near-misses stay explicit — but change how much the user has to touch and how clearly
+      the outcome is shown.
+    </p>
+    <p class="lead" style="margin-top:0.6rem">
+      All three are loaded with the <b>same ~50-row June dataset</b> (26 matched · 8 bills · 2 transfer pairs ·
+      3 incoming · 4 new · 5 needing a decision) so they can be compared at realistic scale.
+    </p>
+  </section>
+
+  <!-- Realistic scale -->
+  <section class="card card--solid">
+    <h2 class="h2" style="margin-bottom:0.5rem">Why a 50-row month breaks the current flow</h2>
+    <div class="row wrap" style="gap:1.5rem;align-items:flex-start">
+      <ul class="stack" style="flex:1;min-width:16rem;list-style:none">
+        <li>• The <b>review carousel</b> turns into ~15–25 Prev/Next/Accept clicks — the bulk of the month is confident matches nobody needs to see.</li>
+        <li>• There's no way to say “show me <em>only</em> the rows you're unsure about”.</li>
+        <li>• The 45 settled rows and the 5 real decisions carry the same visual weight.</li>
+      </ul>
+      <div style="flex:1;min-width:16rem">
+        <div class="impact">
+          <p class="impact-title" style="font-size:1rem">50 rows, ~5 real decisions</p>
+          <div class="impact-grid">
+            <span class="impact-chip"><span class="n">45</span><span class="lbl">settled by<br>the engine</span></span>
+            <span class="impact-chip"><span class="n">5</span><span class="lbl">need a<br>human call</span></span>
+            <span class="impact-chip"><span class="n">90%</span><span class="lbl">of the work is<br>already done</span></span>
+          </div>
+          <p class="muted" style="font-size:0.82rem;margin-top:0.7rem">The redesign goal at scale: make the 90% disappear and put the 5 exceptions front and centre.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Current flow -->
+  <section class="card card--solid">
+    <h2 class="h2" style="margin-bottom:0.5rem">Why the current flow feels convoluted</h2>
+    <div class="row wrap" style="gap:1.5rem;align-items:flex-start">
+      <ul class="stack" style="flex:1;min-width:16rem;list-style:none">
+        <li>• <b>Per-file add</b> → then a separate <b>Find matches</b> step.</li>
+        <li>• <b>One-at-a-time review carousel</b> (“1 of 19”, Prev / Skip / Accept) — confident matches still need a click each.</li>
+        <li>• A third screen for leftovers, bills, and unaccounted rows.</li>
+        <li>• The <b>effect of importing</b> is buried in a summary and on Home only as “Imported · £X · N transactions”.</li>
+      </ul>
+      <div style="flex:1;min-width:16rem">
+        <div class="impact">
+          <p class="impact-title" style="font-size:1rem">Current touchpoints for a normal month</p>
+          <div class="impact-grid">
+            <span class="impact-chip"><span class="n">2–4</span><span class="lbl">add-file<br>actions</span></span>
+            <span class="impact-chip"><span class="n">1</span><span class="lbl">Find<br>matches</span></span>
+            <span class="impact-chip"><span class="n">M</span><span class="lbl">carousel<br>accepts</span></span>
+            <span class="impact-chip"><span class="n">3</span><span class="lbl">wizard<br>screens</span></span>
+            <span class="impact-chip"><span class="n">1</span><span class="lbl">Confirm</span></span>
+          </div>
+          <p class="muted" style="font-size:0.82rem;margin-top:0.7rem">M ≈ number of transfers, netted groups, and exact unmatched rows — every one is a click.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Concepts -->
+  <h2 class="h2" style="margin:0 0.2rem 0.7rem">The concepts</h2>
+  <div class="concept-links">
+    <a class="concept-link" href="concept-1-autofirst.html">
+      <div class="card">
+        <span class="pill ok">Fewest taps</span>
+        <p class="h2" style="margin:0.5rem 0 0.3rem">1 · Auto-first workspace</p>
+        <p class="muted" style="font-size:0.86rem">Matching runs on upload. One scrolling page with a live “what this import does” bar; only the 5 ambiguous rows are surfaced, the other 45 collapse into inspectable groups.</p>
+        <div class="divider"></div>
+        <p class="muted" style="font-size:0.82rem"><b>~7 taps for 50 rows</b> (upload ×2, resolve 5, import). Removes Find matches, the carousel, and the wizard.</p>
+      </div>
+    </a>
+    <a class="concept-link" href="concept-2-cockpit.html">
+      <div class="card">
+        <span class="pill info">Most explicit</span>
+        <p class="h2" style="margin:0.5rem 0 0.3rem">2 · Effect-first cockpit</p>
+        <p class="muted" style="font-size:0.86rem">All 50 rows on one grid with safe defaults pre-selected; a confidence filter jumps to the 5 exceptions, and a sticky panel shows before → after.</p>
+        <div class="divider"></div>
+        <p class="muted" style="font-size:0.82rem"><b>~9 taps for 50 rows</b> (upload ×2, accept bulk, resolve 5, import). Best audit trail.</p>
+      </div>
+    </a>
+    <a class="concept-link" href="concept-3-inbox.html">
+      <div class="card">
+        <span class="pill bill">Mobile-first</span>
+        <p class="h2" style="margin:0.5rem 0 0.3rem">3 · Card inbox</p>
+        <p class="muted" style="font-size:0.86rem">A 50-row statement collapses to “5 left to sort”. Auto-settled rows never appear as tasks; each decision is one card. Ends on a clear “balanced” state.</p>
+        <div class="divider"></div>
+        <p class="muted" style="font-size:0.82rem"><b>~7 taps for 50 rows</b> (upload ×2, 5 cards, import). Lowest cognitive load on a phone.</p>
+      </div>
+    </a>
+  </div>
+
+  <!-- Comparison -->
+  <section class="card" style="margin-top:1.25rem">
+    <h2 class="h2" style="margin-bottom:0.7rem">Touchpoints &amp; trade-offs</h2>
+    <table class="tp-table">
+      <thead>
+        <tr><th>Dimension</th><th>Current</th><th>1 Auto-first</th><th>2 Cockpit</th><th>3 Inbox</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>User taps (50-row month)</td><td><strong>15–25</strong></td><td><strong>~7</strong></td><td><strong>~9</strong></td><td><strong>~7</strong></td></tr>
+        <tr><td>Separate screens</td><td>3 (+Home)</td><td>1</td><td>1</td><td>1–2 cards</td></tr>
+        <tr><td>“Only show me the exceptions”</td><td class="cross">No</td><td class="check">Yes (default)</td><td class="check">Yes (filter)</td><td class="check">Yes (by design)</td></tr>
+        <tr><td>Explicit “Find matches” step</td><td class="cross">Yes</td><td class="check">Removed</td><td class="check">Removed</td><td class="check">Removed</td></tr>
+        <tr><td>Confident matches need a click each?</td><td class="cross">Yes</td><td class="check">No</td><td class="check">No (bulk)</td><td class="check">No</td></tr>
+        <tr><td>Which rows need a decision is obvious</td><td>Partially</td><td class="check">Yes</td><td class="check">Yes</td><td class="check">Yes</td></tr>
+        <tr><td>Effect of import shown <em>before</em> confirm</td><td class="cross">Barely</td><td class="check">Live bar</td><td class="check">Before → after</td><td class="check">Balanced summary</td></tr>
+        <tr><td>Every row inspectable / undoable</td><td class="check">Yes</td><td class="check">Yes (collapsed)</td><td class="check">Yes (grid)</td><td>Yes (review all)</td></tr>
+        <tr><td>Ambiguity still manual</td><td class="check">Yes</td><td class="check">Yes</td><td class="check">Yes</td><td class="check">Yes</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Non-negotiables -->
+  <section class="card card--solid">
+    <h2 class="h2" style="margin-bottom:0.6rem">What none of these sacrifice</h2>
+    <div class="row wrap" style="gap:1.5rem;align-items:flex-start">
+      <ul class="stack" style="flex:1;min-width:15rem;list-style:none">
+        <li>• Exact-amount + exact-date matches still auto-link; <b>near-misses never auto-link</b>.</li>
+        <li>• Same-amount collisions <b>always require a human pick</b>.</li>
+        <li>• Transfers, netted groups, and expected bills keep their current rules.</li>
+      </ul>
+      <ul class="stack" style="flex:1;min-width:15rem;list-style:none">
+        <li>• Every auto-decision stays <b>inspectable and reversible</b> (no silent data loss).</li>
+        <li>• Leftover logged spends and unaccounted rows are still explicitly resolved.</li>
+        <li>• Import stays <b>reversible</b> after the fact.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="card">
+    <p class="kicker">Recommendation</p>
+    <p class="lead" style="margin-top:0.3rem">
+      <b>Concept 2 as the desktop default, Concept 3 as the phone default,</b> sharing Concept 1's auto-run-on-upload and
+      live outcome bar. The cockpit's before → after panel is what fixes the “unclear effect” problem; the inbox is the
+      same model with decision cards stacked for small screens.
+    </p>
+  </section>
+</div>
+</body>
+</html>

@@ -12,7 +12,7 @@
     <div class="app-shell">
         {% with active='reconcile' %}{% include 'partials/app_header.html' %}{% endwith %}
 
-        <section class="spending-section card reconcile-section" aria-labelledby="reconcile-heading" data-step="upload">
+        <section class="spending-section card reconcile-section" aria-labelledby="reconcile-heading">
             <header class="reconcile-top">
                 <div class="reconcile-top-copy">
                     <h2 class="spending-h2" id="reconcile-heading">Reconcile</h2>
@@ -27,97 +27,109 @@
                 </div>
             </header>
 
-            <ol class="reconcile-steps" id="reconcile-steps" aria-label="Progress">
-                <li class="reconcile-steps-item is-current" data-go-step="upload">
-                    <span class="reconcile-steps-num">1</span>
-                    <span class="reconcile-steps-label">Add files</span>
-                </li>
-                <li class="reconcile-steps-item" data-go-step="review">
-                    <span class="reconcile-steps-num">2</span>
-                    <span class="reconcile-steps-label">Review</span>
-                </li>
-                <li class="reconcile-steps-item" data-go-step="confirm">
-                    <span class="reconcile-steps-num">3</span>
-                    <span class="reconcile-steps-label">Import</span>
-                </li>
-            </ol>
-
-            <div id="reconcile-step-upload" class="reconcile-step">
-                <div class="reconcile-composer">
-                    <label class="reconcile-field" for="reconcile-source">
-                        <span class="reconcile-field-label">Bank <span class="reconcile-field-optional">optional</span></span>
-                        <input id="reconcile-source" type="text" class="reconcile-input" placeholder="e.g. Monzo, Amex" maxlength="80" list="reconcile-source-list" />
-                        <datalist id="reconcile-source-list"></datalist>
-                    </label>
-                    <label class="reconcile-field reconcile-field--file" for="reconcile-file">
-                        <span class="reconcile-field-label">Statement file</span>
-                        <span class="reconcile-file-control">
-                            <input id="reconcile-file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="reconcile-file-input" />
-                            <span class="reconcile-file-fake" aria-hidden="true">
-                                <span class="reconcile-file-choose">Choose file</span>
-                                <span id="reconcile-file-name" class="reconcile-file-name">No file selected</span>
-                            </span>
+            <div id="reconcile-composer" class="reconcile-composer">
+                <label class="reconcile-field" for="reconcile-source">
+                    <span class="reconcile-field-label">Bank <span class="reconcile-field-optional">optional</span></span>
+                    <input id="reconcile-source" type="text" class="reconcile-input" placeholder="e.g. Monzo, Amex" maxlength="80" list="reconcile-source-list" />
+                    <datalist id="reconcile-source-list"></datalist>
+                </label>
+                <label class="reconcile-field reconcile-field--file" for="reconcile-file">
+                    <span class="reconcile-field-label">Statement file</span>
+                    <span class="reconcile-file-control">
+                        <input id="reconcile-file" type="file" accept=".pdf,.csv,.txt,.xlsx,application/pdf,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="reconcile-file-input" />
+                        <span class="reconcile-file-fake" aria-hidden="true">
+                            <span class="reconcile-file-choose">Choose file</span>
+                            <span id="reconcile-file-name" class="reconcile-file-name">No file selected</span>
                         </span>
-                    </label>
-                    <div class="reconcile-field reconcile-field--action">
-                        <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft">Add file</button>
-                    </div>
-                </div>
-                <button type="button" id="reconcile-range-toggle" class="reconcile-text-btn reconcile-range-toggle" aria-expanded="false" aria-controls="reconcile-range-fields">Adjust date range</button>
-                <div id="reconcile-range-fields" class="reconcile-range hidden">
-                    <label class="reconcile-field" for="reconcile-period-start">
-                        <span class="reconcile-field-label">From</span>
-                        <input id="reconcile-period-start" type="date" class="reconcile-input" />
-                    </label>
-                    <label class="reconcile-field" for="reconcile-period-end">
-                        <span class="reconcile-field-label">To</span>
-                        <input id="reconcile-period-end" type="date" class="reconcile-input" />
-                    </label>
-                    <div class="reconcile-field reconcile-field--action">
-                        <button type="button" id="reconcile-range-reset" class="reconcile-btn reconcile-btn--ghost">Reset to month</button>
-                    </div>
-                </div>
-                <ul id="reconcile-upload-list" class="reconcile-upload-list" aria-label="Staged statements"></ul>
-                <div class="reconcile-step-foot">
-                    <button type="button" id="reconcile-auto-match-btn" class="reconcile-btn reconcile-btn--primary" disabled>Find matches</button>
+                    </span>
+                </label>
+                <div class="reconcile-field reconcile-field--action">
+                    <button type="button" id="reconcile-upload-btn" class="reconcile-btn reconcile-btn--soft">Add file</button>
                 </div>
             </div>
+            <button type="button" id="reconcile-range-toggle" class="reconcile-text-btn reconcile-range-toggle" aria-expanded="false" aria-controls="reconcile-range-fields">Adjust date range</button>
+            <div id="reconcile-range-fields" class="reconcile-range hidden">
+                <label class="reconcile-field" for="reconcile-period-start">
+                    <span class="reconcile-field-label">From</span>
+                    <input id="reconcile-period-start" type="date" class="reconcile-input" />
+                </label>
+                <label class="reconcile-field" for="reconcile-period-end">
+                    <span class="reconcile-field-label">To</span>
+                    <input id="reconcile-period-end" type="date" class="reconcile-input" />
+                </label>
+                <div class="reconcile-field reconcile-field--action">
+                    <button type="button" id="reconcile-range-reset" class="reconcile-btn reconcile-btn--ghost">Reset to month</button>
+                </div>
+            </div>
+            <ul id="reconcile-upload-list" class="reconcile-upload-list" aria-label="Staged statements"></ul>
+            <div class="reconcile-step-foot">
+                <button type="button" id="reconcile-auto-match-btn" class="reconcile-btn reconcile-btn--primary" disabled>Find matches</button>
+            </div>
 
-            <div id="reconcile-step-review" class="reconcile-step hidden">
-                <div id="reconcile-recap" class="reconcile-recap"></div>
-                <p class="reconcile-step-nav">
-                    <button type="button" id="reconcile-back-to-files" class="reconcile-text-btn">← Add another file</button>
-                    <button type="button" id="reconcile-restart-match" class="reconcile-text-btn">Restart matching</button>
-                </p>
-                <div id="reconcile-workspace" class="reconcile-work">
-                    <div id="reconcile-phase-bank" class="reconcile-triage">
-                        <div id="reconcile-focus" class="reconcile-focus"></div>
-                        <div id="reconcile-suggestions" class="reconcile-suggestions"></div>
-                        <div class="reconcile-triage-foot">
-                            <div id="reconcile-actions" class="reconcile-actions"></div>
-                            <div id="reconcile-queue-nav" class="reconcile-queue-nav"></div>
+            <div id="rc-cockpit" class="rc-cockpit hidden">
+                <div class="rc-two-col">
+                    <div class="rc-left">
+                        <div class="rc-toolbar">
+                            <div class="rc-seg" id="reconcile-seg" role="tablist">
+                                <button type="button" class="is-active" data-filter="review">To review</button>
+                                <button type="button" data-filter="all">All</button>
+                                <button type="button" data-filter="matched">Matched</button>
+                                <button type="button" data-filter="bill">Bills</button>
+                                <button type="button" data-filter="new">New</button>
+                                <button type="button" data-filter="transfer">Transfers</button>
+                            </div>
+                            <div class="rc-toolbar-right">
+                                <span class="rc-count" id="reconcile-count"></span>
+                            </div>
                         </div>
+                        <div id="reconcile-group-panel"></div>
+                        <div class="rc-table-scroll">
+                            <table class="rc-table">
+                                <thead>
+                                    <tr>
+                                        <th class="rc-col-include"><span class="sr-only">Include</span></th>
+                                        <th>Bank row</th>
+                                        <th class="rc-col-status">Status</th>
+                                        <th class="rc-col-entry">Matched entry</th>
+                                        <th class="rc-col-amount">Amount</th>
+                                        <th class="rc-col-actions">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="reconcile-rows"></tbody>
+                            </table>
+                        </div>
+                        <section class="rc-leftover">
+                            <div class="rc-leftover-head">
+                                <h3>Logged, not on statements</h3>
+                                <span class="rc-count" id="reconcile-leftover-count">0</span>
+                            </div>
+                            <div id="reconcile-leftover"></div>
+                        </section>
                     </div>
+
+                    <aside class="rc-right">
+                        <div class="rc-effect">
+                            <p class="rc-kicker">After import</p>
+                            <div id="reconcile-effect"></div>
+                            <div class="rc-divider"></div>
+                            <p class="rc-kicker">Daily budget</p>
+                            <div id="reconcile-daily"></div>
+                            <div class="rc-divider"></div>
+                            <button type="button" id="reconcile-confirm-btn" class="reconcile-btn reconcile-btn--primary rc-confirm-btn">Import</button>
+                            <button type="button" id="reconcile-restart-match" class="rc-text-btn">Restart matching</button>
+                        </div>
+                    </aside>
                 </div>
-                <div id="reconcile-view-all" class="reconcile-allrows">
-                    <button type="button" id="reconcile-view-all-toggle" class="reconcile-text-btn" aria-expanded="false" aria-controls="reconcile-view-all-panel">Show all statement rows</button>
-                </div>
-                <div id="reconcile-view-all-panel" class="reconcile-view-all-panel hidden"></div>
             </div>
 
-            <div id="reconcile-step-confirm" class="reconcile-step hidden">
-                <div id="reconcile-summary-body" class="reconcile-summary-body"></div>
-                <div class="reconcile-step-foot reconcile-step-foot--split">
-                    <button type="button" id="reconcile-confirm-back" class="reconcile-btn reconcile-btn--ghost">← Back</button>
-                    <div class="reconcile-step-foot-actions">
-                        <button type="button" id="reconcile-restart-match-confirm" class="reconcile-btn reconcile-btn--ghost">Restart matching</button>
-                        <button type="button" id="reconcile-final-confirm-btn" class="reconcile-btn reconcile-btn--primary">Confirm import</button>
-                    </div>
-                </div>
-            </div>
-
+            <div id="reconcile-readonly" class="rc-readonly hidden"></div>
             <p id="reconcile-status" class="reconcile-status hidden" role="status"></p>
         </section>
+    </div>
+
+    <div id="reconcile-toast" class="rc-toast" role="status" aria-live="polite">
+        <span id="reconcile-toast-msg"></span>
+        <button type="button" id="reconcile-undo">Undo</button>
     </div>
 
     <script>

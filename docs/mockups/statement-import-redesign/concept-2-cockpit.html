@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept 2 — Effect-first cockpit · Statement import redesign</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="mockup.css">
+<style>
+  .table-scroll { padding-right: 0.2rem; }
+  thead th { position: sticky; top: 0; background: var(--surface-solid); z-index: 2; }
+
+  /* Quiet status labels — only NEW shouts */
+  .v { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; color: var(--muted); }
+  .v-matched { color: var(--accent-deep); }
+  .v-bill { color: #b45309; }
+  .v-transfer { color: var(--info); }
+  .v-in { color: var(--accent-deep); }
+  .v-ask { color: var(--warn); }
+  .v-new {
+    background: var(--info); color: #fff; padding: 0.12rem 0.5rem;
+    border-radius: 999px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em;
+  }
+
+  /* NEW row draws the eye */
+  tr.row-new td { background: rgba(29,78,216,0.07); border-color: rgba(29,78,216,0.25); }
+  tr.row-new td:first-child { border-left: 3px solid var(--info) !important; }
+
+  /* Matched entry cell */
+  .entry { font-size: 0.88rem; }
+  .entry strong { font-weight: 600; }
+  .entry .em { color: var(--muted); font-family: var(--font-money); font-size: 0.8rem; }
+  .entry .diff { color: var(--warn); font-family: var(--font-money); font-size: 0.8rem; font-weight: 600; }
+  .entry .none { color: var(--faint); }
+
+  /* Inline resolver */
+  .resolve-trigger {
+    display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left;
+    font: inherit; background: transparent; border: none; cursor: pointer; padding: 0;
+  }
+  .resolve-trigger .rt-main { flex: 1; min-width: 0; }
+  .resolve-trigger .rt-caret { color: var(--warn); font-size: 0.7rem; }
+  .resolve-trigger:hover .rt-main strong { text-decoration: underline; }
+  .resolve-trigger .em { color: var(--warn); }
+  .resolve-trigger.rt-muted .rt-main, .resolve-trigger.rt-muted .rt-caret { color: var(--faint); }
+
+  .resolver-row td { padding: 0 !important; border: none !important; background: transparent; }
+  .resolver { margin: 0.1rem 0 0.7rem; padding: 0.6rem; border: 1px solid rgba(194,65,12,0.22); border-radius: var(--radius-sm); background: rgba(194,65,12,0.03); }
+  .cand-grid { display: flex; flex-direction: column; gap: 0.25rem; }
+  .cand {
+    display: flex; align-items: center; gap: 0.55rem; width: 100%; text-align: left; font: inherit;
+    border: 1px solid transparent; border-radius: 0.55rem; background: transparent;
+    padding: 0.42rem 0.55rem; cursor: pointer;
+  }
+  .cand:hover { background: rgba(255,255,255,0.7); }
+  .cand.selected { border-color: var(--accent); background: rgba(13,122,98,0.07); }
+  .cand .radio { width: 0.9rem; height: 0.9rem; border-radius: 50%; border: 2px solid var(--line-strong); flex: none; }
+  .cand.selected .radio { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 44%, transparent 46%); }
+  .cand .c-main { flex: 1; min-width: 0; }
+  .cand .c-main strong { font-size: 0.87rem; font-weight: 500; }
+  .cand.selected .c-main strong { font-weight: 600; }
+  .cand .c-main .em { color: var(--muted); font-family: var(--font-money); font-size: 0.78rem; margin-left: 0.35rem; }
+  .cand .c-flag { font-size: 0.72rem; color: var(--warn); font-family: var(--font-money); }
+
+  .resolver-none { margin-top: 0.5rem; padding-left: 0.1rem; }
+  .resolver-none button { font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; background: transparent; border: none; padding: 0.2rem 0; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; }
+  .resolver-none button:hover { color: var(--warn); }
+
+  .seg button { font-size: 0.78rem; padding: 0.3rem 0.7rem; }
+
+  /* Leftover rows: text left, actions in a fixed right column so they line up */
+  .ledger-row--leftover { grid-template-columns: 1fr auto; }
+  .ledger-row--leftover .desc { min-width: 0; }
+
+  /* Row actions — quiet text links */
+  .acts { display: flex; gap: 0.7rem; justify-content: flex-end; white-space: nowrap; }
+  .act { font: inherit; font-size: 0.76rem; font-weight: 600; color: var(--faint); background: none; border: none; cursor: pointer; padding: 0; white-space: nowrap; }
+  .act:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  .act.bill:hover { color: #b45309; }
+  tr:hover .act { color: var(--muted); }
+  .acts-cell { text-align: right; }
+
+  /* Similar-reference badge + group selection */
+  .ref-badge {
+    font-family: var(--font-money); font-size: 0.68rem; font-weight: 700;
+    background: rgba(15,28,26,0.08); color: var(--muted);
+    border: none; border-radius: 999px; padding: 0.05rem 0.4rem; margin-left: 0.4rem;
+    cursor: pointer; vertical-align: middle;
+  }
+  .ref-badge:hover { background: rgba(13,122,98,0.15); color: var(--accent-deep); }
+  tr.group-sel td { background: rgba(13,122,98,0.08); border-color: rgba(13,122,98,0.25); }
+  tr.group-sel td:first-child { border-left: 3px solid var(--accent) !important; }
+
+  /* Inline similar-rows group panel */
+  .group-row td { padding: 0 !important; border: none !important; background: transparent; }
+  .group-panel { margin: 0.1rem 0 0.7rem; padding: 0.75rem 0.9rem; border: 1px solid rgba(13,122,98,0.3); border-radius: var(--radius-sm); background: rgba(13,122,98,0.05); }
+  .gp-head { font-size: 0.86rem; font-weight: 600; margin-bottom: 0.55rem; }
+  .gp-head .money { font-family: var(--font-money); }
+  .gp-list { list-style: none; display: flex; flex-direction: column; gap: 0.2rem; margin-bottom: 0.7rem; }
+  .gp-list li { display: flex; justify-content: space-between; font-size: 0.83rem; color: var(--muted); font-family: var(--font-money); }
+  .gp-actions { display: flex; gap: 0.6rem; }
+
+  /* Expected vs actual bills */
+  .effect-sub { text-align: right; font-size: 0.76rem; color: var(--muted); margin: -0.15rem 0 0.15rem; }
+  .effect-sub .under { color: var(--accent-deep); font-weight: 600; }
+  .effect-sub .over { color: var(--warn); font-weight: 600; }
+
+  /* Undo toast */
+  .toast {
+    position: fixed; left: 50%; bottom: 1.25rem; transform: translate(-50%, 0.5rem);
+    display: flex; align-items: center; gap: 1.1rem;
+    background: var(--ink); color: #fff; padding: 0.6rem 0.95rem; border-radius: 999px;
+    box-shadow: var(--shadow); font-size: 0.85rem; z-index: 50;
+    opacity: 0; pointer-events: none; transition: opacity 0.16s, transform 0.16s;
+  }
+  .toast.show { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+  .toast button { background: none; border: none; font: inherit; font-weight: 700; cursor: pointer; color: #7fe0c4; text-decoration: underline; text-underline-offset: 3px; }
+</style>
+</head>
+<body>
+<div class="shell shell--wide">
+  <header class="app-header">
+    <span class="app-brand">Tally</span>
+    <nav class="app-nav">
+      <a href="#">Home</a><a href="#">Daily</a><a href="#">Monthly</a><a href="#">Search</a>
+      <a class="active" href="#">Reconcile</a><a href="#">Loans</a>
+    </nav>
+    <div class="app-user">Signed in as ivan <button>Log out</button></div>
+  </header>
+
+  <div class="concept-banner">
+    <span class="tag">Concept 2</span>
+    <span><b>Effect-first cockpit.</b> 50 rows, one grid. Filter to the 5 exceptions; resolve each inline against the logged entry you're comparing it to.</span>
+  </div>
+
+  <section class="card" style="padding:1rem 1.45rem">
+    <div class="row between wrap" style="gap:1rem">
+      <div class="row" style="gap:0.9rem;align-items:baseline">
+        <p class="h1">June 2024</p>
+        <span class="muted" id="c2-sub">—</span>
+      </div>
+      <span class="pill ok">● Matched</span>
+    </div>
+  </section>
+
+  <div class="two-col">
+    <div>
+      <section class="card" style="margin-bottom:1rem">
+        <div class="row between wrap" style="margin-bottom:0.8rem">
+          <div class="seg" id="c2-seg">
+            <button class="active" data-filter="all">All 50</button>
+            <button data-filter="ask">To check 5</button>
+            <button data-filter="new" id="c2-tab-new">New 4</button>
+            <button data-filter="matched">Matched 26</button>
+            <button data-filter="bill" id="c2-tab-bill">Bills 8</button>
+            <button data-filter="transfer">Transfers 4</button>
+          </div>
+          <div class="row" style="gap:0.7rem">
+            <span class="muted" id="c2-count" style="font-size:0.78rem"></span>
+            <button class="btn sm ghost">Accept all suggested</button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table class="review-table">
+            <thead>
+              <tr>
+                <th style="width:2rem"></th>
+                <th>Bank row</th>
+                <th style="width:6rem">Status</th>
+                <th style="width:14rem">Matched entry</th>
+                <th style="text-align:right">Amount</th>
+                <th style="width:10.5rem;text-align:right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="c2-rows"></tbody>
+          </table>
+        </div>
+        <p class="muted" style="font-size:0.78rem;margin-top:0.7rem">Unchecked rows are skipped.</p>
+      </section>
+
+      <section class="card">
+        <div class="row between" style="margin-bottom:0.6rem">
+          <h2 class="h2">Logged, not on statements</h2>
+          <span class="muted" id="c2-leftover-count">2</span>
+        </div>
+        <div id="c2-leftover"></div>
+      </section>
+    </div>
+
+    <aside>
+      <section class="card effect-panel">
+        <p class="kicker" style="margin-bottom:0.6rem">After import</p>
+        <div id="c2-effect"></div>
+        <div class="divider"></div>
+        <p class="kicker" style="margin-bottom:0.5rem">Daily budget</p>
+        <div id="c2-daily"></div>
+        <div class="divider"></div>
+        <button class="btn primary lg block">Import 50 selected →</button>
+        <p class="muted" style="font-size:0.76rem;text-align:center;margin-top:0.5rem">Reversible from Home → June.</p>
+      </section>
+    </aside>
+  </div>
+</div>
+
+<div class="toast" id="c2-toast" role="status"><span id="c2-toast-msg"></span><button type="button" id="c2-undo">Undo</button></div>
+
+<script src="mockup-data.js"></script>
+<script>
+(function () {
+  var M = window.MOCK, t = M.totals(), rows = M.allRows(), money = M.money, shortDay = M.shortDay;
+
+  document.getElementById('c2-sub').textContent =
+    t.statementCount + ' rows · ' + t.sortedCount + ' matched · ' + t.askCount + ' to check';
+
+  // Pool of logged entries still available to match against.
+  var pool = [], seen = {};
+  M.asks.forEach(function (a) { a.candidates.forEach(function (c) {
+    if (!seen[c.desc]) { seen[c.desc] = 1; pool.push({ desc: c.desc, amt: c.amt, d: c.d }); }
+  }); });
+  M.leftoverManuals.forEach(function (m) {
+    if (!seen[m.desc]) { seen[m.desc] = 1; pool.push({ desc: m.desc, amt: m.amt, d: m.d }); }
+  });
+  pool.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
+
+  // Group similar payment references (first two alphabetic tokens).
+  function refKey(desc) {
+    return String(desc || '').replace(/[^A-Za-z ]/g, ' ').trim().toUpperCase().split(/\s+/).slice(0, 2).join(' ');
+  }
+  var refCounts = {};
+  rows.forEach(function (r) {
+    if (r.kind === 'new' || r.kind === 'ask') {
+      var k = refKey(r.desc);
+      refCounts[k] = (refCounts[k] || 0) + 1;
+    }
+  });
+
+  function statusCell(r) {
+    if (r.kind === 'new') return '<span class="v v-new">NEW</span>';
+    if (r.kind === 'ask') return '<span class="v v-ask">' + (r.ask.type === 'near' ? 'Near' : r.ask.candidates.length + ' match') + '</span>';
+    if (r.kind === 'matched') return '<span class="v v-matched">Matched</span>';
+    if (r.kind === 'bill') return '<span class="v v-bill">Bill</span>';
+    if (r.kind === 'transfer') return '<span class="v v-transfer">Transfer</span>';
+    return '<span class="v v-in">In</span>';
+  }
+
+  function entryCell(r) {
+    if (r.kind === 'matched') {
+      var manual = r.becomes.replace(/[“”]/g, '');
+      var m = M.matched.filter(function (x) { return x.desc === r.desc && x.manual === manual; })[0];
+      return '<div class="entry"><strong>' + manual + '</strong> <span class="em">' + (m ? money(m.amt) + ' · ' + shortDay(m.d) : '') + '</span></div>';
+    }
+    if (r.kind === 'bill') {
+      var plan = r.becomes.replace(/^Plan [“]/, '').replace(/[”].*$/, '');
+      return '<div class="entry"><span class="none">Plan · ' + plan + '</span></div>';
+    }
+    if (r.kind === 'transfer') {
+      return '<div class="entry"><span class="none">' + r.becomes.replace('paired with ', '↔ ') + '</span></div>';
+    }
+    if (r.kind === 'incoming') {
+      return '<div class="entry"><span class="none">—</span></div>';
+    }
+    if (r.kind === 'new') {
+      return '<button type="button" class="resolve-trigger rt-muted">' +
+        '<span class="rt-main"><span class="none">Match an entry…</span></span>' +
+        '<span class="rt-caret">▾</span></button>';
+    }
+    var a = r.ask;
+    if (a.type === 'near') {
+      var c = a.candidates[0];
+      var diffP = Math.round((a.amt - c.amt) * 100);
+      return '<button type="button" class="resolve-trigger">' +
+        '<span class="rt-main"><strong>' + c.desc + '</strong> <span class="em">' + money(c.amt) + ' · ' + shortDay(c.d) + '</span>' +
+        (diffP ? ' <span class="diff">' + diffP + 'p off</span>' : '') + '</span>' +
+        '<span class="rt-caret">▾</span></button>';
+    }
+    return '<button type="button" class="resolve-trigger">' +
+      '<span class="rt-main"><strong>' + a.candidates.length + ' entries match</strong> <span class="em">' + money(a.amt) + '</span></span>' +
+      '<span class="rt-caret">▾</span></button>';
+  }
+
+  function resolverHtml(bankAmt, cands) {
+    cands = cands || [];
+    var isCand = {};
+    cands.forEach(function (c) { isCand[c.desc] = c; });
+    var ordered = cands.map(function (c) { return { desc: c.desc, amt: c.amt, d: c.d, cand: true }; })
+      .concat(pool.filter(function (p) { return !isCand[p.desc]; }));
+    var list = ordered.map(function (c, i) {
+      var diffP = Math.round((bankAmt - c.amt) * 100);
+      var sel = c.cand && i === 0 ? ' selected' : '';
+      return '<button type="button" class="cand' + sel + '">' +
+        '<span class="radio"></span><span class="c-main"><strong>' + c.desc + '</strong>' +
+        '<span class="em">' + money(c.amt) + ' · ' + shortDay(c.d) + '</span></span>' +
+        (c.cand && diffP ? '<span class="c-flag">' + diffP + 'p off</span>' : '') + '</button>';
+    }).join('');
+    return '<div class="resolver">' +
+      '<div class="cand-grid">' + list + '</div>' +
+      '<div class="resolver-none"><button type="button">Import as new</button></div>' +
+    '</div>';
+  }
+
+  function actionsCell(kind) {
+    var acts = [];
+    if (kind === 'matched') acts.push('<button type="button" class="act unmatch">Unmatch</button>');
+    if (kind === 'matched' || kind === 'new' || kind === 'ask') acts.push('<button type="button" class="act bill">Make bill</button>');
+    return acts.length ? '<div class="acts">' + acts.join('') + '</div>' : '';
+  }
+
+  var html = '';
+  rows.forEach(function (r) {
+    var isAsk = r.kind === 'ask';
+    var cls = r.kind === 'new' ? ' class="row-new"' : (isAsk ? ' class="ask"' : '');
+    var amountCls = r.dir === 'in' ? ' amt--pos' : '';
+    var rk = refKey(r.desc);
+    var n = refCounts[rk] || 0;
+    var badge = (n >= 2 && (r.kind === 'new' || r.kind === 'ask'))
+      ? ' <button type="button" class="ref-badge" data-ref="' + rk.replace(/"/g, '') + '" title="Select all ' + n + ' similar rows">×' + n + '</button>'
+      : '';
+    html += '<tr' + cls + ' data-kind="' + r.kind + '" data-ref="' + rk.replace(/"/g, '') + '" data-amt="' + r.amt + '" data-dir="' + r.dir + '" data-date="' + r.d + '">' +
+      '<td><input class="cbx" type="checkbox" checked></td>' +
+      '<td class="t-desc"><strong>' + r.desc + badge + '</strong><span>' + shortDay(r.d) + ' · ' + r.src + '</span></td>' +
+      '<td>' + statusCell(r) + '</td>' +
+      '<td>' + entryCell(r) + '</td>' +
+      '<td style="text-align:right" class="amt money' + amountCls + '">' + r.amountLabel + '</td>' +
+      '<td class="acts-cell">' + actionsCell(r.kind) + '</td></tr>';
+    if (isAsk || r.kind === 'new') {
+      var cands = isAsk ? r.ask.candidates : [];
+      html += '<tr class="resolver-row" data-resolver="1" hidden><td colspan="6">' + resolverHtml(r.amt, cands) + '</td></tr>';
+    }
+  });
+  document.getElementById('c2-rows').innerHTML = html;
+
+  var tbody = document.getElementById('c2-rows');
+  var countEl = document.getElementById('c2-count');
+
+  // Undo: snapshot the grid before each mutation, restore on Undo.
+  var toastEl = document.getElementById('c2-toast');
+  var toastMsg = document.getElementById('c2-toast-msg');
+  var toastTimer = null;
+  var lastSnapshot = null;
+  function snapshot() { lastSnapshot = tbody.innerHTML; }
+  function hideToast() { toastEl.classList.remove('show'); }
+  function showToast(msg) {
+    toastMsg.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, 6000);
+  }
+  function undo() {
+    if (!lastSnapshot) { hideToast(); return; }
+    tbody.innerHTML = lastSnapshot;
+    lastSnapshot = null;
+    hideToast();
+    refresh();
+  }
+  document.getElementById('c2-undo').addEventListener('click', undo);
+
+  function rowsByRef(ref) {
+    return [].slice.call(tbody.querySelectorAll('tr[data-ref="' + ref + '"]'))
+      .filter(function (tr) { return tr.dataset.kind === 'new' || tr.dataset.kind === 'ask'; });
+  }
+  function closeGroupPanels() {
+    tbody.querySelectorAll('tr[data-group]').forEach(function (r) { r.remove(); });
+    tbody.querySelectorAll('tr.group-sel').forEach(function (tr) { tr.classList.remove('group-sel'); });
+  }
+  function openGroupPanel(tr, ref) {
+    var trs = rowsByRef(ref);
+    if (trs.length < 2) return;
+    var list = trs.map(function (t) {
+      return '<li><span>' + shortDay(t.dataset.date) + '</span><span>' + money(Number(t.dataset.amt)) + '</span></li>';
+    }).join('');
+    var row = document.createElement('tr');
+    row.className = 'group-row';
+    row.setAttribute('data-group', '1');
+    row.innerHTML = '<td colspan="6"><div class="group-panel">' +
+      '<div class="gp-head">' + trs.length + ' similar <span class="money">' + ref + '</span> rows — mark all as bills?</div>' +
+      '<ul class="gp-list">' + list + '</ul>' +
+      '<div class="gp-actions">' +
+        '<button type="button" class="btn sm primary" data-group-bill="' + ref + '">Make all ' + trs.length + ' bills</button>' +
+        '<button type="button" class="btn sm ghost" data-group-cancel="1">Cancel</button>' +
+      '</div></div></td>';
+    var anchor = tr;
+    var next = tr.nextElementSibling;
+    if (next && next.hasAttribute('data-resolver')) anchor = next;
+    anchor.parentNode.insertBefore(row, anchor.nextSibling);
+    trs.forEach(function (t) { t.classList.add('group-sel'); });
+  }
+  function insertResolverRow(tr, amt) {
+    var row = document.createElement('tr');
+    row.className = 'resolver-row';
+    row.setAttribute('data-resolver', '1');
+    row.hidden = true;
+    row.innerHTML = '<td colspan="6">' + resolverHtml(amt, []) + '</td>';
+    tr.parentNode.insertBefore(row, tr.nextSibling);
+  }
+  function makeBill(tr) {
+    tr.dataset.kind = 'bill';
+    tr.classList.remove('row-new', 'ask', 'group-sel');
+    tr.querySelector('td:nth-child(3)').innerHTML = '<span class="v v-bill">Bill</span>';
+    tr.querySelector('td:nth-child(4)').innerHTML = '<div class="entry"><span class="none">Plan · —</span></div>';
+    tr.querySelector('td:nth-child(6)').innerHTML = '';
+    var next = tr.nextElementSibling;
+    if (next && next.hasAttribute('data-resolver')) next.hidden = true;
+  }
+  function unmatch(tr) {
+    tr.dataset.kind = 'new';
+    tr.classList.add('row-new');
+    tr.classList.remove('group-sel');
+    tr.querySelector('td:nth-child(3)').innerHTML = '<span class="v v-new">NEW</span>';
+    tr.querySelector('td:nth-child(4)').innerHTML = '<button type="button" class="resolve-trigger rt-muted"><span class="rt-main"><span class="none">Match an entry…</span></span><span class="rt-caret">▾</span></button>';
+    tr.querySelector('td:nth-child(6)').innerHTML = actionsCell('new');
+    var next = tr.nextElementSibling;
+    if (!(next && next.hasAttribute('data-resolver'))) insertResolverRow(tr, Number(tr.dataset.amt));
+    refresh();
+  }
+
+  function sumKind(kind) {
+    var s = 0;
+    tbody.querySelectorAll('tr[data-kind="' + kind + '"]').forEach(function (tr) { s += Number(tr.dataset.amt) || 0; });
+    return Math.round(s * 100) / 100;
+  }
+  function billsDelta(actual) {
+    var d = Math.round((actual - t.expectedBillTotal) * 100) / 100;
+    if (Math.abs(d) < 0.005) return 'on plan';
+    return d < 0
+      ? '<span class="under">' + money(-d) + ' under</span>'
+      : '<span class="over">' + money(d) + ' over</span>';
+  }
+  function refreshBadges() {
+    var counts = {};
+    tbody.querySelectorAll('tr[data-kind="new"], tr[data-kind="ask"]').forEach(function (tr) {
+      counts[tr.dataset.ref] = (counts[tr.dataset.ref] || 0) + 1;
+    });
+    tbody.querySelectorAll('tr[data-ref]').forEach(function (tr) {
+      var strong = tr.querySelector('.t-desc strong');
+      if (!strong) return;
+      var existing = strong.querySelector('.ref-badge');
+      var n = counts[tr.dataset.ref] || 0;
+      var eligible = (tr.dataset.kind === 'new' || tr.dataset.kind === 'ask') && n >= 2;
+      if (eligible) {
+        if (!existing) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'ref-badge';
+          b.setAttribute('data-ref', tr.dataset.ref);
+          strong.appendChild(b);
+          existing = b;
+        }
+        existing.textContent = '×' + n;
+        existing.title = 'Select all ' + n + ' similar rows';
+      } else if (existing) {
+        existing.remove();
+      }
+    });
+  }
+  function refresh() {
+    var matched = sumKind('matched');
+    var newTotal = sumKind('new');
+    var bills = sumKind('bill');
+    document.getElementById('c2-v-matched').textContent = money(matched);
+    document.getElementById('c2-v-new').textContent = money(newTotal);
+    document.getElementById('c2-v-bills').textContent = money(bills);
+    document.getElementById('c2-bills-sub').innerHTML = 'Expected ' + money(t.expectedBillTotal) + ' · ' + billsDelta(bills);
+    document.getElementById('c2-tab-new').textContent = 'New ' + tbody.querySelectorAll('tr[data-kind="new"]').length;
+    document.getElementById('c2-tab-bill').textContent = 'Bills ' + tbody.querySelectorAll('tr[data-kind="bill"]').length;
+    refreshBadges();
+  }
+
+  document.getElementById('c2-rows').addEventListener('click', function (e) {
+    var badge = e.target.closest('.ref-badge');
+    if (badge) {
+      var ref = badge.getAttribute('data-ref');
+      var alreadyOpen = !!tbody.querySelector('tr[data-group]');
+      var openRef = tbody.querySelector('tr[data-group] .gp-actions [data-group-bill]');
+      closeGroupPanels();
+      if (!(alreadyOpen && openRef && openRef.getAttribute('data-group-bill') === ref)) {
+        openGroupPanel(badge.closest('tr'), ref);
+      }
+      return;
+    }
+    var groupBill = e.target.closest('[data-group-bill]');
+    if (groupBill) {
+      var gref = groupBill.getAttribute('data-group-bill');
+      var gtrs = rowsByRef(gref);
+      snapshot();
+      closeGroupPanels();
+      gtrs.forEach(makeBill);
+      refresh();
+      showToast(gtrs.length + ' rows marked as bills');
+      return;
+    }
+    if (e.target.closest('[data-group-cancel]')) { closeGroupPanels(); return; }
+    var actBill = e.target.closest('.act.bill');
+    if (actBill) { snapshot(); makeBill(actBill.closest('tr')); refresh(); showToast('Marked as bill'); return; }
+    var actUn = e.target.closest('.act.unmatch');
+    if (actUn) { snapshot(); unmatch(actUn.closest('tr')); showToast('Match removed'); return; }
+    var trigger = e.target.closest('.resolve-trigger');
+    if (trigger) {
+      var next = trigger.closest('tr').nextElementSibling;
+      if (next && next.hasAttribute('data-resolver')) {
+        next.hidden = !next.hidden;
+        trigger.querySelector('.rt-caret').textContent = next.hidden ? '▾' : '▴';
+      }
+      return;
+    }
+    var cand = e.target.closest('.cand');
+    if (cand) {
+      cand.parentElement.querySelectorAll('.cand').forEach(function (c) { c.classList.remove('selected'); });
+      cand.classList.add('selected');
+    }
+  });
+
+  function updateCount(shown, label) {
+    countEl.textContent = label === 'All' ? shown + ' rows' : shown + ' of ' + t.statementCount;
+  }
+  updateCount(t.statementCount, 'All');
+  document.getElementById('c2-seg').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    this.querySelectorAll('button').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+    var f = b.getAttribute('data-filter');
+    var shown = 0;
+    tbody.querySelectorAll('tr[data-kind]').forEach(function (tr) {
+      var show = f === 'all' || tr.getAttribute('data-kind') === f;
+      tr.style.display = show ? '' : 'none';
+      if (show) shown++;
+    });
+    tbody.querySelectorAll('tr[data-resolver]').forEach(function (tr) { tr.hidden = true; });
+    updateCount(shown, b.textContent.trim().split(' ')[0]);
+  });
+
+  document.getElementById('c2-leftover-count').textContent = M.leftoverManuals.length;
+  document.getElementById('c2-leftover').innerHTML = M.leftoverManuals.map(function (m) {
+    return '<div class="ledger-row ledger-row--leftover is-ask"><div class="desc"><strong>' + m.desc + '</strong><span>' + money(m.amt) + ' · ' + shortDay(m.d) + '</span></div>' +
+      '<span class="row"><button class="btn sm soft">Keep</button><button class="btn sm danger">Ignore</button></span></div>';
+  }).join('');
+
+  function line(k, v, cls) {
+    return '<div class="effect-line"><span class="k">' + k + '</span><span class="v' + (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
+  }
+  document.getElementById('c2-effect').innerHTML =
+    line('Statement spend', money(t.bankTotal)) +
+    line('Matched', '<span id="c2-v-matched">' + money(t.matchedTotal) + '</span>') +
+    line('New', '<span id="c2-v-new">' + money(t.newTotal) + '</span>') +
+    '<div class="effect-line"><span class="k">Bills</span><span class="v" id="c2-v-bills">' + money(t.billTotal) + '</span></div>' +
+    '<div class="effect-sub" id="c2-bills-sub">Expected ' + money(t.expectedBillTotal) + ' · ' + billsDelta(t.billTotal) + '</div>' +
+    line('Transfers', money(t.transferOutTotal + t.transferInTotal)) +
+    line('Money in', '+' + money(t.incomingTotal + t.transferInTotal), 'amt--pos');
+
+  function ba(before, after) {
+    return '<span class="before-after"><span class="before">' + before + '</span><span class="arrow">→</span><span class="after">' + after + '</span></span>';
+  }
+  var loggedEntries = t.matchedCount + M.asks.reduce(function (s, a) { return s + a.candidates.length; }, 0) + M.leftoverManuals.length;
+  document.getElementById('c2-daily').innerHTML =
+    '<div class="effect-line"><span class="k">Logged entries</span>' + ba(loggedEntries, loggedEntries) + '</div>' +
+    '<div class="effect-line"><span class="k">Unmatched</span>' + ba(M.leftoverManuals.length, 0) + '</div>' +
+    '<div class="effect-line"><span class="k">Ledger rows</span>' + ba(0, t.statementCount) + '</div>';
+
+  refresh();
+})();
+</script>
+</body>
+</html>
