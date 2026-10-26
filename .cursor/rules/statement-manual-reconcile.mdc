@@ -8,6 +8,8 @@ alwaysApply: false
 
 Home has **no import form**. Statements are uploaded on **Reconcile** (`/spending/reconcile`). Home shows a Statements month list (5 by default, View all expands). Every month row opens Reconcile.
 
+**Uploads are CSV / Excel `.xlsx` only** and are parsed fully on-device — no transaction rows are sent to a model (see `@.cursor/rules/project-overview.mdc` → Statement import dates). PDF and `.txt` are rejected. Headerless exports (e.g. HSBC) map their columns locally from cell formats; unknown *headers* may use a header-only LLM (titles only). Reconcile upload passes the optional `bank_source` through so headerless conventions are memoised per bank.
+
 Home statuses (`_home_statement_months`): `imported` (session confirmed) · `in_progress` (uploads or auto-match) · `imported_without_recon` (ledger bank txs, no session) · `not_started`. Empty staging sessions stay `not_started`.
 
 ## Manual fuzzy match (`_daily_budget_fuzzy_match_manual`)

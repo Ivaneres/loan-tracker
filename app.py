@@ -1626,59 +1626,332 @@ def _iter_csv_like_rows(statement_text: str):
         return
 
 
-def _split_tabular_statement(statement_text: str) -> tuple[list[str], list[list[str]]] | None:
+def _tabular_cell_is_date(cell) -> bool:
+    s = str(cell or '').strip()
+    if not s or len(s) > 40:
+        return False
+    # A bare number/amount is never a date (dateutil parses "-10.50" as a date).
+    if _parse_signed_amount_cell(s) is not None:
+        return False
+    # Require a month name or a numeric date pattern before trusting dateutil.
+    if not re.search(r'[A-Za-z]|\d{1,4}[/.\-]\d{1,2}[/.\-]\d{2,4}', s):
+        return False
+    return _parse_bank_statement_date(s) is not None
+
+
+def _tabular_row_has_date(row) -> bool:
+    return any(_tabular_cell_is_date(c) for c in row if str(c or '').strip())
+
+
+def _tabular_row_is_text_header(row) -> bool:
+    """A header row is text-only (no date/amount cells) and reasonably wide."""
+    cells = [str(c).strip() for c in row if str(c or '').strip()]
+    if len(cells) < 3:
+        return False
+    for c in cells:
+        if _tabular_cell_is_date(c):
+            return False
+        if _parse_signed_amount_cell(c) is not None:
+            return False
+    return True
+
+
+def _split_tabular_statement(statement_text: str) -> tuple[list[str] | None, list[list[str]]] | None:
     """
-    Split CSV-like text into (header_row, data_rows) when it looks like a table export.
-    Does not map columns — that happens via alias or a header-only LLM call.
-    Skips preamble rows (e.g. HSBC account metadata) before the real column header.
+    Split CSV-like text into (header_row_or_None, data_rows) when it looks like a table export.
+
+    The first row that carries a date-like cell marks the start of data (bank transaction
+    rows always have a date). If the row immediately above it is a text-only header, that
+    is the header; otherwise the export is headerless (e.g. HSBC) and ``header`` is None.
+    Column mapping happens via alias / header-only LLM (header present) or local inference
+    (headerless). Preamble rows (account metadata, sort codes) are dropped.
     """
     rows = [r for r in _iter_csv_like_rows(statement_text) if any((c or '').strip() for c in r)]
     if not rows:
         return None
 
+    first_data_idx = None
+    for i, row in enumerate(rows[:50]):
+        if sum(1 for c in row if str(c or '').strip()) < 2:
+            continue
+        if _tabular_row_has_date(row):
+            first_data_idx = i
+            break
+    if first_data_idx is None:
+        return None
+
     header = None
     header_idx = None
-    fallback_idx = None
-    for i, row in enumerate(rows[:25]):
-        if _row_looks_numeric_heavy(row):
-            continue
-        if sum(1 for c in row if str(c or '').strip()) < 3:
-            continue
-        if _map_tabular_headers_alias(row) is not None:
-            header = row
-            header_idx = i
-            break
-        if fallback_idx is None:
-            fallback_idx = i
+    if first_data_idx >= 1:
+        cand = rows[first_data_idx - 1]
+        if _map_tabular_headers_alias(cand) is not None or _tabular_row_is_text_header(cand):
+            header = cand
+            header_idx = first_data_idx - 1
 
-    if header is None and fallback_idx is not None:
-        header = rows[fallback_idx]
-        header_idx = fallback_idx
-
-    if header is None or header_idx is None:
-        return None
-    data_rows = rows[header_idx + 1:]
+    data_rows = rows[header_idx + 1:] if header_idx is not None else rows[first_data_idx:]
     if not data_rows:
         return None
-    if sum(1 for c in header if str(c or '').strip()) < 3:
+    if max((len(r) for r in data_rows[:5]), default=0) < 3:
         return None
     return header, data_rows
 
 
+# Headerless exports (e.g. HSBC) have no title row; infer column roles from cell formats only
+# (dates / amounts / text) — never send row values to a model. Resolved conventions are memoised
+# process-locally per (bank_source, column-type shape) and always yield to confident local
+# inference, so a bank changing convention self-heals.
+_TABULAR_SHAPE_CONVENTION_CACHE: dict[tuple, dict] = {}
+
+
+def _column_type_stats(data_rows, col_idx: int, sample_limit: int = 200) -> dict:
+    non_empty = date_n = amount_n = text_n = total_len = 0
+    for cells in data_rows[:sample_limit]:
+        if col_idx >= len(cells):
+            continue
+        s = str(cells[col_idx] or '').strip()
+        if not s:
+            continue
+        non_empty += 1
+        total_len += len(s)
+        if _tabular_cell_is_date(s):
+            date_n += 1
+        elif _parse_signed_amount_cell(s) is not None:
+            amount_n += 1
+        else:
+            text_n += 1
+    return {
+        'non_empty': non_empty,
+        'date': date_n,
+        'amount': amount_n,
+        'text': text_n,
+        'avg_len': (total_len / non_empty) if non_empty else 0.0,
+    }
+
+
+def _cell_signed_amount(cells, idx):
+    if idx is None or idx >= len(cells):
+        return None
+    return _parse_signed_amount_cell(cells[idx])
+
+
+def _find_mutually_exclusive_pair(cols: list[int], rows: list) -> tuple[int, int] | None:
+    """Two numeric columns where at most one is filled per row (Paid in / Paid out)."""
+    for a in range(len(cols)):
+        for b in range(a + 1, len(cols)):
+            ia, ib = cols[a], cols[b]
+            both = one = total = 0
+            for cells in rows:
+                va = _cell_signed_amount(cells, ia)
+                vb = _cell_signed_amount(cells, ib)
+                if va is None and vb is None:
+                    continue
+                total += 1
+                if va is not None and vb is not None:
+                    both += 1
+                else:
+                    one += 1
+            if total >= 1 and both <= max(1, int(total * 0.1)) and one >= total * 0.9:
+                return ia, ib
+    return None
+
+
+def _infer_amount_sign_from_balance(rows, amount_idx, balance_idx) -> str | None:
+    """Derive sign convention from row-to-row balance movement (rows in chronological order)."""
+    if balance_idx is None:
+        return None
+    neg_out = pos_out = 0
+    prev = None
+    for cells in rows:
+        bal = _cell_signed_amount(cells, balance_idx)
+        amt = _cell_signed_amount(cells, amount_idx)
+        if bal is None:
+            continue
+        if prev is not None and amt is not None and abs(amt) > 1e-9:
+            delta = bal - prev
+            if abs(delta) > 1e-9:
+                if (delta < 0) == (amt < 0):
+                    neg_out += 1
+                else:
+                    pos_out += 1
+        prev = bal
+    if neg_out == 0 and pos_out == 0:
+        return None
+    return 'negative_is_outgoing' if neg_out >= pos_out else 'positive_is_outgoing'
+
+
+def _resolve_money_pair_order(rows, a: int, b: int, balance_idx) -> tuple[int, int] | None:
+    """Which of two money columns is out vs in, using balance movement when available."""
+    if balance_idx is None:
+        return None
+    a_out = a_in = b_out = b_in = 0
+    prev = None
+    for cells in rows:
+        bal = _cell_signed_amount(cells, balance_idx)
+        if bal is None:
+            continue
+        delta = None if prev is None else bal - prev
+        prev = bal
+        if delta is None or abs(delta) <= 1e-9:
+            continue
+        va = _cell_signed_amount(cells, a)
+        vb = _cell_signed_amount(cells, b)
+        if va is not None and vb is None:
+            if delta < 0:
+                a_out += 1
+            else:
+                a_in += 1
+        elif vb is not None and va is None:
+            if delta < 0:
+                b_out += 1
+            else:
+                b_in += 1
+    if a_out + a_in + b_out + b_in == 0:
+        return None
+    score_a, score_b = a_out - a_in, b_out - b_in
+    if score_a > score_b:
+        return a, b
+    if score_b > score_a:
+        return b, a
+    return None
+
+
+def _pick_amount_and_balance(amount_cols: list[int], rows: list) -> tuple[int, int | None]:
+    """Pick a single signed transaction-amount column plus an optional running-balance column."""
+    def mixed(idx):
+        pos = neg = 0
+        for cells in rows:
+            v = _cell_signed_amount(cells, idx)
+            if v is None or v == 0:
+                continue
+            if v > 0:
+                pos += 1
+            else:
+                neg += 1
+        return pos, neg
+
+    scored = []
+    for idx in amount_cols:
+        pos, neg = mixed(idx)
+        scored.append((1 if (pos > 0 and neg > 0) else 0, pos + neg, -idx, idx))
+    scored.sort(reverse=True)
+    amount_idx = scored[0][3]
+    sample_n = len(rows[:200])
+    balance_idx = None
+    for idx in amount_cols:
+        if idx == amount_idx:
+            continue
+        if _column_type_stats(rows, idx)['non_empty'] >= max(2, int(sample_n * 0.8)):
+            balance_idx = idx
+            break
+    return amount_idx, balance_idx
+
+
+def _infer_tabular_headers_from_rows(data_rows, *, bank_source: str | None = None):
+    """
+    Headerless local column inference: classify each column by cell format, then map roles.
+    Returns {'columns', 'amount_sign', 'source', 'shape'} or None when it cannot infer.
+    """
+    sample = list(data_rows[:200])
+    if not sample:
+        return None
+    width = max(len(r) for r in sample)
+    stats = {i: _column_type_stats(sample, i) for i in range(width)}
+    date_cols = [
+        i for i in range(width)
+        if stats[i]['non_empty'] >= 1 and stats[i]['date'] >= max(1, int(stats[i]['non_empty'] * 0.6))
+    ]
+    amount_cols = [
+        i for i in range(width)
+        if i not in date_cols
+        and stats[i]['non_empty'] >= 1
+        and stats[i]['amount'] >= max(1, int(stats[i]['non_empty'] * 0.6))
+    ]
+    text_cols = [
+        i for i in range(width)
+        if i not in date_cols and i not in amount_cols and stats[i]['non_empty'] >= 1
+    ]
+    if not date_cols or not amount_cols or not text_cols:
+        return None
+
+    desc_col = max(text_cols, key=lambda i: (stats[i]['avg_len'], stats[i]['non_empty']))
+    col: dict[str, int] = {'description': desc_col}
+    if len(date_cols) == 1:
+        col['date'] = date_cols[0]
+    else:
+        col['started_date'] = date_cols[0]
+        col['completed_date'] = date_cols[1]
+
+    shape = tuple(
+        'date' if i in date_cols else 'num' if i in amount_cols else 'text'
+        for i in range(width)
+    )
+    cache_key = (str(bank_source or ''), shape)
+    cached = _TABULAR_SHAPE_CONVENTION_CACHE.get(cache_key) or {}
+
+    amount_sign = 'negative_is_outgoing'
+    if len(amount_cols) == 1:
+        amt_i = amount_cols[0]
+        col['amount'] = amt_i
+        sign = _infer_amount_sign_from_data_rows(sample, col)
+        if sign is None:
+            sign = cached.get('amount_sign')
+        amount_sign = sign or 'negative_is_outgoing'
+    else:
+        pair = _find_mutually_exclusive_pair(amount_cols, sample)
+        if pair is not None:
+            out_i, in_i = pair
+            remaining = [i for i in amount_cols if i not in pair]
+            balance_idx = remaining[0] if remaining else None
+            order = _resolve_money_pair_order(sample, out_i, in_i, balance_idx)
+            if order is not None:
+                out_i, in_i = order
+            else:
+                cached_order = cached.get('money_order')
+                if isinstance(cached_order, (list, tuple)) and len(cached_order) == 2:
+                    out_i, in_i = int(cached_order[0]), int(cached_order[1])
+            col['money_out'] = out_i
+            col['money_in'] = in_i
+            amount_sign = 'absolute'
+        else:
+            amt_i, balance_idx = _pick_amount_and_balance(amount_cols, sample)
+            col['amount'] = amt_i
+            sign = _infer_amount_sign_from_balance(sample, amt_i, balance_idx)
+            if sign is None:
+                sign = _infer_amount_sign_from_data_rows(sample, col)
+            if sign is None:
+                sign = cached.get('amount_sign')
+            amount_sign = sign or 'negative_is_outgoing'
+
+    if _validate_tabular_column_map(col, width) is None:
+        return None
+
+    entry = dict(cached)
+    entry['amount_sign'] = amount_sign
+    if 'money_out' in col:
+        entry['money_order'] = [col['money_out'], col['money_in']]
+    _TABULAR_SHAPE_CONVENTION_CACHE[cache_key] = entry
+    return {
+        'columns': col,
+        'amount_sign': amount_sign,
+        'source': 'inferred',
+        'shape': shape,
+    }
+
+
 def _parse_tabular_data_rows(
-    header: list[str],
+    header: list[str] | None,
     data_rows: list[list[str]],
     col: dict[str, int],
     *,
     amount_sign: str = 'negative_is_outgoing',
 ) -> tuple[list[dict], dict]:
-    header_fp = _tabular_header_fingerprint(header)
+    header_fp = _tabular_header_fingerprint(header) if header is not None else None
     raw: list[dict] = []
     skipped_state = 0
     skipped_other = 0
     for cells in data_rows:
         # Skip repeated header rows (multi-sheet concat).
-        if _tabular_header_fingerprint(cells) == header_fp:
+        if header_fp is not None and _tabular_header_fingerprint(cells) == header_fp:
             continue
         if not _row_looks_numeric_heavy(cells) and _map_tabular_headers_alias(cells) is not None:
             continue
@@ -1697,27 +1970,44 @@ def _parse_tabular_data_rows(
     return raw, stats
 
 
+def _resolve_tabular_columns_for_rows(header, data_rows, *, allow_llm: bool, bank_source=None):
+    """Header present → alias / header-only LLM; headerless → local format inference."""
+    if header is not None:
+        resolved = _resolve_tabular_headers(header, allow_llm=allow_llm)
+        if resolved is not None:
+            return resolved
+    return _infer_tabular_headers_from_rows(data_rows, bank_source=bank_source)
+
+
+def _tabular_amount_sign_for(resolved, col, data_rows) -> str:
+    if resolved.get('source') == 'inferred':
+        return resolved['amount_sign'] if 'amount' in col else 'absolute'
+    return _resolve_amount_sign_for_rows(data_rows, col, resolved.get('amount_sign'))
+
+
 def _try_parse_tabular_spending_transactions(
     statement_text: str,
     *,
     allow_llm: bool = True,
+    bank_source: str | None = None,
 ) -> tuple[list, dict] | None:
     """
-    Parse bank CSV / Excel exports locally after mapping headers.
-    Header mapping: alias fast path, else tiny LLM call on header titles only (not row data).
+    Parse bank CSV / Excel exports locally after mapping columns.
+    Header present: alias fast path, else a tiny LLM call on header titles only (not row data).
+    Headerless (e.g. HSBC): infer column roles from cell formats locally.
     Returns (raw_rows, meta) or None when not a confident tabular export.
     """
     split = _split_tabular_statement(statement_text)
     if split is None:
         return None
     header, data_rows = split
-    resolved = _resolve_tabular_headers(header, allow_llm=allow_llm)
+    resolved = _resolve_tabular_columns_for_rows(
+        header, data_rows, allow_llm=allow_llm, bank_source=bank_source,
+    )
     if resolved is None:
         return None
     col = resolved['columns']
-    amount_sign = _resolve_amount_sign_for_rows(
-        data_rows, col, resolved.get('amount_sign'),
-    )
+    amount_sign = _tabular_amount_sign_for(resolved, col, data_rows)
     raw, stats = _parse_tabular_data_rows(header, data_rows, col, amount_sign=amount_sign)
     if len(raw) < SPENDING_TABULAR_MIN_ROWS:
         return None
@@ -1728,9 +2018,9 @@ def _try_parse_tabular_spending_transactions(
 
     meta = {
         'mode': 'tabular',
-        'reason': 'structured_csv_headers',
+        'reason': 'structured_csv_headers' if header is not None else 'headerless_inferred',
         'profile': profile,
-        'header': [_normalize_tabular_header(c) for c in header],
+        'header': [_normalize_tabular_header(c) for c in header] if header is not None else [],
         'columns': sorted(col.keys()),
         'header_map_source': resolved.get('source'),
         'amount_sign': amount_sign,
@@ -1741,47 +2031,59 @@ def _try_parse_tabular_spending_transactions(
     return raw, meta
 
 
-def _iter_tabular_spending_extraction(statement_text: str):
+def _iter_tabular_spending_extraction(statement_text: str, *, bank_source: str | None = None):
     """
-    Yield progress for header mapping, then {'type':'result',...} or nothing if not tabular.
+    Yield progress for column mapping, then {'type':'result',...} or nothing if not tabular.
     """
     split = _split_tabular_statement(statement_text)
     if split is None:
         return
     header, data_rows = split
 
-    # Alias / cache first (no progress needed).
-    fp = _tabular_header_fingerprint(header)
-    cached = _TABULAR_HEADER_MAP_CACHE.get(fp)
-    if isinstance(cached, dict) and isinstance(cached.get('columns'), dict):
-        resolved = dict(cached)
+    if header is None:
+        yield {
+            'type': 'progress',
+            'step': 'tabular_infer',
+            'message': 'No header row found — inferring columns from cell formats locally…',
+        }
+        resolved = _infer_tabular_headers_from_rows(data_rows, bank_source=bank_source)
+        if resolved is None:
+            return
     else:
-        alias = _map_tabular_headers_alias(header)
-        if alias is not None:
-            # Provisional only — row sampling may refine amount_sign (Amex vs Revolut).
-            amount_sign = 'negative_is_outgoing' if 'amount' in alias else 'absolute'
-            resolved = {'columns': alias, 'amount_sign': amount_sign, 'source': 'alias'}
-            _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+        # Alias / cache first (no progress needed).
+        fp = _tabular_header_fingerprint(header)
+        cached = _TABULAR_HEADER_MAP_CACHE.get(fp)
+        if isinstance(cached, dict) and isinstance(cached.get('columns'), dict):
+            resolved = dict(cached)
         else:
-            yield {
-                'type': 'progress',
-                'step': 'tabular_headers',
-                'message': 'Mapping spreadsheet/CSV column headers with a small model call…',
-            }
-            llm = _llm_map_tabular_headers(header)
-            if llm is None:
-                return
-            resolved = {
-                'columns': llm['columns'],
-                'amount_sign': llm.get('amount_sign') or 'negative_is_outgoing',
-                'source': 'llm_headers',
-            }
-            _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+            alias = _map_tabular_headers_alias(header)
+            if alias is not None:
+                # Provisional only — row sampling may refine amount_sign (Amex vs Revolut).
+                amount_sign = 'negative_is_outgoing' if 'amount' in alias else 'absolute'
+                resolved = {'columns': alias, 'amount_sign': amount_sign, 'source': 'alias'}
+                _TABULAR_HEADER_MAP_CACHE[fp] = resolved
+            else:
+                yield {
+                    'type': 'progress',
+                    'step': 'tabular_headers',
+                    'message': 'Mapping spreadsheet/CSV column headers with a small model call…',
+                }
+                llm = _llm_map_tabular_headers(header)
+                if llm is None:
+                    # Unmappable header — try headerless inference on the data rows.
+                    resolved = _infer_tabular_headers_from_rows(data_rows, bank_source=bank_source)
+                    if resolved is None:
+                        return
+                else:
+                    resolved = {
+                        'columns': llm['columns'],
+                        'amount_sign': llm.get('amount_sign') or 'negative_is_outgoing',
+                        'source': 'llm_headers',
+                    }
+                    _TABULAR_HEADER_MAP_CACHE[fp] = resolved
 
     col = resolved['columns']
-    amount_sign = _resolve_amount_sign_for_rows(
-        data_rows, col, resolved.get('amount_sign'),
-    )
+    amount_sign = _tabular_amount_sign_for(resolved, col, data_rows)
     raw, stats = _parse_tabular_data_rows(header, data_rows, col, amount_sign=amount_sign)
     if len(raw) < SPENDING_TABULAR_MIN_ROWS:
         return
@@ -1795,7 +2097,7 @@ def _iter_tabular_spending_extraction(statement_text: str):
         'step': 'tabular_parse',
         'message': (
             f'Parsed {len(raw)} transactions from spreadsheet/CSV locally '
-            f'({profile}, headers via {resolved.get("source")})…'
+            f'({profile}, columns via {resolved.get("source")})…'
         ),
     }
     yield {
@@ -1803,9 +2105,9 @@ def _iter_tabular_spending_extraction(statement_text: str):
         'rows': raw,
         'meta': {
             'mode': 'tabular',
-            'reason': 'structured_csv_headers',
+            'reason': 'structured_csv_headers' if header is not None else 'headerless_inferred',
             'profile': profile,
-            'header': [_normalize_tabular_header(c) for c in header],
+            'header': [_normalize_tabular_header(c) for c in header] if header is not None else [],
             'columns': sorted(col.keys()),
             'header_map_source': resolved.get('source'),
             'amount_sign': amount_sign,
@@ -1815,455 +2117,20 @@ def _iter_tabular_spending_extraction(statement_text: str):
         },
     }
 
-def _split_statement_text_into_llm_chunks(text: str, max_chars: int = STATEMENT_LLM_CHUNK_CHARS) -> list[str]:
-    """Split long statement text into line-aligned chunks for sequential LLM extraction."""
-    t = text or ''
-    if len(t) <= max_chars:
-        return [t] if t else []
-    lines = t.splitlines(keepends=True)
-    chunks: list[str] = []
-    buf: list[str] = []
-    size = 0
-    for line in lines:
-        line_len = len(line)
-        if buf and size + line_len > max_chars:
-            chunks.append(''.join(buf))
-            buf = [line]
-            size = line_len
-        else:
-            buf.append(line)
-            size += line_len
-    if buf:
-        chunks.append(''.join(buf))
-    return chunks
-
-
-def _extract_spending_transactions_llm_chunk(
-    client,
-    *,
-    model: str,
-    system: str,
-    chunk: str,
-    period_hint: str | None,
-    part_label: str | None,
-    note_truncated: bool,
-    extraction_timeout: float,
-) -> list:
-    user_msg = 'Bank statement text:\n\n' + chunk
-    if part_label:
-        user_msg += (
-            f'\n\n({part_label} '
-            'Extract every transaction in this part only; do not invent rows from other parts.)'
-        )
-    if period_hint:
-        user_msg += '\n\n' + period_hint
-    if note_truncated:
-        user_msg += '\n\n(Note: text was truncated.)'
-
-    try:
-        completion = client.with_options(
-            timeout=extraction_timeout
-        ).chat.completions.create(
-            model=model,
-            messages=[
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user_msg},
-            ],
-            response_format={'type': 'json_object'},
-            temperature=0.1,
-        )
-    except APITimeoutError as e:
-        raise RuntimeError(
-            'The statement was too large to process within the time limit. '
-            'Try a CSV or Excel (.xlsx) export from your bank (structured exports parse instantly), '
-            'or narrow the date range and import in smaller chunks.'
-        ) from e
-    raw = completion.choices[0].message.content or '{}'
-    data, jerr = _parse_llm_json_object(raw, context='spending_transactions')
-    if jerr:
-        raise RuntimeError(
-            'Could not parse the model response as JSON. This sometimes happens with very long statements '
-            'or stray characters in a description. Try a CSV or Excel (.xlsx) export, narrow the date range, or retry. '
-            f'Detail: {jerr}'
-        )
-    txs = data.get('transactions')
-    if txs is None:
-        txs = data.get('items') or []
-    return txs if isinstance(txs, list) else []
-
-
-def _spending_extraction_system_prompt() -> str:
-    return (
-        'You extract ALL individual bank transactions from the statement text into structured JSON. '
-        'Return only valid JSON as {"transactions":[{"date":"YYYY-MM-DD","started_date":"YYYY-MM-DD"|null,'
-        '"completed_date":"YYYY-MM-DD"|null,"description":"string","amount":number,'
-        '"direction":"incoming|outgoing","money_in":number|null,"money_out":number|null}]}. '
-        'Rules: (1) amount is always a positive absolute number (same as the money in or money out value for that row). '
-        '(2) Many statements use TWO columns: Paid in / Money in / Credits vs Paid out / Money out / Debits. '
-        'For those rows, set money_in to the amount in the IN column and money_out to the amount in the OUT column (use null for the empty column). '
-        'Direction MUST follow the column: if money_in is set, direction is "incoming"; if money_out is set, direction is "outgoing". '
-        'Do NOT infer direction from the merchant description when column hints or two-column layout is present. '
-        '(3) If the statement does not use two columns, set money_in and money_out to null and use amount + direction as usual. '
-        '(4) Be exhaustive: include every posted transaction line. Do not merge rows; do not omit small items. '
-        '(5) Skip only running balances, headers, page numbers, and non-transaction summaries. '
-        '(6) Use ISO dates YYYY-MM-DD. If the statement shows DD/MM/YYYY, convert to ISO. '
-        '(7) Lines beginning with LINE_HINT are layout hints — use them to fill money_in/money_out and direction correctly. '
-        '(8) When a statement has both a start/started date and a completed/settled date (e.g. Revolut '
-        '"Started Date" and "Completed Date"), set started_date and completed_date accordingly, and set '
-        '"date" to the completed/settled date. If only one date exists, set date to that value and leave '
-        'started_date/completed_date null.'
-    )
-
-
-def _prepare_spending_llm_chunks(statement_text: str) -> tuple[list[str], bool]:
-    text = statement_text or ''
-    truncated = False
-    if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
-        text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
-        truncated = True
-    return _split_statement_text_into_llm_chunks(text), truncated
-
-
-def _extract_spending_transactions_llm(statement_text: str, period_hint: str | None = None) -> list:
-    rows = []
-    for ev in _iter_extract_spending_transactions_llm(statement_text, period_hint):
-        if ev.get('type') == 'rows':
-            rows = ev.get('rows') or []
-    return rows
-
-
-def _iter_extract_spending_transactions_llm(statement_text: str, period_hint: str | None = None):
+def iter_spending_transaction_extraction(
+    statement_text: str,
+    period_hint: str | None = None,
+    bank_source: str | None = None,
+):
     """
-    Yield progress between chunks so streaming preview / gunicorn see activity.
-    Final yield: {'type':'rows','rows':list,'chunk_count':int}.
+    Parse a CSV / Excel (.xlsx) statement entirely locally.
+
+    Yields {'type':'progress',...} then {'type':'result','rows':list,'meta':dict}, or
+    {'type':'error','message':str} when the file is not a parseable table. No transaction
+    rows are sent to any model; only header titles may be (unknown headers, header-only LLM).
     """
-    client = _get_openai_client()
-    if not client:
-        raise RuntimeError('OPENAI_API_KEY is not set')
-
-    model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
-    chunks, truncated = _prepare_spending_llm_chunks(statement_text)
-    if not chunks:
-        yield {'type': 'rows', 'rows': [], 'chunk_count': 0}
-        return
-
-    system = _spending_extraction_system_prompt()
-    extraction_timeout = _openai_extraction_timeout_seconds()
-    all_txs: list = []
-    n = len(chunks)
-    for idx, chunk in enumerate(chunks):
-        if n > 1:
-            yield {
-                'type': 'progress',
-                'step': 'llm_extract',
-                'message': f'Extracting transactions with the model (chunk {idx + 1} of {n})…',
-            }
-        part_label = (
-            f'This is part {idx + 1} of {n} of a longer statement.'
-            if n > 1
-            else None
-        )
-        all_txs.extend(
-            _extract_spending_transactions_llm_chunk(
-                client,
-                model=model,
-                system=system,
-                chunk=chunk,
-                period_hint=period_hint,
-                part_label=part_label,
-                note_truncated=truncated and idx == n - 1,
-                extraction_timeout=extraction_timeout,
-            )
-        )
-    yield {'type': 'rows', 'rows': all_txs, 'chunk_count': n}
-
-
-def _split_spending_statement_text_for_model(text: str) -> tuple[str, str]:
-    """Split model input into plain extracted text and LINE_HINT block (if present)."""
-    banner = SPENDING_PDF_COLUMN_HINTS_BANNER
-    if banner in text:
-        base, _, hints = text.partition(banner)
-        return base.rstrip(), hints.lstrip()
-    return text, ''
-
-
-def _parse_line_hint_rows(hints_block: str) -> list[dict]:
-    rows: list[dict] = []
-    for line in (hints_block or '').splitlines():
-        line = line.strip()
-        if not line.startswith('LINE_HINT'):
-            continue
-        m = _LINE_HINT_ROW_RE.match(line)
-        if not m:
-            continue
-        try:
-            mi = round(float(m.group(1)), 2)
-            mo = round(float(m.group(2)), 2)
-        except ValueError:
-            continue
-        lt = (m.group(3) or '').strip()
-        if not lt:
-            continue
-        rows.append({'money_in': mi, 'money_out': mo, 'line_text': lt})
-    return rows
-
-
-def _compile_spending_skip_line_regexes(patterns: list[str]) -> list[re.Pattern]:
-    compiled: list[re.Pattern] = []
-    for p in patterns:
-        s = str(p).strip()
-        if not s:
-            continue
-        try:
-            compiled.append(re.compile(s))
-        except re.error:
-            logger.warning('skipping invalid layout skip regex: %s', s[:120])
-    return compiled
-
-
-def _merge_spending_layout_skip_regexes(llm_patterns: list | None) -> list[str]:
-    merged: list[str] = []
-    seen: set[str] = set()
-    for p in _SPENDING_LAYOUT_DEFAULT_SKIP_REGEXES:
-        if p not in seen:
-            seen.add(p)
-            merged.append(p)
-    if isinstance(llm_patterns, list):
-        for p in llm_patterns:
-            s = str(p).strip()
-            if s and s not in seen and len(merged) < 28:
-                seen.add(s)
-                merged.append(s)
-    return merged
-
-
-def _llm_spending_layout_skip_regexes(base_text: str, hint_rows: list[dict]) -> list[str]:
-    """Small model call: extra regexes for non-transaction lines (balances, headers)."""
-    client = _get_openai_client()
-    if not client:
-        return _merge_spending_layout_skip_regexes([])
-
-    lines = base_text.splitlines()[:SPENDING_LAYOUT_EXCERPT_MAX_LINES]
-    excerpt = '\n'.join(lines)
-    if len(excerpt) > SPENDING_LAYOUT_EXCERPT_MAX_CHARS:
-        excerpt = excerpt[:SPENDING_LAYOUT_EXCERPT_MAX_CHARS]
-
-    samples = []
-    for h in hint_rows[:SPENDING_LAYOUT_SAMPLE_HINTS]:
-        samples.append(
-            f'LINE_HINT money_in={h["money_in"]} money_out={h["money_out"]} | {h["line_text"]}'
-        )
-    sample_block = '\n'.join(samples)
-    user_body = f'Statement excerpt:\n{excerpt}\n\nSample LINE_HINT rows:\n{sample_block}\n'
-    if len(user_body) > SPENDING_LAYOUT_MAPPING_LLM_MAX_CHARS:
-        user_body = user_body[:SPENDING_LAYOUT_MAPPING_LLM_MAX_CHARS]
-
-    model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
-    system = (
-        'You help parse UK/Irish bank statements. The app already knows debit/credit amounts per row from PDF '
-        'geometry (LINE_HINT). Your ONLY job is to list extra Python regex patterns for lines that are NOT real '
-        'transactions: running balances, section headers, page markers, "brought forward", etc. '
-        'Return only valid JSON: {"skip_line_regexes":["regex",...]}. '
-        'Each regex is tested against the text AFTER " | " in a LINE_HINT row (the bank line, not the prefix). '
-        'Use (?i) for case-insensitive patterns. Prefer anchored patterns (^...) when sensible. '
-        'Be conservative: do NOT add broad patterns that could match merchant or payment descriptions '
-        '(that would drop real transactions). When unsure, omit the pattern. '
-        'Return an empty array if defaults suffice. At most 14 patterns; each under 180 characters.'
-    )
-    try:
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user_body},
-            ],
-            response_format={'type': 'json_object'},
-            temperature=0.1,
-        )
-        raw = completion.choices[0].message.content or '{}'
-        data, jerr = _parse_llm_json_object(raw, context='spending_layout_skip')
-        if jerr:
-            logger.warning('layout skip LLM JSON failed: %s', jerr)
-            return _merge_spending_layout_skip_regexes([])
-        return _merge_spending_layout_skip_regexes(data.get('skip_line_regexes'))
-    except Exception as e:
-        logger.warning('layout skip LLM call failed: %s', e)
-        return _merge_spending_layout_skip_regexes([])
-
-
-def _extract_first_bank_date_from_line(line_text: str):
-    """Find the first plausible transaction date and return (date, description_remainder)."""
-    line_text = (line_text or '').strip()
-    if not line_text:
-        return None, ''
-    tokens = line_text.split()
-    for n in range(1, min(5, len(tokens) + 1)):
-        cand = ' '.join(tokens[:n])
-        d = _parse_bank_statement_date(cand)
-        if d is not None:
-            rest = ' '.join(tokens[n:]).strip()
-            return d, rest
-    for m in re.finditer(r'\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})\b', line_text):
-        sub = m.group(0)
-        d = _parse_bank_statement_date(sub)
-        if d is not None:
-            rest = (line_text[: m.start()] + ' ' + line_text[m.end() :]).strip()
-            rest = re.sub(r'\s+', ' ', rest)
-            return d, rest
-    for m in re.finditer(r'\b(\d{4})-(\d{2})-(\d{2})\b', line_text):
-        sub = m.group(0)
-        d = _parse_bank_statement_date(sub)
-        if d is not None:
-            rest = (line_text[: m.start()] + ' ' + line_text[m.end() :]).strip()
-            rest = re.sub(r'\s+', ' ', rest)
-            return d, rest
-    return None, line_text
-
-
-def _token_is_strict_statement_amount(tok: str) -> bool:
-    """True if token looks like a posted currency amount (optional £/$/€, optional commas, .pp)."""
-    t = (tok or '').strip()
-    t = re.sub(r'^[$£€]\s*', '', t)
-    t = t.replace(',', '')
-    t = re.sub(r'(?:CR|DR)$', '', t, flags=re.I)
-    return bool(re.match(r'^\d+\.\d{2}$', t))
-
-
-def _description_before_amount_tokens(desc: str) -> str:
-    """
-    Keep payee/description text after the date, stopping at the first amount-like token.
-
-    Statement rows are usually [date] [description…] [transaction amount(s)] [running balance].
-    LINE_HINT already has the debit/credit amounts; the line text repeats them plus balance.
-    A left boundary (first money token) matches that layout more reliably than stripping only
-    from the right (e.g. odd trailing tokens, or future extra columns).
-    """
-    if not (desc or '').strip():
-        return desc
-    parts = desc.split()
-    out: list[str] = []
-    for tok in parts:
-        if _token_is_strict_statement_amount(tok):
-            break
-        out.append(tok)
-    return ' '.join(out).strip()
-
-
-def _layout_eligible_hint_count(hint_rows: list[dict], skip_pattern_strings: list[str]) -> int:
-    """Hint rows that have money and are not skipped — used for fallback yield thresholds."""
-    compiled = _compile_spending_skip_line_regexes(skip_pattern_strings)
-    n = 0
-    for h in hint_rows:
-        lt = h.get('line_text') or ''
-        if any(p.search(lt) for p in compiled):
-            continue
-        try:
-            mi = round(float(h.get('money_in', 0) or 0), 2)
-            mo = round(float(h.get('money_out', 0) or 0), 2)
-        except (TypeError, ValueError):
-            continue
-        if mi <= 0 and mo <= 0:
-            continue
-        n += 1
-    return n
-
-
-def _raw_transactions_from_line_hints(
-    hint_rows: list[dict],
-    skip_pattern_strings: list[str],
-    *,
-    carry_forward_date: bool = True,
-) -> list[dict]:
-    """Build raw transaction dicts compatible with _normalize_spending_transactions."""
-    compiled = _compile_spending_skip_line_regexes(skip_pattern_strings)
-    raw: list[dict] = []
-    last_d: date | None = None
-    for h in hint_rows:
-        lt = h.get('line_text') or ''
-        if any(p.search(lt) for p in compiled):
-            continue
-        try:
-            mi = round(float(h.get('money_in', 0) or 0), 2)
-            mo = round(float(h.get('money_out', 0) or 0), 2)
-        except (TypeError, ValueError):
-            continue
-        if mi <= 0 and mo <= 0:
-            continue
-        explicit_d, desc = _extract_first_bank_date_from_line(lt)
-        if explicit_d is not None:
-            d = explicit_d
-            last_d = explicit_d
-        elif carry_forward_date and last_d is not None:
-            d = last_d
-            desc = lt.strip()
-        else:
-            continue
-        if not desc:
-            desc = 'Bank transaction'
-        else:
-            desc = _description_before_amount_tokens(desc)
-        if not desc:
-            desc = 'Bank transaction'
-        ds = d.strftime('%Y-%m-%d')
-        if mi > 0 and mo > 0:
-            raw.append({
-                'date': ds,
-                'description': desc[:500],
-                'money_in': mi,
-                'money_out': None,
-                'direction': 'incoming',
-            })
-            raw.append({
-                'date': ds,
-                'description': desc[:500],
-                'money_in': None,
-                'money_out': mo,
-                'direction': 'outgoing',
-            })
-        elif mi > 0:
-            raw.append({
-                'date': ds,
-                'description': desc[:500],
-                'money_in': mi,
-                'money_out': None,
-                'direction': 'incoming',
-            })
-        else:
-            raw.append({
-                'date': ds,
-                'description': desc[:500],
-                'money_in': None,
-                'money_out': mo,
-                'direction': 'outgoing',
-            })
-    return raw
-
-
-def _layout_extraction_should_fallback(hint_row_count: int, eligible_count: int, raw_rows: list) -> bool:
-    if hint_row_count < SPENDING_LAYOUT_MIN_HINT_ROWS:
-        return True
-    p = len(raw_rows)
-    if p == 0:
-        return True
-    if eligible_count <= 0:
-        return True
-    need = max(
-        SPENDING_LAYOUT_FALLBACK_MIN_PARSED,
-        int(eligible_count * SPENDING_LAYOUT_FALLBACK_RATIO),
-    )
-    # At least one output per eligible line when lines are single-sided; dual in/out yields 2 per line.
-    need = min(need, eligible_count)
-    return p < need
-
-
-def iter_spending_transaction_extraction(statement_text: str, period_hint: str | None = None):
-    """
-    Yields {'type':'progress','step':str,'message':str} then
-    {'type':'result','rows':list,'meta':dict}.
-    """
-    # Fast path: structured CSV / Excel — map headers (alias or tiny LLM), parse rows locally.
     tabular_result = None
-    for ev in _iter_tabular_spending_extraction(statement_text):
+    for ev in _iter_tabular_spending_extraction(statement_text, bank_source=bank_source):
         if ev.get('type') == 'progress':
             yield ev
         elif ev.get('type') == 'result':
@@ -2271,109 +2138,13 @@ def iter_spending_transaction_extraction(statement_text: str, period_hint: str |
     if tabular_result is not None:
         yield tabular_result
         return
-
-    base, hints_block = _split_spending_statement_text_for_model(statement_text)
-    hint_rows = _parse_line_hint_rows(hints_block)
-
-    if len(hint_rows) < SPENDING_LAYOUT_MIN_HINT_ROWS:
-        yield {
-            'type': 'progress',
-            'step': 'llm_extract',
-            'message': 'Extracting transactions with the model (not enough layout-derived LINE_HINT rows)…',
-        }
-        rows = None
-        chunk_count = 1
-        for ev in _iter_extract_spending_transactions_llm(statement_text, period_hint):
-            if ev.get('type') == 'progress':
-                yield ev
-            elif ev.get('type') == 'rows':
-                rows = ev.get('rows') or []
-                chunk_count = int(ev.get('chunk_count') or 1)
-        yield {
-            'type': 'result',
-            'rows': rows or [],
-            'meta': {
-                'mode': 'llm_full',
-                'reason': 'insufficient_layout_hints',
-                'hint_row_count': len(hint_rows),
-                'llm_chunk_count': chunk_count,
-            },
-        }
-        return
-
     yield {
-        'type': 'progress',
-        'step': 'layout_mapping',
-        'message': 'Inferring which lines to skip (compact model request on a short excerpt)…',
-    }
-    skip_patterns = _llm_spending_layout_skip_regexes(base, hint_rows)
-
-    yield {
-        'type': 'progress',
-        'step': 'layout_parse',
-        'message': 'Parsing dates and descriptions from LINE_HINT rows locally…',
-    }
-    rows = _raw_transactions_from_line_hints(hint_rows, skip_patterns)
-    eligible = _layout_eligible_hint_count(hint_rows, skip_patterns)
-    layout_retry_defaults = False
-    if _layout_extraction_should_fallback(len(hint_rows), eligible, rows):
-        yield {
-            'type': 'progress',
-            'step': 'layout_parse',
-            'message': 'Retrying layout parse with default skip patterns only (model-added filters may have been too tight)…',
-        }
-        defaults_only = _merge_spending_layout_skip_regexes([])
-        rows_retry = _raw_transactions_from_line_hints(hint_rows, defaults_only)
-        elig_retry = _layout_eligible_hint_count(hint_rows, defaults_only)
-        if len(rows_retry) > len(rows) or not _layout_extraction_should_fallback(
-            len(hint_rows), elig_retry, rows_retry
-        ):
-            rows = rows_retry
-            eligible = elig_retry
-            skip_patterns = defaults_only
-            layout_retry_defaults = True
-
-    layout_attempt_count = len(rows)
-
-    if _layout_extraction_should_fallback(len(hint_rows), eligible, rows):
-        yield {
-            'type': 'progress',
-            'step': 'llm_extract',
-            'message': 'Layout parse still thin after retries — falling back to full model extraction…',
-        }
-        rows = None
-        chunk_count = 1
-        for ev in _iter_extract_spending_transactions_llm(statement_text, period_hint):
-            if ev.get('type') == 'progress':
-                yield ev
-            elif ev.get('type') == 'rows':
-                rows = ev.get('rows') or []
-                chunk_count = int(ev.get('chunk_count') or 1)
-        yield {
-            'type': 'result',
-            'rows': rows or [],
-            'meta': {
-                'mode': 'llm_full',
-                'reason': 'layout_low_yield',
-                'hint_row_count': len(hint_rows),
-                'eligible_hint_count': eligible,
-                'layout_attempt_count': layout_attempt_count,
-                'llm_chunk_count': chunk_count,
-            },
-        }
-        return
-
-    yield {
-        'type': 'result',
-        'rows': rows,
-        'meta': {
-            'mode': 'layout_hints',
-            'hint_row_count': len(hint_rows),
-            'eligible_hint_count': eligible,
-            'raw_row_count': len(rows),
-            'skip_pattern_count': len(skip_patterns),
-            'retried_defaults_only': layout_retry_defaults,
-        },
+        'type': 'error',
+        'message': (
+            'Could not read this as a table. Upload a CSV or Excel (.xlsx) export from your bank '
+            'with a date column and an amount (or paid in / paid out) column. '
+            'PDF and plain-text statements are no longer supported.'
+        ),
     }
 
 
@@ -7960,6 +7731,21 @@ def _is_spreadsheet_filename(name: str) -> bool:
     return n.endswith('.xlsx') or n.endswith('.xlsm') or n.endswith('.xls')
 
 
+# Statement imports are parsed entirely on-device. Only structured exports are supported:
+# CSV and Excel (.xlsx/.xlsm). PDF and free-text statements are no longer accepted because
+# they cannot be parsed locally without sending transaction rows to a model.
+SUPPORTED_STATEMENT_EXTENSIONS = ('.csv', '.xlsx', '.xlsm')
+UNSUPPORTED_STATEMENT_MESSAGE = (
+    'Only CSV or Excel (.xlsx) exports are supported. PDF and plain-text statements are no '
+    'longer accepted — export a CSV or Excel file from your bank and upload that instead.'
+)
+
+
+def _is_supported_statement_filename(name: str) -> bool:
+    n = (name or '').lower()
+    return n.endswith(SUPPORTED_STATEMENT_EXTENSIONS)
+
+
 def _csv_escape_cell(value: str) -> str:
     if any(ch in value for ch in ',"\n\r'):
         return '"' + value.replace('"', '""') + '"'
@@ -8680,57 +8466,58 @@ def _description_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b).ratio()
 
 
-def _extract_transactions_llm(statement_text: str) -> list:
-    """
-    Sends statement text to OpenAI; returns a list of dicts with statement_date, amount, description, category.
-    Third-party: data leaves your server. Set OPENAI_API_KEY (and optionally OPENAI_MODEL, OPENAI_BASE_URL).
-    """
-    client = _get_openai_client()
-    if not client:
-        raise RuntimeError('OPENAI_API_KEY is not set')
+# Household-bill keywords for the loan statement / baseline candidate filter (local, no model).
+_HOUSEHOLD_BILL_KEYWORDS = (
+    'council tax', 'water', 'sewerage', 'electric', 'electricity', 'gas', 'broadband',
+    'internet', 'landline', 'mobile', 'tv licence', 'tv license', 'television licence',
+    'home insurance', 'buildings insurance', 'contents insurance', 'service charge',
+    'ground rent', 'mortgage', 'insurance', 'utility', 'utilities', 'wifi', 'phone',
+)
+_HOUSEHOLD_BILL_RE = re.compile(
+    r'\b(' + '|'.join(re.escape(k) for k in _HOUSEHOLD_BILL_KEYWORDS) + r')\b',
+    re.IGNORECASE,
+)
 
-    model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
-    truncated = False
-    text = statement_text
-    if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
-        text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
-        truncated = True
 
-    system = (
-        'You extract ONLY outgoing debits from UK bank statements that are shared household bills: '
-        'council tax, water, sewerage, electricity, gas, broadband, internet, landline, TV licence, '
-        'TV/broadband bundles, home insurance, service charge, or similar utilities. '
-        'EXCLUDE: groceries, supermarkets, restaurants, retail, ATM cash, transfers to people, '
-        'credit card payments, investments, salary, benefits, general shopping, petrol unless clearly a utility DD. '
-        'Return ONLY valid JSON: {"transactions":[{"statement_date":"YYYY-MM-DD","amount":number,"description":string,"category":string|null}]} '
-        'where amount is the positive debit amount as on the statement. If nothing matches, return {"transactions":[]}.'
-    )
-    user_msg = 'Bank statement text:\n\n' + text
-    if truncated:
-        user_msg += '\n\n(Note: text was truncated; extract from the visible portion only.)'
+def _looks_like_household_bill(description: str) -> bool:
+    return bool(_HOUSEHOLD_BILL_RE.search(_normalize_label(description)))
 
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user_msg},
-        ],
-        response_format={'type': 'json_object'},
-        temperature=0.2,
-    )
-    raw = completion.choices[0].message.content or '{}'
-    data, jerr = _parse_llm_json_object(raw, context='loan_statement_extract')
-    if jerr:
-        raise RuntimeError(
-            'Could not parse the model response as JSON. Try again or use a shorter statement excerpt. '
-            f'Detail: {jerr}'
-        )
-    txs = data.get('transactions')
-    if txs is None:
-        txs = data.get('items') or []
-    if not isinstance(txs, list):
-        return []
-    return txs
+
+def _local_statement_transactions(text: str) -> list[dict]:
+    """Parse a supported (CSV/XLSX) statement locally into normalized transactions."""
+    raw_rows = None
+    for ev in iter_spending_transaction_extraction(text):
+        et = ev.get('type')
+        if et == 'error':
+            raise ValueError(ev.get('message') or 'Could not parse statement.')
+        if et == 'result':
+            raw_rows = ev.get('rows') or []
+    if raw_rows is None:
+        raise ValueError('Could not parse statement.')
+    return _normalize_spending_transactions(raw_rows)
+
+
+def _loan_candidate_rows_from_transactions(txs: list[dict], *, bills_only: bool = True) -> list[dict]:
+    """Outgoing rows (optionally household-bill only) shaped for ``_normalize_candidates``."""
+    rows = []
+    for t in txs:
+        if t.get('direction') != 'outgoing':
+            continue
+        desc = str(t.get('description') or '')
+        if bills_only and not _looks_like_household_bill(desc):
+            continue
+        try:
+            amt = abs(float(t.get('amount') or 0))
+        except (TypeError, ValueError):
+            continue
+        if amt <= 0:
+            continue
+        rows.append({
+            'statement_date': str(t.get('date') or ''),
+            'amount': amt,
+            'description': desc,
+        })
+    return rows
 
 
 def _normalize_candidates(raw_list: list) -> list:
@@ -8847,31 +8634,22 @@ def _spending_pipeline_dict_text(name: str, text: str, raw_len: int) -> dict:
 
 
 def _spending_text_hints_pipeline_from_raw(name: str, raw: bytes) -> tuple[str, list, dict]:
-    """Full spending parse: text for the model, direction hints, pipeline dict (before truncation)."""
-    if name.endswith('.pdf'):
-        text, pdf_parts = _build_spending_pdf_statement_text(raw)
-        hints = _build_spending_direction_hints(raw)
-        pipeline = _spending_pipeline_dict_pdf(pdf_parts, hints, len(raw), text)
-        return text, hints, pipeline
+    """Decode a supported (CSV/XLSX) statement upload to CSV-like text + pipeline dict."""
+    if not _is_supported_statement_filename(name):
+        raise ValueError(UNSUPPORTED_STATEMENT_MESSAGE)
     if _is_spreadsheet_filename(name):
         text = _extract_spreadsheet_text(raw, name)
-        return text, [], _spending_pipeline_dict_text(name, text, len(raw))
-    text = raw.decode('utf-8', errors='replace')
+    else:
+        text = raw.decode('utf-8', errors='replace')
     return text, [], _spending_pipeline_dict_text(name, text, len(raw))
 
 
 def _finalize_spending_upload(text: str, hints: list, pipeline: dict | None) -> tuple[tuple | None, str | None]:
-    if not text or len(re.sub(r'\s+', '', text)) < 40:
-        return None, 'Extracted text is empty or too short. Try exporting CSV or Excel (.xlsx) from your bank or another PDF.'
-    truncated = False
-    if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
-        text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
-        truncated = True
+    if not text or len(re.sub(r'\s+', '', text)) < 6:
+        return None, 'File is empty or unreadable. Export CSV or Excel (.xlsx) from your bank.'
     if pipeline is not None:
-        pipeline['truncated_for_llm'] = truncated
-        pipeline['llm_char_limit'] = STATEMENT_MAX_CHARS_FOR_LLM
-        pipeline['lengths']['sent_to_llm'] = len(text)
-    return (text, truncated, hints, pipeline), None
+        pipeline['lengths']['prepared_text'] = len(text)
+    return (text, False, hints, pipeline), None
 
 
 def _iter_prepare_spending_raw(name: str, raw: bytes):
@@ -8880,39 +8658,22 @@ def _iter_prepare_spending_raw(name: str, raw: bytes):
     pipeline: dict | None = None
     text = ''
     try:
-        if name.endswith('.pdf'):
-            yield {'type': 'progress', 'step': 'pdf_text', 'message': 'Extracting PDF text (layout-aware)…'}
-            pdf_meta: dict = {}
-            base = _extract_pdf_text(raw, meta_out=pdf_meta)
-            yield {'type': 'progress', 'step': 'pdf_column_hints', 'message': 'Deriving column hints from statement layout…'}
-            hints_str = _pdfplumber_spending_column_hints(raw)
-            if hints_str:
-                text = base + SPENDING_PDF_COLUMN_HINTS_BANNER + hints_str
-            else:
-                text = base
-            pdf_parts = {
-                'extracted_text': base,
-                'column_hints_block': hints_str,
-                'pdf_text_engine': pdf_meta.get('engine'),
-                'pdf_engines_considered': pdf_meta.get('engines') or [],
-            }
-            yield {'type': 'progress', 'step': 'pdf_direction_hints', 'message': 'Deriving credit/debit hints from geometry…'}
-            hints = _build_spending_direction_hints(raw)
-            pipeline = _spending_pipeline_dict_pdf(pdf_parts, hints, len(raw), text)
-        elif _is_spreadsheet_filename(name):
+        if not _is_supported_statement_filename(name):
+            yield {'type': 'error', 'message': UNSUPPORTED_STATEMENT_MESSAGE, 'http_status': 400}
+            return
+        if _is_spreadsheet_filename(name):
             yield {'type': 'progress', 'step': 'decode_spreadsheet', 'message': 'Converting Excel spreadsheet…'}
             text = _extract_spreadsheet_text(raw, name)
-            pipeline = _spending_pipeline_dict_text(name, text, len(raw))
         else:
-            yield {'type': 'progress', 'step': 'decode_text', 'message': 'Decoding text or CSV…'}
+            yield {'type': 'progress', 'step': 'decode_csv', 'message': 'Decoding CSV…'}
             text = raw.decode('utf-8', errors='replace')
-            pipeline = _spending_pipeline_dict_text(name, text, len(raw))
+        pipeline = _spending_pipeline_dict_text(name, text, len(raw))
     except Exception as e:
         logger.exception('statement read failed')
         yield {'type': 'error', 'message': f'Could not read file: {e}', 'http_status': 400}
         return
 
-    yield {'type': 'progress', 'step': 'validate', 'message': 'Validating text and applying model size limit…'}
+    yield {'type': 'progress', 'step': 'validate', 'message': 'Validating statement text…'}
     fin, err = _finalize_spending_upload(text, hints, pipeline)
     if err:
         yield {'type': 'error', 'message': err, 'http_status': 400}
@@ -9005,6 +8766,7 @@ def _spending_statement_preview_payload(
     direction_hints: list,
     pipeline: dict,
     period: dict,
+    bank_source: str | None = None,
 ) -> dict:
     """Build the same JSON body as spending_statement_preview after file prep."""
     data = load_data()
@@ -9012,18 +8774,15 @@ def _spending_statement_preview_payload(
     if changed:
         save_data(data)
 
-    period_hint = (
-        f'Prefer transactions whose completed/settled date (or sole statement date) falls on or between '
-        f'{period["period_start"]} and {period["period_end"]} inclusive. '
-        f'When a row has both started and completed dates, always set date=completed_date even if started_date '
-        f'is outside that range — still include the row. When in doubt, include the row.'
-    )
     raw_rows = None
     extraction_meta = None
-    for ev in iter_spending_transaction_extraction(text, period_hint):
-        if ev.get('type') == 'result':
+    for ev in iter_spending_transaction_extraction(text, bank_source=bank_source):
+        et = ev.get('type')
+        if et == 'result':
             raw_rows = ev.get('rows')
             extraction_meta = ev.get('meta')
+        elif et == 'error':
+            raise ValueError(ev.get('message') or 'Could not parse statement.')
     if raw_rows is None:
         raw_rows = []
     return _spending_statement_preview_finalize(
@@ -9040,11 +8799,9 @@ def _spending_statement_preview_payload(
 
 def _prepare_statement_text_from_upload(*, for_spending: bool = False):
     """
-    Read multipart file from request.
+    Read multipart file from request (CSV / Excel .xlsx only).
     Returns ((text, truncated_bool, hints_list, pipeline_dict), None) when for_spending=True,
     else ((text, truncated_bool), None). On error returns (None, message).
-    hints_list is direction hints from PDF geometry (empty for non-PDF).
-    pipeline_dict describes intermediate representations for the spending UI (PDF stages, previews).
     """
     f = request.files.get('file')
     if not f or not getattr(f, 'filename', None):
@@ -9053,13 +8810,13 @@ def _prepare_statement_text_from_upload(*, for_spending: bool = False):
     if len(raw) > STATEMENT_MAX_BYTES:
         return None, 'File too large (max 2 MB).'
     name = (f.filename or '').lower()
+    if not _is_supported_statement_filename(name):
+        return None, UNSUPPORTED_STATEMENT_MESSAGE
     hints: list = []
     pipeline: dict | None = None
     try:
         if for_spending:
             text, hints, pipeline = _spending_text_hints_pipeline_from_raw(name, raw)
-        elif name.endswith('.pdf'):
-            text = _extract_pdf_text(raw)
         elif _is_spreadsheet_filename(name):
             text = _extract_spreadsheet_text(raw, name)
         else:
@@ -9073,70 +8830,8 @@ def _prepare_statement_text_from_upload(*, for_spending: bool = False):
             return None, ferr
         return fin, None
     if not text or len(re.sub(r'\s+', '', text)) < 40:
-        return None, 'Extracted text is empty or too short. Try exporting CSV or Excel (.xlsx) from your bank or another PDF.'
-    truncated = False
-    if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
-        text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
-        truncated = True
-    return (text, truncated), None
-
-
-def _extract_baseline_statement_llm(statement_text: str) -> tuple[list, str | None]:
-    """
-    Broader extraction for expected recurring bills + statement period_end.
-    Returns (transactions_list, period_end_iso_or_none).
-    """
-    client = _get_openai_client()
-    if not client:
-        raise RuntimeError('OPENAI_API_KEY is not set')
-
-    model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini').strip() or 'gpt-4o-mini'
-    truncated = False
-    text = statement_text
-    if len(text) > STATEMENT_MAX_CHARS_FOR_LLM:
-        text = text[:STATEMENT_MAX_CHARS_FOR_LLM]
-        truncated = True
-
-    system = (
-        'You analyse UK bank statement text. Return ONLY valid JSON with keys: '
-        '"transactions" (array) and "period_end" (string or null). '
-        '"transactions": outgoing debits that could plausibly be recurring monthly household bills '
-        '(council tax, water, electricity, gas, broadband, rent DD, insurance, phone, TV licence, service charges, etc.). '
-        'Be more inclusive than a strict filter but EXCLUDE: supermarkets, restaurants, pubs, coffee, '
-        'ATM cash, transfers to people, salary, benefits, gambling, general shopping unless clearly a utility DD. '
-        'Each item: statement_date (YYYY-MM-DD), amount (positive debit), description (string), category (string or null). '
-        '"period_end": the statement period end date as YYYY-MM-DD if visible in the text, else null.'
-    )
-    user_msg = 'Bank statement text:\n\n' + text
-    if truncated:
-        user_msg += '\n\n(Note: text was truncated.)'
-
-    completion = client.chat.completions.create(
-        model=model,
-        messages=[
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user_msg},
-        ],
-        response_format={'type': 'json_object'},
-        temperature=0.2,
-    )
-    raw = completion.choices[0].message.content or '{}'
-    data, jerr = _parse_llm_json_object(raw, context='baseline_statement')
-    if jerr:
-        logger.warning('baseline_statement LLM JSON parse failed: %s', jerr)
-        return [], None
-    txs = data.get('transactions')
-    if txs is None:
-        txs = data.get('items') or []
-    if not isinstance(txs, list):
-        txs = []
-    pe = data.get('period_end')
-    if pe is not None and not isinstance(pe, str):
-        pe = str(pe) if pe else None
-    if pe:
-        d = _parse_iso_date(pe)
-        pe = d.strftime('%Y-%m-%d') if d else None
-    return txs, pe
+        return None, 'Extracted text is empty or too short. Try exporting CSV or Excel (.xlsx) from your bank.'
+    return (text, False), None
 
 
 def _default_reminder_day_from_period_end(period_end: str | None) -> int:
@@ -9550,28 +9245,20 @@ def reconcile_upload(month):
         return jsonify({'error': uerr}), 400
     text, truncated_text, direction_hints, pipeline = prep
 
-    if (
-        _try_parse_tabular_spending_transactions(text, allow_llm=False) is None
-        and not _get_openai_client()
-    ):
-        return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
+    bank_source = _normalize_bank_source(request.form.get('bank_source') or request.form.get('source'))
 
     try:
         body = _spending_statement_preview_payload(
-            text, truncated_text, direction_hints, pipeline, period,
+            text, truncated_text, direction_hints, pipeline, period, bank_source,
         )
-    except RuntimeError as e:
-        if 'OPENAI_API_KEY' in str(e):
-            return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
-        logger.exception('reconcile upload extraction failed')
-        return jsonify({'error': str(e)}), 500
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.exception('reconcile upload extraction failed')
         return jsonify({'error': str(e)}), 500
 
     f = request.files.get('file')
     file_name = str(getattr(f, 'filename', None) or 'statement')[:200]
-    bank_source = _normalize_bank_source(request.form.get('bank_source') or request.form.get('source'))
     stage_rows = _reconcile_rows_from_preview_transactions(body.get('transactions') or [])
     upload_id = str(uuid.uuid4())
     sess.setdefault('uploads', []).append({
@@ -10366,8 +10053,8 @@ def delete_recurring_payment(loan_id, payment_index):
 @login_required
 def statement_preview(loan_id):
     """
-    Upload a bank statement (PDF, CSV, Excel .xlsx, or plain text). Text is sent to OpenAI for extraction.
-    Env: OPENAI_API_KEY (required), OPENAI_MODEL (default gpt-4o-mini), OPENAI_BASE_URL (optional).
+    Upload a bank statement (CSV or Excel .xlsx). Parsed locally — no transaction rows
+    are sent to any model. Only likely household bills are offered as candidates.
     """
     data = load_data()
     if loan_id not in data['loans']:
@@ -10376,23 +10063,21 @@ def statement_preview(loan_id):
     if loan.get('deleted'):
         return jsonify({'error': 'Loan is deleted'}), 400
 
-    if not _get_openai_client():
-        return jsonify({'error': 'Statement import is not configured (set OPENAI_API_KEY).'}), 503
-
     prep, err = _prepare_statement_text_from_upload()
     if err:
         return jsonify({'error': err}), 400
-    text, truncated_text = prep
+    text, _truncated = prep
 
     try:
-        raw_txs = _extract_transactions_llm(text)
-    except Exception as e:
-        logger.exception('LLM extraction failed')
-        return jsonify({'error': str(e)}), 500
+        txs = _local_statement_transactions(text)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
-    candidates = _normalize_candidates(raw_txs)
+    candidates = _normalize_candidates(
+        _loan_candidate_rows_from_transactions(txs, bills_only=True)
+    )
     _mark_duplicates(candidates, loan)
-    out = {'candidates': candidates, 'truncated': truncated_text}
+    out = {'candidates': candidates, 'truncated': False}
     bl = loan.get('bill_baseline')
     if bl:
         diff = _compare_to_baseline(candidates, bl)
@@ -10460,10 +10145,8 @@ def statement_import(loan_id):
 @app.route('/api/loan/<loan_id>/statement/from-spending', methods=['POST'])
 @login_required
 def statement_from_spending(loan_id):
-    """Reuse transactions already imported on the home screen as loan-repayment
-    candidates. Instead of re-uploading a file, this rebuilds statement text from
-    the outgoing lines already extracted for the selected month(s) and re-runs the
-    household-bill LLM filter so the review table matches the file-upload flow.
+    """Reuse outgoing transactions already imported on the monthly page as loan-repayment
+    candidates, filtered to likely household bills locally (no model calls).
     Body: {"report_month": "YYYY-MM" | "all"}."""
     data = load_data()
     if loan_id not in data['loans']:
@@ -10471,9 +10154,6 @@ def statement_from_spending(loan_id):
     loan = data['loans'][loan_id]
     if loan.get('deleted'):
         return jsonify({'error': 'Loan is deleted'}), 400
-
-    if not _get_openai_client():
-        return jsonify({'error': 'Statement import is not configured (set OPENAI_API_KEY).'}), 503
 
     spending, changed = _ensure_user_spending(data, session['username'])
     if changed:
@@ -10491,7 +10171,7 @@ def statement_from_spending(loan_id):
             return jsonify({'error': 'Invalid report_month (use YYYY-MM).'}), 400
         outgoing = [t for t in outgoing if _report_month_for_spending_tx(t) == month]
 
-    lines = []
+    rows = []
     for t in sorted(outgoing, key=lambda x: str(x.get('date') or '')):
         try:
             amt = abs(float(t.get('amount') or 0))
@@ -10499,33 +10179,26 @@ def statement_from_spending(loan_id):
             continue
         if amt <= 0:
             continue
-        d = str(t.get('date') or '')
         desc = str(t.get('description') or '').strip()
-        lines.append(f'{d}  {desc}  -\u00a3{amt:.2f}')
+        if not _looks_like_household_bill(desc):
+            continue
+        rows.append({'statement_date': str(t.get('date') or ''), 'amount': amt, 'description': desc})
 
-    if not lines:
+    if not rows:
         return jsonify({
             'candidates': [],
             'truncated': False,
             'source_count': 0,
-            'message': 'No imported outgoing transactions found for the selected period. '
+            'message': 'No imported outgoing household bills found for the selected period. '
                        'Reconcile a month first.',
         })
 
-    pseudo_text = '\n'.join(lines)
-
-    try:
-        raw_txs = _extract_transactions_llm(pseudo_text)
-    except Exception as e:
-        logger.exception('LLM extraction from imported spending failed')
-        return jsonify({'error': str(e)}), 500
-
-    candidates = _normalize_candidates(raw_txs)
+    candidates = _normalize_candidates(rows)
     _mark_duplicates(candidates, loan)
     out = {
         'candidates': candidates,
-        'truncated': len(pseudo_text) > STATEMENT_MAX_CHARS_FOR_LLM,
-        'source_count': len(lines),
+        'truncated': False,
+        'source_count': len(rows),
     }
     bl = loan.get('bill_baseline')
     if bl:
@@ -10545,25 +10218,25 @@ def statement_baseline_preview(loan_id):
     if loan.get('deleted'):
         return jsonify({'error': 'Loan is deleted'}), 400
 
-    if not _get_openai_client():
-        return jsonify({'error': 'Statement import is not configured (set OPENAI_API_KEY).'}), 503
-
     prep, err = _prepare_statement_text_from_upload()
     if err:
         return jsonify({'error': err}), 400
-    text, truncated_text = prep
+    text, _truncated = prep
 
     try:
-        raw_txs, period_end = _extract_baseline_statement_llm(text)
-    except Exception as e:
-        logger.exception('baseline LLM extraction failed')
-        return jsonify({'error': str(e)}), 500
+        txs = _local_statement_transactions(text)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
-    candidates = _normalize_candidates(raw_txs)
+    candidates = _normalize_candidates(
+        _loan_candidate_rows_from_transactions(txs, bills_only=True)
+    )
+    dates = [str(t.get('date')) for t in txs if t.get('date')]
+    period_end = max(dates) if dates else None
     inferred_day = _default_reminder_day_from_period_end(period_end)
     return jsonify({
         'candidates': candidates,
-        'truncated': truncated_text,
+        'truncated': False,
         'inferred_period_end': period_end,
         'inferred_reminder_day': inferred_day,
     })
@@ -10834,14 +10507,6 @@ def spending_statement_preview():
         return jsonify({'error': err}), 400
     text, truncated_text, direction_hints, pipeline = prep
 
-    # Alias-mapped CSV/XLSX can proceed without OpenAI; unfamiliar headers need a
-    # tiny header LLM call (or full extract), so require the API key then.
-    if (
-        _try_parse_tabular_spending_transactions(text, allow_llm=False) is None
-        and not _get_openai_client()
-    ):
-        return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
-
     period, perr = _parse_spending_period_from_values(
         request.form.get('report_month'),
         request.form.get('period_start'),
@@ -10850,15 +10515,13 @@ def spending_statement_preview():
     if perr:
         return jsonify({'error': perr}), 400
 
+    bank_source = _normalize_bank_source(request.form.get('bank_source') or request.form.get('source'))
     try:
         body = _spending_statement_preview_payload(
-            text, truncated_text, direction_hints, pipeline, period
+            text, truncated_text, direction_hints, pipeline, period, bank_source
         )
-    except RuntimeError as e:
-        if 'OPENAI_API_KEY' in str(e):
-            return jsonify({'error': 'Statement analysis is not configured (set OPENAI_API_KEY).'}), 503
-        logger.exception('spending statement extraction failed')
-        return jsonify({'error': str(e)}), 500
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         logger.exception('spending statement extraction failed')
         return jsonify({'error': str(e)}), 500
@@ -10941,22 +10604,8 @@ def spending_statement_preview_stream():
 
         text, truncated_text, direction_hints, pipeline = prep
 
-        if (
-            _try_parse_tabular_spending_transactions(text, allow_llm=False) is None
-            and not _get_openai_client()
-        ):
-            yield emit({
-                'type': 'error',
-                'message': 'Statement analysis is not configured (set OPENAI_API_KEY).',
-                'http_status': 503,
-            })
-            return
-
-        period_hint = (
-            f'Prefer transactions whose completed/settled date (or sole statement date) falls on or between '
-            f'{period["period_start"]} and {period["period_end"]} inclusive. '
-            f'When a row has both started and completed dates, always set date=completed_date even if started_date '
-            f'is outside that range — still include the row. When in doubt, include the row.'
+        bank_source = _normalize_bank_source(
+            request.form.get('bank_source') or request.form.get('source')
         )
 
         yield emit({'type': 'progress', 'step': 'load_profile', 'message': 'Loading your spending profile…'})
@@ -10968,24 +10617,16 @@ def spending_statement_preview_stream():
         raw_rows = None
         extraction_meta = None
         try:
-            for ev in iter_spending_transaction_extraction(text, period_hint):
+            for ev in iter_spending_transaction_extraction(text, bank_source=bank_source):
                 et = ev.get('type')
                 if et == 'progress':
                     yield emit(ev)
                 elif et == 'result':
                     raw_rows = ev.get('rows')
                     extraction_meta = ev.get('meta')
-        except RuntimeError as e:
-            if 'OPENAI_API_KEY' in str(e):
-                yield emit({
-                    'type': 'error',
-                    'message': 'Statement analysis is not configured (set OPENAI_API_KEY).',
-                    'http_status': 503,
-                })
-                return
-            logger.exception('spending statement stream extraction failed')
-            yield emit({'type': 'error', 'message': str(e), 'http_status': 500})
-            return
+                elif et == 'error':
+                    yield emit({'type': 'error', 'message': ev.get('message'), 'http_status': 400})
+                    return
         except Exception as e:
             logger.exception('spending statement stream extraction failed')
             yield emit({'type': 'error', 'message': str(e), 'http_status': 500})

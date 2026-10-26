@@ -162,14 +162,12 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(topup['direction'], 'incoming')
         self.assertEqual(topup['amount'], 50.0)
 
-    def test_iter_extraction_uses_tabular_not_full_llm(self):
+    def test_iter_extraction_uses_tabular_not_llm(self):
         raw = _revolut_like_xlsx_bytes()
         text = app_mod._extract_spreadsheet_text(raw, 'revolut.xlsx')
-        with mock.patch.object(app_mod, '_iter_extract_spending_transactions_llm') as full_llm:
-            with mock.patch.object(app_mod, '_llm_map_tabular_headers') as header_llm:
-                events = list(app_mod.iter_spending_transaction_extraction(text))
-                full_llm.assert_not_called()
-                header_llm.assert_not_called()  # alias fast path
+        with mock.patch.object(app_mod, '_llm_map_tabular_headers') as header_llm:
+            events = list(app_mod.iter_spending_transaction_extraction(text))
+            header_llm.assert_not_called()  # alias fast path
         steps = [e.get('step') for e in events if e.get('type') == 'progress']
         self.assertIn('tabular_parse', steps)
         result = next(e for e in events if e.get('type') == 'result')
@@ -177,15 +175,26 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(result['meta']['header_map_source'], 'alias')
         self.assertGreaterEqual(len(result['rows']), 2)
 
-    def test_unknown_headers_use_tiny_llm_then_local_rows(self):
+    def test_unknown_headers_fall_back_to_local_inference(self):
         text = (
             'Txn when,What happened,Cash delta,Settle flag\n'
             '2024-07-01,Coffee shop,-4.80,COMPLETED\n'
             '2024-07-02,Payroll,1000.00,COMPLETED\n'
         )
-        # Without LLM mapping, unfamiliar headers fail.
-        self.assertIsNone(
-            app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        # No LLM needed: the headerless-style local inference maps the columns.
+        parsed = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertIsNotNone(parsed)
+        rows, meta = parsed
+        self.assertEqual(meta['header_map_source'], 'inferred')
+        by_desc = {r['description']: r for r in rows}
+        self.assertEqual(by_desc['Coffee shop']['direction'], 'outgoing')
+        self.assertEqual(by_desc['Payroll']['direction'], 'incoming')
+
+    def test_unknown_headers_use_tiny_llm_when_available(self):
+        text = (
+            'Txn when,What happened,Cash delta,Settle flag\n'
+            '2024-07-01,Coffee shop,-4.80,COMPLETED\n'
+            '2024-07-02,Payroll,1000.00,COMPLETED\n'
         )
 
         def fake_llm(header_row):
@@ -201,12 +210,8 @@ class TestTabularLocalParse(unittest.TestCase):
             }
 
         with mock.patch.object(app_mod, '_llm_map_tabular_headers', side_effect=fake_llm):
-            with mock.patch.object(app_mod, '_iter_extract_spending_transactions_llm') as full_llm:
-                events = list(app_mod.iter_spending_transaction_extraction(text))
-                full_llm.assert_not_called()
-        steps = [e.get('step') for e in events if e.get('type') == 'progress']
-        self.assertIn('tabular_headers', steps)
-        self.assertIn('tabular_parse', steps)
+            events = list(app_mod.iter_spending_transaction_extraction(text))
+        self.assertTrue(events)  # header-only LLM used for familiar mapping
         result = next(e for e in events if e.get('type') == 'result')
         self.assertEqual(result['meta']['header_map_source'], 'llm_headers')
         self.assertEqual(len(result['rows']), 2)
@@ -293,15 +298,6 @@ class TestTabularLocalParse(unittest.TestCase):
         self.assertEqual(by_desc['PRET A MANGER']['direction'], 'outgoing')
         self.assertEqual(by_desc['PRET A MANGER']['amount'], 10.5)
         self.assertEqual(by_desc['SALARY']['direction'], 'incoming')
-
-    def test_llm_chunk_split(self):
-        lines = [f'row {i},value\n' for i in range(100)]
-        text = ''.join(lines)
-        chunks = app_mod._split_statement_text_into_llm_chunks(text, max_chars=80)
-        self.assertGreater(len(chunks), 1)
-        self.assertEqual(''.join(chunks), text)
-        for c in chunks:
-            self.assertLessEqual(len(c), 80 + max(len(l) for l in lines))
 
     def test_unstructured_text_does_not_tabular_parse(self):
         text = 'This is a scanned PDF dump without headers\n01 Jul Coffee 4.80\n'
@@ -582,6 +578,107 @@ class TestAmountSignInferenceMatrix(unittest.TestCase):
         self.assertEqual(len(out), 40)
         self.assertEqual(len(inc), 2)
         self.assertTrue(all(r['description'].startswith('MERCHANT') for r in out))
+
+
+class TestHeaderlessInference(unittest.TestCase):
+    def setUp(self):
+        app_mod._TABULAR_HEADER_MAP_CACHE.clear()
+        app_mod._TABULAR_SHAPE_CONVENTION_CACHE.clear()
+
+    def test_split_detects_no_header_when_first_row_is_data(self):
+        text = '05/06/2024,PRET A MANGER,-10.50\n06/06/2024,SALARY,1500.00\n'
+        header, data = app_mod._split_tabular_statement(text)
+        self.assertIsNone(header)
+        self.assertEqual(len(data), 2)
+
+    def test_split_keeps_real_header(self):
+        text = 'Date,Description,Amount\n01/06/2024,Coffee,-4.80\n'
+        header, _data = app_mod._split_tabular_statement(text)
+        self.assertEqual(header, ['Date', 'Description', 'Amount'])
+
+    def test_headerless_signed_amount_with_balance(self):
+        text = (
+            '05/06/2024,PRET A MANGER,-10.50,989.50\n'
+            '06/06/2024,SALARY,1500.00,2489.50\n'
+            '07/06/2024,TESCO STORES,-22.30,2467.20\n'
+        )
+        rows, meta = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertIsNotNone(rows)
+        self.assertEqual(meta['reason'], 'headerless_inferred')
+        self.assertEqual(meta['amount_sign'], 'negative_is_outgoing')
+        d = {r['description']: (r['direction'], r['amount']) for r in rows}
+        self.assertEqual(d['PRET A MANGER'], ('outgoing', 10.5))
+        self.assertEqual(d['SALARY'], ('incoming', 1500.0))
+        self.assertEqual(d['TESCO STORES'], ('outgoing', 22.3))
+
+    def test_headerless_money_pair_order_from_balance(self):
+        text = (
+            '05/06/2024,PRET A MANGER,10.50,,990.00\n'
+            '06/06/2024,SALARY,,1500.00,2490.00\n'
+            '07/06/2024,TESCO STORES,22.30,,2467.70\n'
+        )
+        rows, meta = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertIsNotNone(rows)
+        self.assertEqual(meta['reason'], 'headerless_inferred')
+        d = {r['description']: r['direction'] for r in rows}
+        self.assertEqual(d['PRET A MANGER'], 'outgoing')
+        self.assertEqual(d['SALARY'], 'incoming')
+        self.assertEqual(d['TESCO STORES'], 'outgoing')
+
+    def test_hsbc_preamble_header_still_detected(self):
+        text = (
+            'Account name,My Current Account\n'
+            'Sort code,40-00-00\n'
+            'Date,Description,Paid Out,Paid In,Balance\n'
+            '05/06/2024,PRET A MANGER,10.50,,\n'
+            '06/06/2024,SALARY,,1500.00,\n'
+        )
+        rows, meta = app_mod._try_parse_tabular_spending_transactions(text, allow_llm=False)
+        self.assertEqual(meta['header_map_source'], 'alias')
+        self.assertEqual(len(rows), 2)
+
+    def test_headerless_inference_never_calls_llm(self):
+        text = '05/06/2024,PRET A MANGER,-10.50\n06/06/2024,SALARY,1500.00\n'
+        with mock.patch.object(app_mod, '_llm_map_tabular_headers') as header_llm:
+            events = list(app_mod.iter_spending_transaction_extraction(text))
+            header_llm.assert_not_called()
+        result = next(e for e in events if e.get('type') == 'result')
+        self.assertEqual(result['meta']['reason'], 'headerless_inferred')
+
+
+class TestUploadRestrictions(unittest.TestCase):
+    def test_supported_filename(self):
+        for n in ('a.csv', 'A.CSV', 'x.xlsx', 'y.xlsm'):
+            self.assertTrue(app_mod._is_supported_statement_filename(n), n)
+        for n in ('a.pdf', 'a.txt', 'a.xls', 'a.doc'):
+            self.assertFalse(app_mod._is_supported_statement_filename(n), n)
+
+    def test_iter_prepare_rejects_pdf(self):
+        events = list(app_mod._iter_prepare_spending_raw('statement.pdf', b'%PDF-1.4 junk'))
+        self.assertEqual(events[-1]['type'], 'error')
+        self.assertIn('CSV', events[-1]['message'])
+
+    def test_iter_prepare_rejects_txt(self):
+        events = list(app_mod._iter_prepare_spending_raw('statement.txt', b'01 Jun Coffee 4.80'))
+        self.assertEqual(events[-1]['type'], 'error')
+
+    def test_iter_prepare_accepts_csv(self):
+        raw = b'Date,Description,Amount\n01/06/2024,Coffee,-4.80\n'
+        events = list(app_mod._iter_prepare_spending_raw('s.csv', raw))
+        steps = [e.get('step') for e in events if e.get('type') == 'progress']
+        self.assertIn('decode_csv', steps)
+        self.assertEqual(events[-1]['type'], 'prep_complete')
+
+    def test_no_transaction_sending_llm_functions_remain(self):
+        for name in (
+            '_iter_extract_spending_transactions_llm',
+            '_extract_spending_transactions_llm',
+            '_extract_spending_transactions_llm_chunk',
+            '_llm_spending_layout_skip_regexes',
+            '_extract_transactions_llm',
+            '_extract_baseline_statement_llm',
+        ):
+            self.assertFalse(hasattr(app_mod, name), name)
 
 
 class TestStatementXlsxUiAccept(unittest.TestCase):
