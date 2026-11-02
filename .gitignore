@@ -1,5 +1,11 @@
 data.json
+data.json.lock
+data.json.bak-*
+data.json.corrupt-*
 data/*.json
+data/*.json.lock
+data/*.json.bak-*
+data/*.json.corrupt-*
 data/scheduler.lock
 flask_session/
 .venv/

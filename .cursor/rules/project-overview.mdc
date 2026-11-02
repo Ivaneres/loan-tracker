@@ -14,6 +14,7 @@ Flask monolith named **Tally** (daily budget, spending, statement reconcile, loa
 - `static/` — vanilla JS/CSS (`daily_budget.js`, `spending.js`, `spending_search.js`, `script.js`, `style.css`)
 - `tests/` — `unittest` modules (not pytest-first; run with `python -m unittest …`)
 - `data.json` — local persistence (gitignored). Production uses `DATA_PATH=data/ledger.json` under `/var/www/tally/backend/data/` (also gitignored; deploys must not delete it). `data/.gitkeep` is the only tracked file in that directory.
+- Ledger writes are **atomic** (temp + `os.replace`) and **flocked**; a corrupted ledger is quarantined + raises rather than being reset; a timestamped `.bak-YYYYMMDDTHHMMSSZ` backup is written once per UTC day. See `@.cursor/rules/production-deployment.mdc` → *Ledger durability*.
 - `.cursor/rules/` — agent context; keep learnings here for future agents
 
 ## Stack / runtime

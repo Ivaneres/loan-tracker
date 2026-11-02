@@ -15,6 +15,21 @@ The product name is **Tally**. The git repo and local folder stay `loan-tracker`
 - Service: `tally-api.service` (user `nginx`, `127.0.0.1:5053`, gunicorn `--timeout 120`). Port 5052 is Hinder; do not reuse it.
 - Ledger: `/var/www/tally/backend/data/ledger.json` via `DATA_PATH` in `backend/.env`. Git and `deploy-generic.sh` both ignore `data/*.json`. Do not delete or overwrite it on deploy.
 - Config: `deploy.conf` in the repo, applied by `~/scripts/deploy-generic.sh`
+- `WORKERS=1`. The ledger is a single JSON file that every request reads and rewrites; one worker serialises requests so concurrent requests cannot lose each other's writes.
+
+## Ledger durability (do not regress)
+
+`app.py` treats the ledger as precious. Keep these invariants when touching `load_data`/`save_data`:
+
+- **Atomic writes only.** `save_data` goes through `_write_json_atomic` (temp file in the same dir + `fsync` + `os.replace`). A reader must never be able to observe a truncated/partial file. Never reintroduce `open(DATA_PATH, 'w')` + `json.dump`.
+- **Writers are serialised.** `save_data` runs under `ledger_lock()` (process `RLock` + `fcntl.flock` on `<DATA_PATH>.lock`). Held only for the write, never around slow work (model calls, statement parsing).
+- **Never wipe on read failure.** `load_data` on a missing file creates the empty default (first run). On an existing but empty/unparseable file it quarantines to `<DATA_PATH>.corrupt-<ts>` and raises `LedgerUnreadableError` — it must NOT overwrite the ledger with defaults.
+- **Daily backups.** `_maybe_backup_ledger` snapshots the pre-write state once per UTC day to `<DATA_PATH>.bak-YYYYMMDDTHHMMSSZ`, rotating to `LEDGER_BACKUP_KEEP` (default 7) newest. Files live next to the ledger (gitignored). Restore by copying a `.bak-*` back over `ledger.json`.
+- **Symptom to recognise:** ledger reset to a tiny `{"loans":{}, "users":{...}}` default while `/api/spending/months` returns `[]`. Check `journalctl -u tally-api`, `data/*.corrupt-*`, and `data/*.bak-*` before anything else.
+
+### Incident: 2026-10-30 → 2026-11-02 total data loss
+
+Two concurrent requests (`POST /api/spending/daily/entry` + `GET /api/spending/daily/status` at 19:41:42 UTC on Oct 30) did an unlocked, non-atomic read‑modify‑write of `ledger.json`. A partial read left the file unparseable; the next read (Nov 2 08:55) hit the old destructive reset and replaced it with an empty default (756 bytes). Nobody read the file in between, so it went unnoticed. Recovered from the pre-cutover copy `/root/loan-tracker/data.json` (Oct 13, 803 KB; ivan + 3 loans + 760 tx). Data created Oct 13–30 is otherwise lost. The hardening above is the permanent fix.
 
 Ongoing deploy (does not rewrite nginx or certificates):
 
