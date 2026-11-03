@@ -28,6 +28,16 @@ The product name is **Tally**. The git repo and local folder stay `loan-tracker`
 - **Backups live outside the app dir in prod.** `backend/.env` sets `LEDGER_BACKUP_DIR=/var/www/tally-backups` (owned `nginx:nginx`, mode `0770`). This matters: `deploy-generic.sh` runs `rsync --delete` over `/var/www/tally/backend`, and its excludes only protect `data/*.json` — a `.bak-*`/`.corrupt-*` file inside `data/` would be deleted on the next deploy. Never point `LEDGER_BACKUP_DIR` back inside the rsynced tree.
 - **Symptom to recognise:** ledger reset to a tiny `{"loans":{}, "users":{...}}` default while `/api/spending/months` returns `[]`. Check `journalctl -u tally-api`, `data/*.corrupt-*`, and `data/*.bak-*` before anything else.
 
+### pip 26 install blocker (deploy quirk)
+
+pip 26.x arms an import blocker while installing; setuptools 57.4.0's lazy `distutils.command.build` import trips it and `pip install` aborts with `Blocked import of 'distutils.command.build' after pip install started`. The venv carries a startup hook so the module is preloaded before installation begins:
+
+```
+venv/lib/python3.10/site-packages/zzz-preimport-distutils.pth   # contains: import distutils.command.build
+```
+
+If the venv is ever deleted/rebuilt, `deploy-generic.sh` will fail at `Setting up Python venv...` until this `.pth` is recreated. The name starts with `zzz` so it runs after `distutils-precedence.pth`. `deploy-generic.sh`'s `chmod -R` leaves the file `750 root:nginx`; that is fine (gunicorn runs as `nginx`).
+
 ### Incident: 2026-10-30 → 2026-11-02 total data loss
 
 Two concurrent requests (`POST /api/spending/daily/entry` + `GET /api/spending/daily/status` at 19:41:42 UTC on Oct 30) did an unlocked, non-atomic read‑modify‑write of `ledger.json`. A partial read left the file unparseable; the next read (Nov 2 08:55) hit the old destructive reset and replaced it with an empty default (756 bytes). Nobody read the file in between, so it went unnoticed. Recovered from the pre-cutover copy `/root/loan-tracker/data.json` (Oct 13, 803 KB; ivan + 3 loans + 760 tx). Data created Oct 13–30 is otherwise lost. The hardening above is the permanent fix.
