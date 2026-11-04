@@ -88,7 +88,7 @@ How to capture and embed:
 4. Do **not** use Cursor artifact `/tmp/cursor/artifacts/…` paths or markdown links to `cursor.com/agents/…/artifacts` — those become click-through links, not inline images.
 5. Prefer tight crops of the changed control for each step, plus one full mobile/desktop frame when helpful.
 
-Primary nav (`app_nav.html`): Home `/` · Daily `/spending/daily` · Monthly `/spending` · Search `/spending/search` · Loans `/loans`
+Primary nav: `@.cursor/rules/navigation-chrome.mdc` (desktop rail + mobile tab bar; search is a top-bar icon, not a tab).
 
 Global transaction search (all months): `@.cursor/rules/transaction-search.mdc`.
 

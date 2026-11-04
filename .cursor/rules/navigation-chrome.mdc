@@ -1,0 +1,44 @@
+---
+description: Primary navigation chrome, the global quick-log modal, and the mobile Monthly layout
+globs: templates/partials/app_rail.html,templates/partials/app_tabbar.html,templates/partials/app_header.html,templates/partials/spend_modal.html,static/spend_modal.js,static/style.css,templates/spending.html,static/spending.js,templates/daily_budget.html
+alwaysApply: false
+---
+
+# Navigation chrome (Concept 4)
+
+Top pill bar is gone. Chrome is split by breakpoint; the split is **1024px**.
+
+| File | Role |
+|---|---|
+| `@templates/partials/app_rail.html` | desktop left rail (fixed, left) |
+| `@templates/partials/app_tabbar.html` | mobile bottom tab bar (fixed, bottom) |
+| `@templates/partials/app_header.html` | rail + top bar + tab bar + spend modal + `spend_modal.js` |
+| `@templates/partials/spend_modal.html` | floating “+” and the log-spend sheet |
+
+- Rail groups: **Home** · *Spending* (Daily, Monthly, Reconcile) · *Accounts* (Loans). Rail footer holds "Signed in as … / Log out".
+- Top bar shows brand (mobile only), the **search icon** (`/spending/search`), session and logout. Search is deliberately a top-bar icon, **not** a nav tab.
+- `active` values: `home | daily | spending | reconcile | loans | search`. Search lives in the top bar, so it has no rail/tab entry.
+- Body padding offsets live in `@static/style.css`: `padding-left: var(--rail-w)` at ≥1024px; on mobile `padding-bottom: calc(8.6rem + env(safe-area-inset-bottom))` — enough for the tab bar **and** the floating “+”, so the “+” cannot cover the last row (e.g. a spend's delete button).
+- **Loan detail** (`@templates/index.html`) builds its own header, so it includes the rail, the search icon and the tab bar directly — it does not use `app_header.html`. Add new chrome to it too.
+- Tests asserting nav markup: `@tests/test_transaction_search.py` (`app-icon-btn is-active` marks Search), `@tests/test_reconcile_session.py` (`app-tabbar`), `@tests/test_spend_modal.py`.
+
+# Global quick-log modal
+
+Logging a manual spend is no longer tied to the Daily page.
+
+- The modal reuses the Daily form's **exact ids**: `#db-entry-form`, `#db-amount`, `#db-title`, `#db-title-clear`, `#db-title-suggestions`, `#db-entry-date`, `#db-entry-date-value`, `#db-cat-grid`, `#db-category`, `#db-date-chips`, `#db-add-btn`. Keep them in sync — `daily_budget.js` still binds them.
+- Ownership: on `body.db-page` **`daily_budget.js` owns the form**; elsewhere `@static/spend_modal.js` binds it. `spend_modal.js` decides via `document.body.classList.contains('db-page')` so the form is never double-bound.
+- Categories are injected globally by the `inject_asset_helpers` context processor as **`spend_modal_categories`** (= `DAILY_ENTRY_CATEGORIES`), so the modal renders on any page.
+- `daily_budget.js` `postEntry()` dispatches **`tally:spend-logged`**; `spend_modal.js` closes the sheet on that event. On non-Daily pages `spend_modal.js` also refreshes title suggestions from `/api/spending/daily/status`.
+- Endpoint/payload unchanged: `POST /api/spending/daily/entry` (`amount`, `title`, `category`, `date`).
+- The inline `#db-entry-form` was removed from the Daily Today panel; the `.db-today-compose` wrapper now holds only the Usual section.
+
+# Mobile Monthly — stats-first
+
+`@templates/spending.html` is one template for both breakpoints; the mobile summary is **CSS-only**, so no markup is duplicated.
+
+- Sections are tagged `spending-tier-primary` (the summary) and `spending-tier-more` (everything else).
+- Inside `#insight-content`, mobile uses a flex column with `order`: `.home-spotlight` 1 · `.spending-tier-primary` 2 · `.spending-more-controls` 3 · `.spending-tier-more` 4.
+- The largest-outgoing / category grid carries `spending-split` (`display: contents` on mobile) so only the **Outgoing by category** half stays in the summary.
+- Closed state hides `.spending-tier-more` (`body:not(.spending-more-open)`); `#spending-more-toggle` (`@static/spending.js`) flips `body.spending-more-open` and swaps its label to "Back to summary". The month actions (re-run categorisation / recompute / delete month) are `spending-tier-more` too.
+- The toggle is hidden ≥1024px; **desktop is unchanged**. When adding a section to Monthly, decide which tier it belongs to.
