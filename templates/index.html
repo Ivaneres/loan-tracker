@@ -10,6 +10,7 @@
 </head>
 <body class="app-page">
     <div class="app-shell loan-detail-page">
+        {% with active='loans' %}{% include 'partials/app_rail.html' %}{% endwith %}
         <header class="app-header loan-detail-header">
             <div class="app-header-top">
                 <div class="loan-detail-title">
@@ -36,6 +37,9 @@
                     </div>
                 </div>
                 <div class="app-header-right loan-detail-actions">
+                    <a href="/spending/search" class="app-icon-btn" aria-label="Search transactions" title="Search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+                    </a>
                     <span class="app-session">Signed in as {{ username }}</span>
                     <button id="deleteLoanBtn" class="app-btn app-btn--danger" type="button">
                         {% if loan_deleted %}Recover Loan{% else %}Delete Loan{% endif %}
@@ -43,8 +47,8 @@
                     <a href="/logout" class="app-btn app-btn--muted">Logout</a>
                 </div>
             </div>
-            {% with active='loans' %}{% include 'partials/app_nav.html' %}{% endwith %}
         </header>
+        {% with active='loans' %}{% include 'partials/app_tabbar.html' %}{% endwith %}
         <section class="loan-summary mb-6" aria-label="Loan summary">
             <div class="money-hero loan-money-hero">
                 <p class="money-hero-kicker">Current balance</p>

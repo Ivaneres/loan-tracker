@@ -191,7 +191,7 @@ class TestTransactionSearchPage(unittest.TestCase):
         self.assertIn('spending_search.js', html)
         self.assertIn('Search transactions', html)
         self.assertIn('href="/spending/search"', html)
-        self.assertIn('app-nav-active', html)
+        self.assertIn('app-icon-btn is-active', html)
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')

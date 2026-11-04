@@ -810,7 +810,9 @@ class TestReconcileUiPresence(unittest.TestCase):
             self.assertIn('Adjust date range', rec)
 
             nav_daily = self.client.get('/spending/daily')
-            self.assertIn('>Reconcile</a>', nav_daily.get_data(as_text=True))
+            nav_daily_html = nav_daily.get_data(as_text=True)
+            self.assertIn('app-tabbar', nav_daily_html)
+            self.assertIn('/spending/reconcile', nav_daily_html)
 
     def test_reconcile_js_cockpit_present(self):
         js = (Path(app_mod.app.root_path) / 'static' / 'reconcile.js').read_text(encoding='utf-8')
