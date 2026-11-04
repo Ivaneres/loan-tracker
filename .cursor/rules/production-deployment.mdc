@@ -48,6 +48,22 @@ Ongoing deploy (does not rewrite nginx or certificates):
 ~/scripts/deploy-generic.sh /home/ivan/finance_tracker --redeploy --yes
 ```
 
+**Deploy from a clean tree, not the working tree.** The script rsyncs `PROJECT_DIR`
+verbatim, so if that directory has uncommitted work (or is on a different branch
+than the one to ship), the deploy ships it. `/home/ivan/finance_tracker` is often
+dirty. Export exactly the commit to ship and point the script at that:
+
+```sh
+rm -rf /tmp/opencode/tally-deploy-src && mkdir -p /tmp/opencode/tally-deploy-src
+git archive HEAD | tar -x -C /tmp/opencode/tally-deploy-src
+~/scripts/deploy-generic.sh /tmp/opencode/tally-deploy-src --redeploy --yes
+```
+
+`git archive` includes tracked `tmp/` helpers but omits `.git`, `.env` and
+`data/*.json` — fine. Before deploying, snapshot the live ledger outside the
+rsync tree (`cp -a data/ledger.json /var/www/tally-backups/ledger.pre-deploy-<ts>.json`)
+and re-check counts after.
+
 A full install (`--yes` without `--redeploy`) rewrites nginx and re-runs certbot. Use that only for a first install or when the nginx site itself must change. `--redeploy` still rewrites the systemd unit from `deploy.conf`.
 
 After a deploy, check:
@@ -55,6 +71,8 @@ After a deploy, check:
 ```sh
 ssh -o BatchMode=yes -o ConnectTimeout=15 root@195.201.98.136 'systemctl is-active tally-api && curl -fsS -o /dev/null -w "%{http_code}\n" https://tally.ereshchenko.com/login'
 ```
+
+`write_backend_env` preserves any `.env` keys it does not manage (`DATA_PATH`, `LEDGER_BACKUP_DIR`, `FINANCE_TRACKER_USERS`, `OPENAI_API_KEY`, `DAILY_CAPTURE_TOKENS`, …), so app secrets survive redeploys. `fix_permissions` re-asserts `data/` ownership (`nginx:nginx`, group-writable) and `.env` (640 root:nginx) after its `chmod -R`, so those do not need manual repair.
 
 The old public gunicorn on port 8000 is retired. nginx on `:8000` redirects to the HTTPS host. Leave `/root/loan-tracker` on disk as the rollback copy.
 
