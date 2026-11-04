@@ -95,6 +95,8 @@
   let usualBusy = false;
   let usualUndoId = '';
   let usualUndoTimer = null;
+  /** Capture chip the entry form is currently pre-filled from (see db-captures). */
+  let activeCaptureId = '';
 
   const BillDiff = window.DbBillDiff || {};
   const billAmount = BillDiff.billAmount || ((b) => Number(b && b.amount) || 0);
@@ -415,14 +417,16 @@
 
   async function postEntry(payload) {
     const spendDate = clampToToday(payload.date || entryDate || localISODate());
+    const body = {
+      amount: payload.amount,
+      title: payload.title,
+      category: payload.category || 'other',
+      date: spendDate,
+    };
+    if (payload.capture_id) body.capture_id = payload.capture_id;
     const data = await api('/api/spending/daily/entry', {
       method: 'POST',
-      body: JSON.stringify({
-        amount: payload.amount,
-        title: payload.title,
-        category: payload.category || 'other',
-        date: spendDate,
-      }),
+      body: JSON.stringify(body),
     });
     entryDate = spendDate;
     viewDate = (data.status && data.status.as_of) || spendDate;
@@ -430,6 +434,98 @@
     await refreshGoals(goalsAsOf || localISODate());
     syncDateControls();
     return data;
+  }
+
+  // --- Phone captures (Google Wallet / bank notifications) -----------------
+
+  function captureLabel(source) {
+    if (source === 'bank') return 'bank';
+    if (source === 'android') return 'phone';
+    if (source === 'other') return 'capture';
+    return 'wallet';
+  }
+
+  function renderCaptures() {
+    const section = $('db-captures');
+    const list = $('db-captures-list');
+    if (!section || !list) return;
+    const caps = (state && state.pending_captures) || [];
+    const count = $('db-captures-count');
+    list.innerHTML = '';
+    if (!caps.length) {
+      if (activeCaptureId) activeCaptureId = '';
+      setUsualVisible(section, false);
+      return;
+    }
+    setUsualVisible(section, true);
+    if (count) count.textContent = caps.length === 1 ? '1 new' : caps.length + ' new';
+    caps.forEach((cap) => {
+      const card = document.createElement('div');
+      card.className = 'db-capture-card';
+      if (String(cap.id) === String(activeCaptureId)) {
+        card.classList.add('db-capture-card--active');
+      }
+      const fill = document.createElement('button');
+      fill.type = 'button';
+      fill.className = 'db-capture-main';
+      fill.dataset.captureFill = cap.id;
+      fill.setAttribute('aria-label', 'Fill form with ' + (cap.title || 'capture') + ' ' + money(cap.amount));
+      const title = document.createElement('strong');
+      title.textContent = cap.title || 'Spend';
+      const meta = document.createElement('small');
+      const when = dateOffsetLabel(cap.date || localISODate());
+      const tail = cap.date && cap.date !== localISODate() ? ' · ' + when : '';
+      meta.textContent = money(cap.amount) + ' · ' + captureLabel(cap.source) + tail;
+      fill.appendChild(title);
+      fill.appendChild(meta);
+      const ignore = document.createElement('button');
+      ignore.type = 'button';
+      ignore.className = 'db-capture-x';
+      ignore.dataset.captureDismiss = cap.id;
+      ignore.setAttribute('aria-label', 'Ignore ' + (cap.title || 'capture'));
+      ignore.textContent = '×';
+      card.appendChild(fill);
+      card.appendChild(ignore);
+      list.appendChild(card);
+    });
+  }
+
+  function fillFromCapture(id) {
+    const cap = ((state && state.pending_captures) || []).find(
+      (c) => String(c.id) === String(id)
+    );
+    if (!cap) return;
+    activeCaptureId = String(cap.id);
+    const amountInput = $('db-amount');
+    if (amountInput) amountInput.value = Number(cap.amount).toFixed(2);
+    const titleInput = $('db-title');
+    if (titleInput) {
+      titleInput.value = String(cap.title || '');
+      titleInput.dispatchEvent(new Event('input'));
+    }
+    entryDate = clampToToday(cap.date || localISODate());
+    syncDateControls();
+    renderCaptures();
+    if (amountInput) amountInput.focus();
+    flash('Tap Add spend to log it', 'ok');
+  }
+
+  async function dismissCapture(id) {
+    try {
+      const data = await api(
+        '/api/spending/daily/capture/' + encodeURIComponent(id) + '/dismiss',
+        { method: 'POST' }
+      );
+      if (String(id) === String(activeCaptureId)) activeCaptureId = '';
+      if (data && data.status) {
+        applyTodayStatus(data.status);
+      } else {
+        await refresh(viewDate);
+      }
+      flash('Ignored', 'ok');
+    } catch (e) {
+      flash(e.message, 'error');
+    }
   }
 
   async function logUsual(pin) {
@@ -730,6 +826,7 @@
     renderDebtNote(status);
     renderTitleSuggestions();
     renderUsual();
+    renderCaptures();
 
     const list = $('db-today-list');
     const empty = $('db-today-empty');
@@ -1881,6 +1978,19 @@
         renderUsual();
       });
     }
+    const capturesList = $('db-captures-list');
+    if (capturesList) {
+      capturesList.addEventListener('click', (ev) => {
+        const dismiss = ev.target.closest('[data-capture-dismiss]');
+        if (dismiss) {
+          dismissCapture(dismiss.dataset.captureDismiss);
+          return;
+        }
+        const fill = ev.target.closest('[data-capture-fill]');
+        if (fill) fillFromCapture(fill.dataset.captureFill);
+      });
+    }
+
     const usualChips = $('db-usual-chips');
     if (usualChips) {
       usualChips.addEventListener('click', (ev) => {
@@ -2111,9 +2221,10 @@
           title,
           category: $('db-category').value || 'other',
           date: spendDate,
+          capture_id: activeCaptureId || undefined,
         });
-        $('db-amount').value = '';
-        lastAutoTitle = categoryTitle($('db-category').value);
+        activeCaptureId = '';
+        $('db-amount').value = '';        lastAutoTitle = categoryTitle($('db-category').value);
         setTitle(lastAutoTitle);
         $('db-amount').focus();
         const when = dateOffsetLabel(spendDate);

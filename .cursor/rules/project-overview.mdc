@@ -21,6 +21,7 @@ Flask monolith named **Tally** (daily budget, spending, statement reconcile, loa
 
 - Python Flask app: `python app.py` or `./start.sh` (sources `.env` if present)
 - Auth users from `FINANCE_TRACKER_USERS` (`user:pass,user2:pass2`); if unset, local defaults `admin`/`admin123` and `user`/`user123`
+- `DAILY_CAPTURE_TOKENS` (`user:token,…`) enables the bearer-token phone-capture ingest (`POST /api/spending/daily/capture`); unset ⇒ 401. See `@docs/daily-capture.md`.
 - Session login required for app routes; APIs return JSON
 - Static assets may be cache-busted via helpers in `app.py` — hard-refresh if UI looks stale after deploy
 

@@ -207,5 +207,48 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
         self.assertNotIn('id="db-underspend"', html)
 
 
+class TestDailyBudgetCapturesUi(unittest.TestCase):
+    def setUp(self):
+        self.client = app_mod.app.test_client()
+        self.data = {'users': {'ivan': {'spending': {}}}, 'loans': {}}
+
+    def _login(self):
+        with self.client.session_transaction() as sess:
+            sess['username'] = 'ivan'
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_captures_section_renders(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        html = self.client.get('/spending/daily').get_data(as_text=True)
+        self.assertIn('id="db-captures"', html)
+        self.assertIn('id="db-captures-list"', html)
+        self.assertIn('id="db-captures-count"', html)
+        self.assertIn('Captured from your phone', html)
+
+        js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        for needle in (
+            'renderCaptures',
+            'fillFromCapture',
+            'dismissCapture',
+            'data-capture-fill',
+            'data-capture-dismiss',
+            'pending_captures',
+            '/api/spending/daily/capture/',
+            'capture_id',
+        ):
+            self.assertIn(needle, js)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_captures_section_hidden_without_pending(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/api/spending/daily/status')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()['pending_captures'], [])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response, stream_with_context
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response, stream_with_context, g
 from functools import wraps
 from datetime import datetime, date, timedelta, timezone
 from contextlib import contextmanager
@@ -6,6 +6,7 @@ import copy
 import csv
 import fcntl
 import glob
+import hmac
 import io
 import json
 import logging
@@ -423,6 +424,85 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
+# --- Phone capture ingest (Google Wallet / bank notifications) -------------
+#
+# A phone-side automation (MacroDroid / Tasker) reads payment notifications and
+# POSTs them here with a bearer token. Tokens are configured per user via
+# DAILY_CAPTURE_TOKENS="ivan:long-random-token,user2:other-token". Captures are
+# *suggestions* only: they land as pending and never touch the ledger until the
+# user confirms them in Daily. The endpoint can create captures and nothing else.
+_DAILY_CAPTURE_RATE = 60           # max capture POSTs ...
+_DAILY_CAPTURE_RATE_WINDOW = 60.0  # ... per this many seconds, per user
+_DAILY_CAPTURE_HITS: dict[str, list[float]] = {}
+_DAILY_CAPTURE_HITS_LOCK = threading.Lock()
+
+
+def _daily_capture_tokens() -> dict:
+    """Parse DAILY_CAPTURE_TOKENS into {username: token}."""
+    tokens = {}
+    for part in (os.getenv('DAILY_CAPTURE_TOKENS', '') or '').split(','):
+        part = part.strip()
+        if not part or ':' not in part:
+            continue
+        user, _sep, token = part.partition(':')
+        user = user.strip()
+        token = token.strip()
+        if user and token:
+            tokens[user] = token
+    return tokens
+
+
+def _daily_capture_user_from_request():
+    """Resolve the presented capture token to a username, or None."""
+    supplied = ''
+    auth = request.headers.get('Authorization', '')
+    if auth.lower().startswith('bearer '):
+        supplied = auth[7:].strip()
+    if not supplied:
+        supplied = (request.headers.get('X-Capture-Token') or '').strip()
+    if not supplied:
+        return None
+    match = None
+    for user, token in _daily_capture_tokens().items():
+        if hmac.compare_digest(token, supplied):
+            match = user
+    return match
+
+
+def _daily_capture_rate_ok(username: str) -> bool:
+    now = time.monotonic()
+    with _DAILY_CAPTURE_HITS_LOCK:
+        hits = [
+            t for t in _DAILY_CAPTURE_HITS.get(username, [])
+            if now - t < _DAILY_CAPTURE_RATE_WINDOW
+        ]
+        if len(hits) >= _DAILY_CAPTURE_RATE:
+            _DAILY_CAPTURE_HITS[username] = hits
+            return False
+        hits.append(now)
+        _DAILY_CAPTURE_HITS[username] = hits
+    return True
+
+
+def capture_token_required(f):
+    """Bearer-token auth for the phone capture ingest route.
+
+    Unlike ``login_required`` this never touches the session: the phone holds a
+    long-lived token whose only power is creating pending captures for one user.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        username = _daily_capture_user_from_request()
+        if not username:
+            logger.warning('daily capture rejected: missing or invalid token')
+            return jsonify({'error': 'Unauthorized'}), 401
+        if not _daily_capture_rate_ok(username):
+            return jsonify({'error': 'Too many captures; slow down'}), 429
+        g.capture_username = username
+        return f(*args, **kwargs)
+    return decorated_function
+
 scheduler = BackgroundScheduler()
 
 # Ledger file. Local and tests keep using ./data.json. Production sets
@@ -699,6 +779,7 @@ def _ensure_user_spending(data: dict, username: str) -> tuple[dict, bool]:
         'classification_overrides': {},
         'classification_cache': {},
         'daily_budget': {},
+        'daily_captures': [],
     }
     for key, default in defaults.items():
         if key not in spending or not isinstance(spending.get(key), type(default)):
@@ -5092,6 +5173,106 @@ def _daily_budget_usual_lists(spending: dict, bucket: dict) -> tuple[list, list]
     return spends, _daily_budget_frequent_manuals(spending, exclude_keys=exclude)
 
 
+DAILY_CAPTURE_MAX = 200
+DAILY_CAPTURE_PENDING_KEEP = 50
+DAILY_CAPTURE_PENDING_LIMIT = 20
+DAILY_CAPTURE_PENDING_MAX_AGE_DAYS = 14
+DAILY_CAPTURE_SOURCES = {'wallet', 'bank', 'android', 'other'}
+
+
+def _ensure_daily_captures(spending: dict) -> list:
+    captures = spending.get('daily_captures')
+    if not isinstance(captures, list):
+        captures = []
+        spending['daily_captures'] = captures
+    return captures
+
+
+def _daily_capture_clean_title(raw) -> str:
+    return str(raw or '').strip()[:200]
+
+
+def _daily_capture_source(raw) -> str:
+    value = str(raw or '').strip().lower()
+    return value if value in DAILY_CAPTURE_SOURCES else 'wallet'
+
+
+def _daily_capture_find(captures: list, capture_id):
+    target = str(capture_id or '')
+    if not target:
+        return None
+    for cap in captures:
+        if isinstance(cap, dict) and str(cap.get('id')) == target:
+            return cap
+    return None
+
+
+def _daily_capture_dedupe_key(date_str: str, amount, title: str) -> str:
+    try:
+        amt = f'{round(float(amount), 2):.2f}'
+    except (TypeError, ValueError):
+        amt = '0.00'
+    return f'{date_str}|{amt}|{_normalize_label(title)}'
+
+
+def _daily_capture_pending_list(spending: dict, as_of: date | None = None) -> list:
+    """Newest unconfirmed captures for the Daily screen (bounded window)."""
+    today = as_of or _daily_budget_today()
+    floor = (today - timedelta(days=DAILY_CAPTURE_PENDING_MAX_AGE_DAYS)).isoformat()
+    today_key = today.isoformat()
+    out = []
+    for cap in _ensure_daily_captures(spending):
+        if not isinstance(cap, dict) or cap.get('status') != 'pending':
+            continue
+        date_key = str(cap.get('date') or '')[:10]
+        if not date_key or date_key > today_key or date_key < floor:
+            continue
+        out.append({
+            'id': cap.get('id'),
+            'date': date_key,
+            'amount': cap.get('amount'),
+            'title': cap.get('title') or '',
+            'source': cap.get('source') or 'wallet',
+            'card_last4': cap.get('card_last4') or '',
+            'captured_at': cap.get('captured_at') or cap.get('created_at') or '',
+        })
+    out.sort(key=lambda c: str(c.get('captured_at') or ''), reverse=True)
+    return out[:DAILY_CAPTURE_PENDING_LIMIT]
+
+
+def _daily_capture_prune(spending: dict) -> None:
+    """Bound capture history: cap resolved rows, keep only the newest pending.
+
+    Unconfirmed captures are cheap but not free — a runaway phone automation can
+    spam them — so pending rows are capped too. Newest wins; stale suggestions
+    are useless anyway.
+    """
+    captures = _ensure_daily_captures(spending)
+    pending = [c for c in captures if isinstance(c, dict) and c.get('status') == 'pending']
+    resolved = [c for c in captures if not (isinstance(c, dict) and c.get('status') == 'pending')]
+    if len(pending) <= DAILY_CAPTURE_PENDING_KEEP and len(resolved) <= DAILY_CAPTURE_MAX:
+        return
+    pending.sort(key=lambda c: str(c.get('created_at') or ''), reverse=True)
+    resolved.sort(key=lambda c: str(c.get('created_at') or ''), reverse=True)
+    pending = pending[:DAILY_CAPTURE_PENDING_KEEP]
+    keep = pending + resolved[:max(0, DAILY_CAPTURE_MAX - len(pending))]
+    spending['daily_captures'] = keep
+
+
+def _daily_capture_matching_manual(spending: dict, date_str: str, amount):
+    """Existing manual spend that already represents this capture (±3 days, exact)."""
+    for t in spending.get('transactions') or []:
+        if not isinstance(t, dict):
+            continue
+        if str(t.get('source') or '') != 'manual' or t.get('direction') != 'outgoing':
+            continue
+        if not _manual_match_amounts_close(t.get('amount'), amount):
+            continue
+        if _manual_match_dates_close(t.get('date'), date_str):
+            return t
+    return None
+
+
 def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
     bucket, _ = _ensure_daily_budget(spending)
     plan = bucket.get('plan') or {}
@@ -5251,6 +5432,7 @@ def _daily_budget_status(spending: dict, as_of: date | None = None) -> dict:
         'common_titles_by_category': _daily_budget_common_titles(spending, limit=3),
         'usual_spends': usual_spends,
         'usual_suggestions': usual_suggestions,
+        'pending_captures': _daily_capture_pending_list(spending, today),
     }
 
 
@@ -11567,6 +11749,32 @@ def spending_daily_entry_create():
 
     d_str = d.strftime('%Y-%m-%d')
     month_key = d.strftime('%Y-%m')
+
+    # Optional: this spend confirms a phone capture (see _daily_capture_*).
+    # If a manual entry for the same amount already exists nearby, link the
+    # capture to it instead of double-counting.
+    capture_id = str(payload.get('capture_id') or '').strip()
+    capture = None
+    if capture_id:
+        capture = _daily_capture_find(_ensure_daily_captures(spending), capture_id)
+        if capture is not None and capture.get('status') != 'pending':
+            capture = None
+
+    if capture is not None:
+        existing = _daily_capture_matching_manual(spending, d_str, amount)
+        if existing is not None:
+            capture['status'] = 'accepted'
+            capture['transaction_id'] = existing.get('id')
+            capture['updated_at'] = datetime.now(timezone.utc).isoformat()
+            save_data(data)
+            status = _daily_budget_status(spending, as_of=d)
+            return jsonify({
+                'ok': True,
+                'transaction': existing,
+                'linked_existing': True,
+                'status': status,
+            })
+
     tx_id = str(uuid.uuid4())
     base_fp = _spending_fingerprint(month_key, d_str, amount, 'outgoing', title)
     fp = f'{base_fp}|manual|{tx_id}'
@@ -11587,11 +11795,115 @@ def spending_daily_entry_create():
         'created_at': now_iso,
         'fingerprint': fp,
     }
+    if capture is not None:
+        tx['capture_id'] = capture.get('id')
     spending.setdefault('transactions', []).append(tx)
+    if capture is not None:
+        capture['status'] = 'accepted'
+        capture['transaction_id'] = tx_id
+        capture['updated_at'] = now_iso
     _recompute_monthly_insights(spending, {month_key})
     save_data(data)
     status = _daily_budget_status(spending, as_of=d)
     return jsonify({'ok': True, 'transaction': tx, 'status': status})
+
+
+@app.route('/api/spending/daily/capture', methods=['POST'])
+@capture_token_required
+def spending_daily_capture_create():
+    """Phone ingest: record a payment notification as a *pending* suggestion.
+
+    Never writes to the ledger. Auth is the DAILY_CAPTURE_TOKENS bearer token,
+    not the session cookie, so a phone automation can reach it.
+    """
+    payload = request.get_json(silent=True) or {}
+    try:
+        amount = float(payload.get('amount'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Valid amount is required'}), 400
+    if amount <= 0:
+        return jsonify({'error': 'Amount must be positive'}), 400
+    amount = round(amount, 2)
+    title = _daily_capture_clean_title(
+        payload.get('title') or payload.get('merchant') or payload.get('description')
+    )
+    if not title:
+        return jsonify({'error': 'Title is required'}), 400
+
+    today = _daily_budget_today()
+    raw_date = str(payload.get('date') or '').strip()
+    d = _parse_iso_date(raw_date) if raw_date else today
+    if d is None:
+        return jsonify({'error': 'Invalid date'}), 400
+    if d > today:
+        # Phone clock/timezone skew — never file a capture in the future.
+        d = today
+    d_str = d.strftime('%Y-%m-%d')
+
+    capture_id = str(payload.get('capture_id') or '').strip()[:100]
+    if not capture_id:
+        capture_id = str(uuid.uuid4())
+
+    username = g.capture_username
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, username)
+    captures = _ensure_daily_captures(spending)
+
+    existing = _daily_capture_find(captures, capture_id)
+    if existing is None:
+        key = _daily_capture_dedupe_key(d_str, amount, title)
+        for cap in captures:
+            if cap.get('status') == 'pending' and cap.get('dedupe_key') == key:
+                existing = cap
+                break
+    if existing is not None:
+        if changed:
+            save_data(data)
+        return jsonify({'ok': True, 'duplicate': True, 'capture': existing})
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    capture = {
+        'id': capture_id,
+        'date': d_str,
+        'amount': amount,
+        'title': title,
+        'merchant_raw': str(payload.get('merchant_raw') or payload.get('raw') or '')[:500],
+        'card_last4': str(payload.get('card_last4') or '').strip()[:4],
+        'device': str(payload.get('device') or '').strip()[:60],
+        'source': _daily_capture_source(payload.get('source')),
+        'captured_at': str(payload.get('captured_at') or '').strip()[:40],
+        'status': 'pending',
+        'dedupe_key': _daily_capture_dedupe_key(d_str, amount, title),
+        'created_at': now_iso,
+        'updated_at': now_iso,
+        'transaction_id': None,
+    }
+    captures.append(capture)
+    _daily_capture_prune(spending)
+    save_data(data)
+    return jsonify({'ok': True, 'duplicate': False, 'capture': capture})
+
+
+@app.route('/api/spending/daily/capture/<capture_id>/dismiss', methods=['POST'])
+@login_required
+def spending_daily_capture_dismiss(capture_id):
+    """Ignore a pending capture (not a spend, already logged, or a mistake)."""
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, session['username'])
+    capture = _daily_capture_find(_ensure_daily_captures(spending), capture_id)
+    if capture is None:
+        if changed:
+            save_data(data)
+        return jsonify({'error': 'Capture not found'}), 404
+    if capture.get('status') == 'pending':
+        capture['status'] = 'dismissed'
+        capture['updated_at'] = datetime.now(timezone.utc).isoformat()
+        changed = True
+    if changed:
+        save_data(data)
+    status = _daily_budget_status(spending)
+    return jsonify({'ok': True, 'status': status})
+
 
 
 @app.route('/api/spending/daily/entry/<tx_id>', methods=['DELETE'])

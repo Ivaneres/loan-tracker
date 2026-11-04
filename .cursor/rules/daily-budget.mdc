@@ -42,9 +42,23 @@ Two independent date states in `daily_budget.js` (Goals has a third):
   - Response `status` is computed for the **entry’s date**
 - **Calendar “today”** is `_daily_budget_today()` → **Europe/London** civil date (not the host’s `date.today()` / UTC). Needed so logging “today” right after midnight BST/GMT works when production runs on UTC.
 - `DELETE /api/spending/daily/entry/<id>` — manual only; client should `refresh(viewDate)` afterward
+- `POST /api/spending/daily/entry` also accepts optional `capture_id` to confirm a phone capture (see *Phone captures* below); it links an existing manual of the same amount within ±3 days instead of double-counting
+- `POST /api/spending/daily/capture` — **bearer-token** ingest for phone notifications (`DAILY_CAPTURE_TOKENS`), creates a *pending* capture only
+- `POST /api/spending/daily/capture/<id>/dismiss` — ignore a pending capture (session auth)
 - `GET`/`PUT /api/spending/daily/plan` — plan fields including `pay_day`, `tracking_from`, `daily_mode`, `bill_items`
 
 Manual txs: `source: "manual"`, discretionary outgoing, counted in daily spend when category isn’t a bill/ignored category.
+
+## Phone captures (Wallet / bank notifications)
+
+`DAILY_CAPTURE_TOKENS="user:token,user2:token2"` (env, like `FINANCE_TRACKER_USERS`) enables an Android automation (MacroDroid/Tasker) to POST payment notifications to `POST /api/spending/daily/capture`. See `@docs/daily-capture.md` for the full recipe.
+
+- Auth is a **bearer token, not the session** (`@app.py` `capture_token_required`); rate-limited 60/min/user; unset env ⇒ 401 for all.
+- Captures live in `spending.daily_captures` (`_ensure_daily_captures`); status is `pending|accepted|dismissed`. **Never** written to `transactions` without a user confirm.
+- Status payload exposes `pending_captures` (`_daily_capture_pending_list`: pending only, ≤14 days old, ≤20 rows, newest first).
+- Idempotent on `capture_id`; also collapses a pending row with the same date+amount+title (`_daily_capture_dedupe_key`). Future dates clamp to today. `_daily_capture_prune` caps resolved history (`DAILY_CAPTURE_MAX`) and pending rows (`DAILY_CAPTURE_PENDING_KEEP`).
+- UI: `#db-captures` panel above the entry form (`@templates/daily_budget.html`); JS `renderCaptures` / `fillFromCapture` / `dismissCapture` in `@static/daily_budget.js`. Tap fills amount/title/entry date and sets `activeCaptureId`; the entry POST sends `capture_id`. Styles: `.db-capture*` in `@static/style.css`.
+- Tests: `@tests/test_daily_capture.py`.
 
 ## How past spends affect today’s limit
 
