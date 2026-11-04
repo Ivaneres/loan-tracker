@@ -228,21 +228,6 @@
     return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
   }
 
-  function updateAddButtonLabel() {
-    const btn = $('db-add-btn');
-    if (!btn) return;
-    const today = localISODate();
-    if (entryDate === today) {
-      btn.textContent = 'Add spend';
-    } else if (entryDate === addDaysISO(today, -1)) {
-      btn.textContent = 'Add for yesterday';
-    } else if (entryDate === addDaysISO(today, -2)) {
-      btn.textContent = 'Add for 2 days ago';
-    } else {
-      btn.textContent = 'Add for ' + dateOffsetLabel(entryDate);
-    }
-  }
-
   function syncChipRow(rowId, selectedIso) {
     const chips = $(rowId);
     if (!chips) return;
@@ -252,20 +237,6 @@
       const chipDate = addDaysISO(today, offset);
       btn.classList.toggle('db-date-chip--selected', selectedIso === chipDate);
     });
-  }
-
-  function syncEntryDateControls() {
-    const today = localISODate();
-    syncChipRow('db-date-chips', entryDate);
-    const input = $('db-entry-date');
-    if (input) {
-      input.max = today;
-      input.value = entryDate;
-    }
-    const hidden = $('db-entry-date-value');
-    if (hidden) hidden.value = entryDate;
-    updateAddButtonLabel();
-    updateUsualWhen();
   }
 
   function updateUsualWhen() {
@@ -326,14 +297,14 @@
 
   function fillUsualCategorySelect() {
     const sel = $('db-usual-category');
-    const grid = $('db-cat-grid');
-    if (!sel || !grid || sel.options.length) return;
-    grid.querySelectorAll('.db-cat').forEach((btn) => {
-      const value = btn.dataset.category || '';
+    if (!sel || sel.options.length) return;
+    // Categories come from the page (same source as the modal's grid).
+    const cats = window.DAILY_BUDGET_CATEGORIES || [];
+    cats.forEach((value) => {
       if (!value) return;
       const opt = document.createElement('option');
       opt.value = value;
-      const label = String(btn.textContent || value).trim();
+      const label = String(value).replace(/_/g, ' ');
       opt.textContent = label.charAt(0).toUpperCase() + label.slice(1);
       sel.appendChild(opt);
     });
@@ -429,7 +400,6 @@
     applyTodayStatus(data.status);
     await refreshGoals(goalsAsOf || localISODate());
     syncDateControls();
-    document.dispatchEvent(new CustomEvent('tally:spend-logged', { detail: data }));
     return data;
   }
 
@@ -511,13 +481,8 @@
   }
 
   function syncDateControls() {
-    syncEntryDateControls();
     syncViewDateControls();
-  }
-
-  function selectEntryDate(iso) {
-    entryDate = clampToToday(iso);
-    syncEntryDateControls();
+    updateUsualWhen();
   }
 
   async function selectViewDate(iso, opts) {
@@ -678,34 +643,6 @@
     }
   }
 
-  function renderTitleSuggestions() {
-    const wrap = $('db-title-suggestions');
-    const titleInput = $('db-title');
-    if (!wrap || !titleInput) return;
-    const cat = ($('db-category') && $('db-category').value) || 'dining';
-    const byCat = (state && state.common_titles_by_category) || {};
-    const titles = Array.isArray(byCat[cat]) ? byCat[cat].slice(0, 3) : [];
-    wrap.innerHTML = '';
-    if (!titles.length) {
-      wrap.classList.add('hidden');
-      return;
-    }
-    wrap.classList.remove('hidden');
-    const current = String(titleInput.value || '').trim();
-    titles.forEach((title) => {
-      const label = String(title || '').trim();
-      if (!label) return;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'db-title-chip';
-      btn.dataset.title = label;
-      btn.textContent = label;
-      if (current === label) btn.classList.add('db-title-chip--selected');
-      wrap.appendChild(btn);
-    });
-    if (!wrap.childElementCount) wrap.classList.add('hidden');
-  }
-
   function renderToday(status) {
     const remaining = status.remaining_today;
     const limit = status.daily_limit;
@@ -729,7 +666,6 @@
 
     renderTodayOverspendPrompt(status);
     renderDebtNote(status);
-    renderTitleSuggestions();
     renderUsual();
 
     const list = $('db-today-list');
@@ -2003,74 +1939,17 @@
       if (ev.key === 'Escape') hideDayTooltip();
     });
 
-    const titleInput = $('db-title');
-    const titleClear = $('db-title-clear');
-    const titleSuggestions = $('db-title-suggestions');
-    const setTitle = (value) => {
-      titleInput.value = value;
-      titleClear.classList.toggle('hidden', !value);
-      renderTitleSuggestions();
-    };
-    const categoryTitle = (category) => {
-      const label = String(category || '').replace(/_/g, ' ');
-      return label ? label.charAt(0).toUpperCase() + label.slice(1) : '';
-    };
-    let lastAutoTitle = categoryTitle($('db-category').value);
-    titleInput.addEventListener('input', () => {
-      titleClear.classList.toggle('hidden', !titleInput.value);
-      renderTitleSuggestions();
+    // The log-spend form lives in the shared modal (static/spend_modal.js) and is
+    // owned there on every page. Daily reacts to a successful log instead.
+    document.addEventListener('tally:spend-logged', (ev) => {
+      const status = ev && ev.detail && ev.detail.status;
+      if (!status) return;
+      entryDate = clampToToday(status.as_of || localISODate());
+      applyTodayStatus(status);
+      if (!goalsState || goalsState.cycle_is_live) applyGoalsStatus(status);
+      updateUsualWhen();
+      refreshGoals(goalsAsOf || localISODate());
     });
-    titleClear.addEventListener('click', () => {
-      setTitle('');
-      lastAutoTitle = '';
-      titleInput.focus();
-    });
-    if (titleSuggestions) {
-      titleSuggestions.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('.db-title-chip');
-        if (!btn) return;
-        const picked = String(btn.dataset.title || btn.textContent || '').trim();
-        if (!picked) return;
-        setTitle(picked);
-        titleInput.focus();
-      });
-    }
-    setTitle(lastAutoTitle);
-
-    const grid = $('db-cat-grid');
-    if (grid) {
-      grid.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('.db-cat');
-        if (!btn) return;
-        grid.querySelectorAll('.db-cat').forEach((b) => b.classList.remove('db-cat--selected'));
-        btn.classList.add('db-cat--selected');
-        $('db-category').value = btn.dataset.category;
-        const nextAutoTitle = categoryTitle(btn.dataset.category);
-        const current = String(titleInput.value || '');
-        if (!current.trim() || current === lastAutoTitle) {
-          setTitle(nextAutoTitle);
-        } else {
-          renderTitleSuggestions();
-        }
-        lastAutoTitle = nextAutoTitle;
-      });
-    }
-
-    const dateChips = $('db-date-chips');
-    if (dateChips) {
-      dateChips.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('.db-date-chip');
-        if (!btn) return;
-        const offset = Number(btn.dataset.offset);
-        selectEntryDate(addDaysISO(localISODate(), offset));
-      });
-    }
-    const dateInput = $('db-entry-date');
-    if (dateInput) {
-      dateInput.addEventListener('change', () => {
-        selectEntryDate(dateInput.value || localISODate());
-      });
-    }
 
     const viewChips = $('db-view-date-chips');
     if (viewChips) {
@@ -2087,45 +1966,6 @@
         selectViewDate(viewDateInput.value || localISODate());
       });
     }
-
-    $('db-entry-form').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const raw = String($('db-amount').value || '').replace(/,/g, '').trim();
-      const amount = Number(raw);
-      if (!Number.isFinite(amount) || amount <= 0) {
-        flash('Enter a valid amount', 'error');
-        return;
-      }
-      const title = String($('db-title').value || '').trim();
-      if (!title) {
-        flash('Add a short title', 'error');
-        return;
-      }
-      const spendDate = clampToToday(
-        ($('db-entry-date-value') && $('db-entry-date-value').value) || entryDate || localISODate()
-      );
-      const btn = $('db-add-btn');
-      btn.disabled = true;
-      try {
-        await postEntry({
-          amount,
-          title,
-          category: $('db-category').value || 'other',
-          date: spendDate,
-        });
-        $('db-amount').value = '';
-        lastAutoTitle = categoryTitle($('db-category').value);
-        setTitle(lastAutoTitle);
-        $('db-amount').focus();
-        const when = dateOffsetLabel(spendDate);
-        flash(when === 'today' ? 'Logged' : 'Logged for ' + when, 'ok');
-      } catch (e) {
-        flash(e.message, 'error');
-      } finally {
-        btn.disabled = false;
-        updateAddButtonLabel();
-      }
-    });
 
     ['plan-income', 'plan-savings-pct'].forEach((id) => {
       const el = $(id);

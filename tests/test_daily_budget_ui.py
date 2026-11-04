@@ -42,15 +42,22 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
 
         js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
         for needle in (
-            'selectEntryDate',
             'selectViewDate',
-            'date: spendDate',
-            'Add for yesterday',
             'db-view-date-chips',
             'viewDate',
         ):
             self.assertIn(needle, js)
         self.assertNotIn('Yesterday’s spends', js)
+
+        # The entry-form controls now live in the shared modal module.
+        modal_js = (ROOT / 'static' / 'spend_modal.js').read_text(encoding='utf-8')
+        for needle in (
+            'db-date-chips',
+            'db-entry-date',
+            'db-entry-date-value',
+            'Add for yesterday',
+        ):
+            self.assertIn(needle, modal_js)
 
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
@@ -125,9 +132,9 @@ class TestDailyBudgetPlanUiMarkup(unittest.TestCase):
         self.assertIn('id="db-title-suggestions"', html)
         self.assertIn('Common references for this category', html)
 
-        js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        js = (ROOT / 'static' / 'spend_modal.js').read_text(encoding='utf-8')
         for needle in (
-            'renderTitleSuggestions',
+            'renderSuggestions',
             'common_titles_by_category',
             'db-title-chip',
             'db-title-suggestions',

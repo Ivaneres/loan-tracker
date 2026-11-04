@@ -77,11 +77,16 @@ class TestSpendModal(unittest.TestCase):
         self.assertIn('data-category="dining"', modal)
         self.assertIn('db-cat--selected', modal)
 
-    def test_modal_js_guards_the_daily_form(self):
-        # spend_modal.js must not double-bind the form on the Daily page.
-        self.assertIn("classList.contains('db-page')", SPEND_MODAL_JS)
+    def test_form_is_owned_by_the_modal_module_only(self):
+        # One implementation of the log-spend form: spend_modal.js owns it on every
+        # page; daily_budget.js must not bind it (that would double-post).
         self.assertIn('/api/spending/daily/entry', SPEND_MODAL_JS)
         self.assertIn('tally:spend-logged', SPEND_MODAL_JS)
+        daily = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
+        for needle in ("$('db-entry-form')", 'db-title-suggestions', 'db-cat-grid',
+                       'updateAddButtonLabel', 'renderTitleSuggestions'):
+            self.assertNotIn(needle, daily, needle)
+        self.assertIn("addEventListener('tally:spend-logged'", daily)
 
     def test_modal_traps_focus(self):
         # aria-modal="true" needs the background made inert.

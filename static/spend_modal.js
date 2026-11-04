@@ -1,7 +1,6 @@
-/* Global quick-log modal.
-   On the Daily page (#db-entry-form exists and daily_budget.js owns it) this only
-   handles opening/closing and reacting to "tally:spend-logged".
-   On every other page it also binds the form and posts to the same endpoint. */
+/* Global quick-log modal: the single owner of the log-spend form (#db-entry-form)
+   on every page. It posts to /api/spending/daily/entry and dispatches
+   "tally:spend-logged"; daily_budget.js listens for that to refresh Daily. */
 (function () {
     'use strict';
 
@@ -21,8 +20,7 @@
     var dateValue = document.getElementById('db-entry-date-value');
     var addBtn = document.getElementById('db-add-btn');
 
-    // daily_budget.js already binds the form on the Daily page.
-    var ownsForm = !document.body.classList.contains('db-page');
+    // single owner of the log-spend form on every page
     var lastFocus = null;
     var entryDate = '';
     var suggestionsLoaded = false;
@@ -93,15 +91,12 @@
         modal.hidden = false;
         document.body.classList.add('spend-modal-open');
         setBackgroundInert(true);
-        // On the Daily page daily_budget.js owns the form and its date state.
-        if (ownsForm) {
-            syncDates();
-            lastAutoTitle = categoryLabel(categoryEl ? categoryEl.value : '');
-            if (amountEl) amountEl.value = '';
-            if (titleEl && !titleEl.value.trim()) titleEl.value = lastAutoTitle;
-            if (titleClear) titleClear.classList.toggle('hidden', !(titleEl && titleEl.value));
-            loadSuggestions();
-        }
+        syncDates();
+        lastAutoTitle = categoryLabel(categoryEl ? categoryEl.value : '');
+        if (amountEl) amountEl.value = '';
+        if (titleEl && !titleEl.value.trim()) titleEl.value = lastAutoTitle;
+        if (titleClear) titleClear.classList.toggle('hidden', !(titleEl && titleEl.value));
+        loadSuggestions();
         if (amountEl) setTimeout(function () { amountEl.focus(); }, 30);
     }
 
@@ -178,8 +173,8 @@
         if (!modal.hidden) close();
     });
 
-    // ---- Form binding (non-Daily pages only) ----
-    if (!ownsForm || !form) return;
+    // ---- Form binding ----
+    if (!form) return;
 
     catGrid && catGrid.addEventListener('click', function (ev) {
         var btn = ev.target.closest('.db-cat');

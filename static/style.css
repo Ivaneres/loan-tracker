@@ -168,41 +168,7 @@ h2 {
     color: var(--muted);
 }
 
-.app-nav {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.25rem;
-    width: 100%;
-    padding: 0.25rem;
-    border-radius: 1.15rem;
-    background: rgba(255, 255, 255, 0.55);
-    border: 1px solid var(--line);
-    backdrop-filter: blur(8px);
-}
-
-.app-nav a {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.55rem 0.35rem;
-    border-radius: 999px;
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--muted);
-    text-decoration: none;
-    text-align: center;
-    transition: background 0.15s ease, color 0.15s ease;
-}
-
-.app-nav a:hover {
-    color: var(--ink);
-}
-
-.app-nav a.app-nav-active {
-    background: var(--ink);
-    color: #f4faf7;
-}
-
+/* Loan detail builds its own header (index.html); these keep its grid. */
 @media (min-width: 768px) {
     .app-header {
         display: grid;
@@ -221,33 +187,12 @@ h2 {
         grid-row: 1;
     }
 
-    .app-nav {
-        display: inline-flex;
-        flex-wrap: nowrap;
-        width: auto;
-        grid-column: 2;
-        grid-row: 1;
-        justify-self: start;
-        gap: 0.2rem;
-        padding: 0.2rem;
-        border-radius: 999px;
-    }
-
-    .app-nav a {
-        padding: 0.4rem 0.75rem;
-        font-size: 0.8rem;
-        min-height: 0;
-        white-space: nowrap;
-        flex: 0 0 auto;
-    }
-
     .app-header-right {
         grid-column: 3;
         grid-row: 1;
         justify-self: end;
     }
 
-    /* Loan detail: title + actions on row 1, nav full-width row 2 */
     .loan-detail-header {
         grid-template-columns: 1fr auto;
     }
@@ -260,12 +205,6 @@ h2 {
     .loan-detail-header .loan-detail-actions {
         grid-column: 2;
         grid-row: 1;
-    }
-
-    .loan-detail-header .app-nav {
-        grid-column: 1 / -1;
-        grid-row: 2;
-        justify-self: start;
     }
 }
 
@@ -2339,7 +2278,6 @@ body.spending-page {
     width: 100%;
 }
 .spending-top-nav {
-    /* legacy class kept; prefer .app-nav */
     background: transparent;
     border: 0;
     padding: 0;
@@ -5099,12 +5037,6 @@ body.login-page {
     .app-btn--logout {
         padding: 0.5rem 0.75rem;
         font-size: 0.8rem;
-    }
-
-    .app-nav a {
-        min-height: 2.5rem;
-        font-size: 0.72rem;
-        padding: 0.45rem 0.2rem;
     }
 
     .card,
