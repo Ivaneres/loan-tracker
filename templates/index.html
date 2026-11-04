@@ -49,6 +49,8 @@
             </div>
         </header>
         {% with active='loans' %}{% include 'partials/app_tabbar.html' %}{% endwith %}
+        {% include 'partials/spend_modal.html' %}
+        <script src="{{ asset_url('spend_modal.js') }}" defer></script>
         <section class="loan-summary mb-6" aria-label="Loan summary">
             <div class="money-hero loan-money-hero">
                 <p class="money-hero-kicker">Current balance</p>

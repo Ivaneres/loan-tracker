@@ -76,44 +76,6 @@
                     <button type="button" id="db-usual-undo">Undo</button>
                 </div>
             </section>
-
-            <form id="db-entry-form" class="db-entry" autocomplete="off">
-                <label class="db-entry-amount-wrap">
-                    <span class="db-entry-currency">£</span>
-                    <input id="db-amount" class="db-entry-amount" type="text" inputmode="decimal" placeholder="0.00" required aria-label="Amount">
-                </label>
-                <div class="db-field">
-                    <label for="db-title">What for?</label>
-                    <div class="db-title-input-wrap">
-                        <input id="db-title" type="text" maxlength="200" value="Dining" placeholder="Coffee, lunch…" required>
-                        <button type="button" id="db-title-clear" class="db-title-clear" aria-label="Clear what for">×</button>
-                    </div>
-                    <div id="db-title-suggestions" class="db-title-suggestions hidden" role="group" aria-label="Common references for this category"></div>
-                </div>
-                <fieldset class="db-dates">
-                    <legend>When?</legend>
-                    <div class="db-date-chip-row" id="db-date-chips" role="group" aria-label="Spend date shortcuts">
-                        <button type="button" class="db-date-chip db-date-chip--selected" data-offset="0">Today</button>
-                        <button type="button" class="db-date-chip" data-offset="-1">Yesterday</button>
-                        <button type="button" class="db-date-chip" data-offset="-2">2 days ago</button>
-                    </div>
-                    <label class="db-date-other">
-                        <span class="db-date-other-label">Or pick a date</span>
-                        <input id="db-entry-date" type="date" aria-label="Spend date">
-                    </label>
-                    <input type="hidden" id="db-entry-date-value" value="">
-                </fieldset>
-                <fieldset class="db-cats">
-                    <legend>Category</legend>
-                    <div class="db-cat-grid" id="db-cat-grid">
-                        {% for cat in spending_categories %}
-                        <button type="button" class="db-cat{% if cat == 'dining' %} db-cat--selected{% endif %}" data-category="{{ cat }}">{{ cat }}</button>
-                        {% endfor %}
-                    </div>
-                    <input type="hidden" id="db-category" value="dining">
-                </fieldset>
-                <button type="submit" class="db-cta" id="db-add-btn">Add spend</button>
-            </form>
             </div>
 
             <div class="db-today-list-wrap">

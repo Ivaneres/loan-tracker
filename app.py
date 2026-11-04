@@ -368,7 +368,11 @@ def inject_asset_helpers():
     def asset_url(filename: str) -> str:
         return url_for('static', filename=filename, v=_static_asset_version(filename))
 
-    return {'asset_url': asset_url}
+    return {
+        'asset_url': asset_url,
+        # Categories for the global quick-log modal, which is rendered on every page.
+        'spend_modal_categories': DAILY_ENTRY_CATEGORIES,
+    }
 
 
 @app.after_request

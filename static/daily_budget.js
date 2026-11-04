@@ -429,6 +429,7 @@
     applyTodayStatus(data.status);
     await refreshGoals(goalsAsOf || localISODate());
     syncDateControls();
+    document.dispatchEvent(new CustomEvent('tally:spend-logged', { detail: data }));
     return data;
   }
 
