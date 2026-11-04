@@ -1,12 +1,17 @@
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session, Response, stream_with_context
 from functools import wraps
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
+from contextlib import contextmanager
 import copy
 import csv
+import fcntl
+import glob
 import io
 import json
 import logging
 import os
+import tempfile
+import threading
 import time
 import re
 import smtplib
@@ -428,6 +433,23 @@ scheduler = BackgroundScheduler()
 # DATA_PATH=data/ledger.json so deploys can exclude it from rsync.
 DATA_PATH = os.getenv('DATA_PATH', 'data.json').strip() or 'data.json'
 
+# Ledger durability. Writes are atomic (temp file + os.replace) and every
+# writer takes a cross-process lock, so a reader can never observe a partial
+# file and two writers cannot corrupt one another. A timestamped snapshot is
+# taken once per UTC day before the first write and rotated to keep the newest
+# LEDGER_BACKUP_KEEP copies. An unreadable ledger is quarantined and raises
+# instead of being silently replaced with an empty one.
+try:
+    LEDGER_BACKUP_KEEP = max(1, int(os.getenv('LEDGER_BACKUP_KEEP', '7') or '7'))
+except ValueError:
+    LEDGER_BACKUP_KEEP = 7
+_LEDGER_LOCK = threading.RLock()
+_LEDGER_STAMP_FORMAT = '%Y%m%dT%H%M%SZ'
+
+
+class LedgerUnreadableError(RuntimeError):
+    """Raised when an existing on-disk ledger cannot be parsed."""
+
 
 def bootstrap_schedules():
     """Arm interest, recurring payments, and bill reminders from the ledger.
@@ -456,6 +478,129 @@ def bootstrap_schedules():
     schedule_bill_reminders_job()
 
 
+def _ledger_lock_path() -> str:
+    return DATA_PATH + '.lock'
+
+
+@contextmanager
+def ledger_lock():
+    """Serialise ledger writers across threads and processes.
+
+    A process-wide re-entrant lock guards against the in-process APScheduler
+    thread; an advisory ``flock`` guards against the other gunicorn workers.
+    Held only for the write itself, never around slow work such as model calls
+    or statement parsing.
+    """
+    with _LEDGER_LOCK:
+        lock_path = _ledger_lock_path()
+        parent = os.path.dirname(lock_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        handle = open(lock_path, 'a+')
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            yield
+        finally:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            finally:
+                handle.close()
+
+
+def _write_json_atomic(path: str, payload) -> None:
+    """Write ``payload`` as JSON without ever exposing a partial file.
+
+    Writes a temp file in the same directory, ``fsync``s it, then atomically
+    ``os.replace``s it over the destination. Readers therefore only ever see
+    the complete old file or the complete new one.
+    """
+    parent = os.path.dirname(path) or '.'
+    os.makedirs(parent, exist_ok=True)
+    try:
+        mode = os.stat(path).st_mode & 0o777
+    except OSError:
+        mode = None
+    fd, tmp_path = tempfile.mkstemp(
+        dir=parent, prefix=os.path.basename(path) + '.', suffix='.tmp',
+    )
+    try:
+        with os.fdopen(fd, 'w') as fh:
+            json.dump(payload, fh, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        if mode is not None:
+            os.chmod(tmp_path, mode)
+        os.replace(tmp_path, path)
+        dir_fd = os.open(parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _ledger_backup_dir() -> str:
+    return os.getenv('LEDGER_BACKUP_DIR', '').strip() or (os.path.dirname(DATA_PATH) or '.')
+
+
+def _ledger_backup_paths() -> list[str]:
+    pattern = os.path.join(_ledger_backup_dir(), os.path.basename(DATA_PATH) + '.bak-*')
+    return sorted(glob.glob(pattern))
+
+
+def _maybe_backup_ledger() -> str | None:
+    """Snapshot the current on-disk ledger at most once per UTC day.
+
+    The snapshot holds the state *before* the day's first write, so a bad write
+    is always recoverable. Old snapshots are pruned to LEDGER_BACKUP_KEEP.
+    Caller must hold :func:`ledger_lock`.
+    """
+    try:
+        with open(DATA_PATH, 'r') as fh:
+            current = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+    now = datetime.now(timezone.utc)
+    today_prefix = now.strftime('%Y%m%d')
+    backups = _ledger_backup_paths()
+    if any(os.path.basename(p).split('.bak-', 1)[-1].startswith(today_prefix) for p in backups):
+        return None
+    dest = os.path.join(
+        _ledger_backup_dir(),
+        f'{os.path.basename(DATA_PATH)}.bak-{now.strftime(_LEDGER_STAMP_FORMAT)}',
+    )
+    _write_json_atomic(dest, current)
+    logger.info('ledger backup written: %s', dest)
+    pruned = _ledger_backup_paths()
+    while len(pruned) > LEDGER_BACKUP_KEEP:
+        try:
+            os.unlink(pruned.pop(0))
+        except OSError:
+            pass
+    return dest
+
+
+def _quarantine_unreadable_ledger(reason: str) -> None:
+    """Preserve an unreadable ledger, then fail loudly instead of wiping it."""
+    stamp = datetime.now(timezone.utc).strftime(_LEDGER_STAMP_FORMAT)
+    quarantine = f'{DATA_PATH}.corrupt-{stamp}'
+    try:
+        os.replace(DATA_PATH, quarantine)
+    except OSError:
+        quarantine = DATA_PATH
+    logger.error(
+        'refusing to continue: ledger %s is unreadable (%s); original preserved '
+        'at %s — restore a %s.bak-* snapshot before restarting',
+        DATA_PATH, reason, quarantine, os.path.basename(DATA_PATH),
+    )
+    raise LedgerUnreadableError(f'{DATA_PATH} is unreadable: {reason}')
+
+
 def load_data():
     default_data = {
         'loans': {},  # Dictionary to store multiple loans
@@ -464,41 +609,45 @@ def load_data():
     try:
         with open(DATA_PATH, 'r') as f:
             content = f.read().strip()
-            if not content:  # Handle empty file
-                save_data(default_data)
-                return default_data
-            
-            # Load existing data and merge with defaults to handle missing fields
-            existing_data = json.loads(content)
-            if 'loans' not in existing_data:
-                # Convert old format to new format
-                old_data = existing_data
-                existing_data = default_data
-                if 'loan_amount' in old_data:
-                    loan_id = 'loan_1'  # Default ID for the first loan
-                    existing_data['loans'][loan_id] = {
-                        'name': 'My Loan',  # Default name
-                        'loan_amount': old_data.get('loan_amount', 0),
-                        'interest_rate': old_data.get('interest_rate', 0),
-                        'interest_day': old_data.get('interest_day', 1),
-                        'transactions': old_data.get('transactions', [])
-                    }
-            
-            changed = _ensure_data_shape(existing_data)
-            if changed:
-                save_data(existing_data)
-            return existing_data
-            
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        # Genuine first run (or a brand-new DATA_PATH): create the empty ledger.
         save_data(default_data)
         return default_data
 
+    if not content:
+        _quarantine_unreadable_ledger('empty file')
+    try:
+        existing_data = json.loads(content)
+    except json.JSONDecodeError as exc:
+        _quarantine_unreadable_ledger(f'invalid JSON: {exc}')
+    if not isinstance(existing_data, dict):
+        _quarantine_unreadable_ledger('top-level value is not a JSON object')
+
+    if 'loans' not in existing_data:
+        # Convert old flat format to the current shape.
+        old_data = existing_data
+        existing_data = default_data
+        if 'loan_amount' in old_data:
+            loan_id = 'loan_1'  # Default ID for the first loan
+            existing_data['loans'][loan_id] = {
+                'name': 'My Loan',  # Default name
+                'loan_amount': old_data.get('loan_amount', 0),
+                'interest_rate': old_data.get('interest_rate', 0),
+                'interest_day': old_data.get('interest_day', 1),
+                'transactions': old_data.get('transactions', [])
+            }
+
+    changed = _ensure_data_shape(existing_data)
+    if changed:
+        save_data(existing_data)
+    return existing_data
+
+
 def save_data(data):
-    parent = os.path.dirname(DATA_PATH)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(DATA_PATH, 'w') as f:
-        json.dump(data, f, indent=2)
+    """Persist the ledger atomically, with a once-per-day timestamped backup."""
+    with ledger_lock():
+        _maybe_backup_ledger()
+        _write_json_atomic(DATA_PATH, data)
 
 
 def _ensure_data_shape(data: dict) -> bool:
