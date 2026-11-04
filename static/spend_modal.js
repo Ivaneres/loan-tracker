@@ -56,7 +56,26 @@
                 btn.classList.toggle('db-date-chip--selected', addDays(isoToday(), Number(btn.dataset.offset)) === entryDate);
             });
         }
-        if (addBtn) addBtn.textContent = entryDate === isoToday() ? 'Add spend' : 'Add for ' + entryDate;
+        if (addBtn) addBtn.textContent = dateLabel();
+    }
+
+    // Mirrors daily_budget.js updateAddButtonLabel so the wording is the same.
+    function dateLabel() {
+        var today = isoToday();
+        if (entryDate === today) return 'Add spend';
+        if (entryDate === addDays(today, -1)) return 'Add for yesterday';
+        if (entryDate === addDays(today, -2)) return 'Add for 2 days ago';
+        return 'Add for ' + entryDate;
+    }
+
+    // The rest of the shell must not be reachable while the modal claims aria-modal.
+    function setBackgroundInert(on) {
+        var siblings = modal.parentElement ? Array.from(modal.parentElement.children) : [];
+        siblings.forEach(function (el) {
+            if (el === modal) return;
+            if (on) el.setAttribute('inert', '');
+            else el.removeAttribute('inert');
+        });
     }
 
     function toast(message) {
@@ -73,12 +92,14 @@
         lastFocus = document.activeElement;
         modal.hidden = false;
         document.body.classList.add('spend-modal-open');
+        setBackgroundInert(true);
         // On the Daily page daily_budget.js owns the form and its date state.
         if (ownsForm) {
             syncDates();
             lastAutoTitle = categoryLabel(categoryEl ? categoryEl.value : '');
             if (amountEl) amountEl.value = '';
             if (titleEl && !titleEl.value.trim()) titleEl.value = lastAutoTitle;
+            if (titleClear) titleClear.classList.toggle('hidden', !(titleEl && titleEl.value));
             loadSuggestions();
         }
         if (amountEl) setTimeout(function () { amountEl.focus(); }, 30);
@@ -87,6 +108,7 @@
     function close() {
         modal.hidden = true;
         document.body.classList.remove('spend-modal-open');
+        setBackgroundInert(false);
         if (lastFocus && lastFocus.focus) lastFocus.focus();
     }
 
@@ -129,6 +151,28 @@
     });
     document.addEventListener('keydown', function (ev) {
         if (ev.key === 'Escape' && !modal.hidden) close();
+    });
+    // Keep Tab inside the sheet (aria-modal); inert already blocks the background,
+    // this also wraps around and covers browsers without inert.
+    document.addEventListener('keydown', function (ev) {
+        if (modal.hidden || ev.key !== 'Tab') return;
+        var focusables = Array.prototype.filter.call(
+            modal.querySelectorAll('button, input, select, textarea, a[href], [tabindex]:not([tabindex="-1"])'),
+            function (el) { return !el.disabled && el.offsetParent !== null; }
+        );
+        if (!focusables.length) return;
+        var first = focusables[0];
+        var last = focusables[focusables.length - 1];
+        if (!modal.contains(document.activeElement)) {
+            ev.preventDefault();
+            first.focus();
+        } else if (ev.shiftKey && document.activeElement === first) {
+            ev.preventDefault();
+            last.focus();
+        } else if (!ev.shiftKey && document.activeElement === last) {
+            ev.preventDefault();
+            first.focus();
+        }
     });
     document.addEventListener('tally:spend-logged', function () {
         if (!modal.hidden) close();

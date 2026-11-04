@@ -12,6 +12,7 @@ import app as app_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEND_MODAL_JS = (ROOT / 'static' / 'spend_modal.js').read_text(encoding='utf-8')
+STYLE_CSS = (ROOT / 'static' / 'style.css').read_text(encoding='utf-8')
 
 # Pages rendered through partials/app_header.html, plus loan detail (index.html),
 # which builds its own chrome.
@@ -81,6 +82,43 @@ class TestSpendModal(unittest.TestCase):
         self.assertIn("classList.contains('db-page')", SPEND_MODAL_JS)
         self.assertIn('/api/spending/daily/entry', SPEND_MODAL_JS)
         self.assertIn('tally:spend-logged', SPEND_MODAL_JS)
+
+    def test_modal_traps_focus(self):
+        # aria-modal="true" needs the background made inert.
+        self.assertIn('aria-modal="true"',
+                      (ROOT / 'templates' / 'partials' / 'spend_modal.html').read_text(encoding='utf-8'))
+        self.assertIn('setBackgroundInert', SPEND_MODAL_JS)
+        self.assertIn("setAttribute('inert'", SPEND_MODAL_JS)
+
+    def test_loan_detail_builds_the_same_chrome(self):
+        # Loan detail hand-rolls its header, so it must include the chrome itself.
+        html = (ROOT / 'templates' / 'index.html').read_text(encoding='utf-8')
+        for piece in ("partials/app_rail.html", "partials/app_tabbar.html",
+                      "partials/spend_modal.html", "spend_modal.js",
+                      'href="/spending/search"'):
+            self.assertIn(piece, html, piece)
+
+    def test_old_top_nav_partial_is_gone(self):
+        self.assertFalse((ROOT / 'templates' / 'partials' / 'app_nav.html').exists())
+
+
+class TestMonthlyTierHiddenState(unittest.TestCase):
+    """Regression: the mobile flex layout must not defeat Tailwind's .hidden.
+
+    `body.spending-page #insight-content` (element + id + class) out-specifies
+    `.hidden` (class), which would show a zeroed dashboard to a user with no
+    insights. `.spending-page .hidden` restores the convention used on the
+    other page classes.
+    """
+
+    def test_spending_page_hidden_rule_is_important(self):
+        marker = '.spending-page .hidden'
+        self.assertIn(marker, STYLE_CSS)
+        rule = STYLE_CSS[STYLE_CSS.index(marker):STYLE_CSS.index(marker) + 120]
+        self.assertIn('display: none !important', rule)
+
+    def test_flex_rule_is_scoped_to_the_insights_container(self):
+        self.assertIn('body.spending-page #insight-content { display: flex', STYLE_CSS)
 
 
 if __name__ == '__main__':

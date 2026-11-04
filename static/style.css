@@ -8128,6 +8128,11 @@ body.spend-modal-open { overflow: hidden; }
 /* ==========================================================================
    Monthly: stats-first on mobile, everything else behind “Show more”
    ========================================================================== */
+/* .hidden must win over the flex layout / tier rules below. */
+.spending-page .hidden {
+    display: none !important;
+}
+
 .spending-more-controls { display: none; }
 
 @media (max-width: 1023px) {
