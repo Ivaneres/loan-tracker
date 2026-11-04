@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept 3 · Task-first with a CTA — Tally nav</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="nav.css">
+</head>
+<body>
+<div class="shell">
+
+  <div class="concept-banner">
+    <span class="tag">Concept 3</span>
+    Task-first — <b>Home · Track · Find</b>, with <b>Reconcile</b> promoted to the one primary action.
+  </div>
+
+  <div class="kicker" style="margin:0 0.35rem 0.5rem">Desktop</div>
+  <header class="app-header">
+    <a href="#" class="app-brand">Tally</a>
+    <span class="spacer"></span>
+    <nav class="nav-task" aria-label="Primary">
+      <a href="#">Home</a>
+      <a class="active" href="#">Track</a>
+      <a href="#">⌕ Find</a>
+      <a class="nav-cta" href="#">Reconcile <span style="opacity:0.8;font-weight:500">· 2</span></a>
+    </nav>
+    <span class="spacer"></span>
+    <div class="app-user">Signed in as ivan <button type="button">Log out</button></div>
+  </header>
+
+  <div class="subnav-row">
+    <nav class="subnav" aria-label="Track sections">
+      <a href="#">Daily</a>
+      <a class="active" href="#">Monthly</a>
+      <a href="#">Loans</a>
+    </nav>
+    <span class="subnav-note">Track groups the places you look at your money.</span>
+  </div>
+
+  <section class="card">
+    <div class="row between wrap" style="margin-bottom:0.9rem">
+      <div>
+        <p class="kicker">June 2026</p>
+        <h2 class="h2" style="margin:0.1rem 0">Track — Monthly</h2>
+      </div>
+      <a class="btn primary sm" href="#">Reconcile June →</a>
+    </div>
+    <div class="grid-3">
+      <div class="stat accent"><div class="k">Spent</div><div class="v">£1,842.60</div><div class="d">of £2,300 budgeted</div></div>
+      <div class="stat"><div class="k">Left</div><div class="v">£457.40</div><div class="d">6 days remaining</div></div>
+      <div class="stat"><div class="k">Unreconciled</div><div class="v">2</div><div class="d">months pending</div></div>
+    </div>
+  </section>
+
+  <section class="card card--solid">
+    <h2 class="h2" style="margin-bottom:0.5rem">The idea</h2>
+    <div class="callout"><span class="tag">Jobs</span>Rename destinations to <b>jobs</b>: “Track” (understand my money — Daily/Monthly/Loans), “Find” (look something up), “Reconcile” (do the monthly task).</div>
+    <div class="callout"><span class="tag">CTA</span>Reconcile is the only recurrent chore, so it becomes a real button — impossible to forget, and a natural call-to-action from anywhere.</div>
+    <div class="callout warn"><span class="tag">Cost</span>New vocabulary (“Track”, “Find”) must be taught. Renaming Monthly→Track risks losing search-engine/muscle-memory value.</div>
+  </section>
+
+  <section class="card">
+    <h2 class="h2" style="margin-bottom:0.7rem">On a phone — Reconcile stays reachable</h2>
+    <div class="device-row">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-inner">
+            <header class="app-header">
+              <a href="#" class="app-brand">Tally</a>
+              <span class="spacer"></span>
+              <a class="nav-cta" href="#" style="padding:0.4rem 0.8rem;font-size:0.82rem">Reconcile</a>
+            </header>
+            <nav class="nav-task" style="width:100%;justify-content:space-between" aria-label="Primary">
+              <a href="#">Home</a>
+              <a class="active" href="#">Track</a>
+              <a href="#">⌕</a>
+            </nav>
+            <div style="height:0.8rem"></div>
+            <div class="stat accent" style="margin-bottom:0.6rem"><div class="k">Spent this month</div><div class="v">£1,842.60</div><div class="d">2 months pending</div></div>
+            <div class="ledger-row"><div class="desc"><strong>Tesco Express</strong><span>Groceries</span></div><span class="amt">-£18.40</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:15rem">
+        <div class="callout"><span class="tag">Mobile</span>The CTA travels into the top bar, so “the monthly task” is one tap even from the home screen.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <a class="btn" href="index.html">← All concepts</a>
+    <a class="btn soft" href="concept-4-rail.html" style="margin-left:0.5rem">Next: Side rail →</a>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept 4 · Side rail + bottom tabs — Tally nav</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="nav.css">
+</head>
+<body>
+<div class="shell shell--wide">
+
+  <div class="concept-banner">
+    <span class="tag">Concept 4</span>
+    Side rail + bottom tab bar — navigation leaves the top bar entirely. Desktop gets a vertical rail; phones get a bottom tab bar.
+  </div>
+
+  <div class="rail-layout">
+    <!-- desktop rail -->
+    <aside class="app-rail" aria-label="Primary">
+      <div class="rail-brand">Tally</div>
+      <a href="#"><span class="ri">⌂</span> Home</a>
+      <div class="rail-h">Spending</div>
+      <a href="#"><span class="ri">☀</span> Daily</a>
+      <a class="active" href="#"><span class="ri">▦</span> Monthly</a>
+      <a href="#"><span class="ri">✓</span> Reconcile <span class="pill warn" style="margin-left:auto">2</span></a>
+      <a href="#"><span class="ri">⌕</span> Search</a>
+      <div class="rail-sep"></div>
+      <div class="rail-h">Accounts</div>
+      <a href="#"><span class="ri">◫</span> Loans</a>
+      <div class="rail-user">Signed in as ivan · <a href="#" style="color:var(--accent-deep);font-weight:600;text-decoration:none">Log out</a></div>
+    </aside>
+
+    <!-- content -->
+    <main>
+      <header class="app-header">
+        <a href="#" class="app-brand">Tally</a>
+        <span class="spacer"></span>
+        <div class="app-user">Signed in as ivan <button type="button">Log out</button></div>
+      </header>
+
+      <section class="card">
+        <div class="row between wrap" style="margin-bottom:0.9rem">
+          <div>
+            <p class="kicker">June 2026</p>
+            <h2 class="h2" style="margin:0.1rem 0">Monthly overview</h2>
+          </div>
+          <span class="pill warn">2 months pending</span>
+        </div>
+        <div class="grid-3">
+          <div class="stat accent"><div class="k">Spent</div><div class="v">£1,842.60</div><div class="d">of £2,300 budgeted</div></div>
+          <div class="stat"><div class="k">Left</div><div class="v">£457.40</div><div class="d">6 days remaining</div></div>
+          <div class="stat"><div class="k">Categories tracked</div><div class="v">11</div><div class="d">3 over budget</div></div>
+        </div>
+        <div class="divider"></div>
+        <div class="ledger-row"><div class="desc"><strong>Tesco Express</strong><span>Groceries · 12 Jun</span></div><span class="amt">-£18.40</span></div>
+        <div class="ledger-row"><div class="desc"><strong>British Gas</strong><span>Bills · 08 Jun</span></div><span class="amt">-£96.00</span></div>
+      </section>
+
+      <section class="card card--solid">
+        <h2 class="h2" style="margin-bottom:0.5rem">Why a rail</h2>
+        <div class="callout"><span class="tag">Room to grow</span>A vertical list holds six destinations comfortably — plus future ones — with no wrapping or overflow.</div>
+        <div class="callout"><span class="tag">Grouping</span>The rail can label groups (“Spending”, “Accounts”) explicitly, which the pill bar can't.</div>
+        <div class="callout warn"><span class="tag">Cost</span>Highest-effort change: a new layout for every page, and the top bar's account controls need rehoming.</div>
+      </section>
+    </main>
+  </div>
+
+  <!-- mobile -->
+  <section class="card" style="margin-top:1.5rem">
+    <h2 class="h2" style="margin-bottom:0.2rem">On a phone — bottom tab bar</h2>
+    <p class="lead" style="font-size:0.88rem;margin-bottom:1rem">The same five tabs, always in thumb reach. Monthly and Daily keep their existing content, and the Daily entry form is unchanged — it just opens in a “+” modal from any tab.</p>
+    <div class="device-row">
+
+      <!-- Monthly -->
+      <figure style="margin:0">
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-inner">
+              <header class="app-header">
+                <a href="#" class="app-brand">Tally</a>
+                <span class="spacer"></span>
+                <a class="topbar-icon" href="#" aria-label="Search">⌕</a>
+                <div class="app-user"><button type="button">⋯</button></div>
+              </header>
+
+              <div class="money-hero-mini">
+                <div class="k">This month · June</div>
+                <div class="label">Net</div>
+                <div class="value">£1,842.60</div>
+                <div class="delta">▲ 12% vs May</div>
+              </div>
+
+              <div class="stat-grid">
+                <div class="statglass"><span class="k">Income</span><span class="v">£2,450</span><span class="d">▲ 3%</span></div>
+                <div class="statglass"><span class="k">Outgoing</span><span class="v">£607.40</span><span class="d">▲ 8%</span></div>
+                <div class="statglass"><span class="k">Savings</span><span class="v">75%</span><span class="d">▲ 4pt</span></div>
+              </div>
+
+              <div class="mini-h">Outgoing by category</div>
+              <div class="bar-list">
+                <div class="bar-item">
+                  <div class="bar-top"><span class="lv">Bills</span><span class="amt">£228.80</span></div>
+                  <div class="bar-track"><i style="width:100%"></i></div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-top"><span class="lv">Groceries</span><span class="amt">£182.40</span></div>
+                  <div class="bar-track"><i style="width:80%"></i></div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-top"><span class="lv">Dining</span><span class="amt">£96.20</span></div>
+                  <div class="bar-track"><i style="width:42%"></i></div>
+                </div>
+                <div class="bar-item">
+                  <div class="bar-top"><span class="lv">Transport</span><span class="amt">£72.00</span></div>
+                  <div class="bar-track"><i style="width:31%"></i></div>
+                </div>
+              </div>
+              <div class="showmore"><span>Show more — insights, trends &amp; transactions</span><span class="chev">›</span></div>
+            </div>
+            <span class="fab" aria-hidden="true">+</span>
+            <nav class="tabbar" aria-label="Primary">
+              <a href="#"><span class="ti">⌂</span> Home</a>
+              <a href="#"><span class="ti">☀</span> Daily</a>
+              <a class="active" href="#"><span class="ti">▦</span> Monthly</a>
+              <a href="#"><span class="ti">✓</span> Reconcile</a>
+              <a href="#"><span class="ti">◫</span> Loans</a>
+            </nav>
+          </div>
+        </div>
+        <figcaption class="muted" style="text-align:center;font-size:0.78rem;margin-top:0.5rem">Monthly — stats-first on mobile: net, income/outgoing/savings, category bars</figcaption>
+      </figure>
+
+      <!-- Monthly show-more side page -->
+      <figure style="margin:0">
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-inner sp-page">
+              <header class="app-header">
+                <a class="topbar-icon" href="#" aria-label="Back">←</a>
+                <span class="spacer"></span>
+                <div class="app-user"><button type="button">⋯</button></div>
+              </header>
+
+              <h3>June 2026 <span class="muted" style="font-size:0.85rem">▾</span></h3>
+              <p class="sp-sub">Everything below the stats</p>
+
+              <div class="sp-group">
+                <div class="sp-h">Transactions</div>
+                <div class="sp-row"><span class="sp-ic">☰</span><span class="sp-t">Month transactions</span><span class="sp-m">128 rows</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">▦</span><span class="sp-t">Top categories</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">◫</span><span class="sp-t">Top merchants</span><span class="chev">›</span></div>
+              </div>
+
+              <div class="sp-group">
+                <div class="sp-h">Insights</div>
+                <div class="sp-row"><span class="sp-ic">↗</span><span class="sp-t">Month-over-month trends</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">▤</span><span class="sp-t">Outgoing by category (chart)</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">!</span><span class="sp-t">Spend anomalies</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">↻</span><span class="sp-t">Recurring candidates</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">£</span><span class="sp-t">Largest outgoing</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">⇄</span><span class="sp-t">Transfers &amp; reconciliation</span><span class="chev">›</span></div>
+              </div>
+
+              <div class="sp-group">
+                <div class="sp-h">Bills</div>
+                <div class="sp-row"><span class="sp-ic">▤</span><span class="sp-t">Regular bills &amp; subscriptions</span><span class="chev">›</span></div>
+              </div>
+
+              <div class="sp-group">
+                <div class="sp-h">Month actions</div>
+                <div class="sp-row"><span class="sp-ic">✦</span><span class="sp-t">Re-run categorisation</span><span class="chev">›</span></div>
+                <div class="sp-row"><span class="sp-ic">⟳</span><span class="sp-t">Recompute insights</span><span class="chev">›</span></div>
+                <div class="sp-row danger"><span class="sp-ic">✕</span><span class="sp-t">Delete month</span><span class="chev">›</span></div>
+              </div>
+            </div>
+            <span class="fab" aria-hidden="true">+</span>
+            <nav class="tabbar" aria-label="Primary">
+              <a href="#"><span class="ti">⌂</span> Home</a>
+              <a href="#"><span class="ti">☀</span> Daily</a>
+              <a class="active" href="#"><span class="ti">▦</span> Monthly</a>
+              <a href="#"><span class="ti">✓</span> Reconcile</a>
+              <a href="#"><span class="ti">◫</span> Loans</a>
+            </nav>
+          </div>
+        </div>
+        <figcaption class="muted" style="text-align:center;font-size:0.78rem;margin-top:0.5rem">“Show more” → everything omitted from the stats view, grouped and one tap away</figcaption>
+      </figure>
+
+      <!-- Daily -->
+      <figure style="margin:0">
+        <div class="phone">
+          <div class="phone-screen">
+            <div class="phone-inner">
+              <header class="app-header">
+                <a href="#" class="app-brand">Tally</a>
+                <span class="spacer"></span>
+                <div class="app-user"><button type="button">⋯</button></div>
+              </header>
+
+              <nav class="panel-tabs" aria-label="Daily Budget panels">
+                <span class="on">Today</span>
+                <span>Plan</span>
+                <span>Goals</span>
+              </nav>
+
+              <div class="daily-hero">
+                <div class="k">Today · Mon 12 June</div>
+                <div class="label">Left to spend</div>
+                <div class="value">£23.60</div>
+                <div class="bar" aria-hidden="true"><i style="width:56%"></i></div>
+                <div class="daily-meta">
+                  <div class="m">Limit <b>£42.00</b></div>
+                  <div class="m">Spent <b>£18.40</b></div>
+                </div>
+              </div>
+
+              <div class="overspend-prompt">
+                <div class="t">Yesterday went over by £6.10</div>
+                <div class="b">Carry it into today's limit?</div>
+                <div class="ac"><span class="solid">Carry forward</span><span>Not this time</span></div>
+              </div>
+
+              <div class="usual-card">
+                <div class="usual-head">
+                  <span class="usual-label">Usual</span>
+                  <button class="usual-edit" type="button">Edit</button>
+                </div>
+                <div class="chip-row">
+                  <span class="chip">☕ Coffee · £4.20</span>
+                  <span class="chip">🥪 Lunch · £8.50</span>
+                  <span class="chip chip-add">+ Add</span>
+                </div>
+                <p class="usual-note">Tap a pill to log it for today · <b>Edit</b> to remove</p>
+              </div>
+
+              <div class="filter-row">
+                <span class="mini-h" style="margin:0">Spends</span>
+                <div class="filter-chips">
+                  <span class="date-chip on">Today</span>
+                  <span class="date-chip">Yesterday</span>
+                  <span class="date-chip">2 days</span>
+                  <span class="date-chip">Pick…</span>
+                </div>
+              </div>
+              <div class="ledger-row ledger-row--del"><div class="desc"><strong>Coffee House</strong><span>Dining · 08:15</span></div><span class="amt">-£4.20</span><button class="row-x" type="button" aria-label="Delete">×</button></div>
+              <div class="ledger-row ledger-row--del"><div class="desc"><strong>Pret</strong><span>Dining · 12:40</span></div><span class="amt">-£14.20</span><button class="row-x" type="button" aria-label="Delete">×</button></div>
+            </div>
+            <span class="fab" aria-hidden="true">+</span>
+            <nav class="tabbar" aria-label="Primary">
+              <a href="#"><span class="ti">⌂</span> Home</a>
+              <a class="active" href="#"><span class="ti">☀</span> Daily</a>
+              <a href="#"><span class="ti">▦</span> Monthly</a>
+              <a href="#"><span class="ti">✓</span> Reconcile</a>
+              <a href="#"><span class="ti">◫</span> Loans</a>
+            </nav>
+          </div>
+        </div>
+        <figcaption class="muted" style="text-align:center;font-size:0.78rem;margin-top:0.5rem">Daily budget — hero, usual pills (with Add/Edit), today's list</figcaption>
+      </figure>
+
+      <!-- Pin a new usual pill -->
+      <figure style="margin:0">
+        <div class="phone">
+          <div class="phone-screen" style="min-height:840px">
+            <div class="phone-inner">
+              <header class="app-header">
+                <a href="#" class="app-brand">Tally</a>
+                <span class="spacer"></span>
+                <div class="app-user"><button type="button">⋯</button></div>
+              </header>
+              <div class="daily-hero">
+                <div class="k">Today · Mon 12 June</div>
+                <div class="label">Left to spend</div>
+                <div class="value">£23.60</div>
+                <div class="bar" aria-hidden="true"><i style="width:56%"></i></div>
+                <div class="daily-meta">
+                  <div class="m">Limit <b>£42.00</b></div>
+                  <div class="m">Spent <b>£18.40</b></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="overlay"></div>
+
+            <div class="sheet sheet--form" role="dialog" aria-label="Pin a usual">
+              <div class="sheet-grip"></div>
+              <div class="sheet-head"><h3>Pin a usual</h3><button class="x" type="button">✕</button></div>
+              <div class="sheet-body">
+                <span class="db-usual-label">Often logged</span>
+                <button class="db-usual-suggest" type="button"><span><strong>Coffee House</strong><small>Dining · logged 12×</small></span><span class="amt">£4.20</span></button>
+                <button class="db-usual-suggest" type="button"><span><strong>Pret</strong><small>Dining · logged 8×</small></span><span class="amt">£14.20</span></button>
+                <button class="db-usual-suggest" type="button"><span><strong>Tesco Express</strong><small>Groceries · logged 6×</small></span><span class="amt">£18.40</span></button>
+
+                <span class="db-usual-label" style="margin-top:0.9rem">Enter your own</span>
+                <div class="db-field"><input value="" placeholder="What for?" aria-label="What for?"></div>
+                <div class="db-field"><input value="" placeholder="0.00" inputmode="decimal" aria-label="Usual amount"></div>
+                <div class="db-field">
+                  <select class="db-select" aria-label="Usual category">
+                    <option>Dining</option><option>Groceries</option><option>Transport</option><option>Bills</option>
+                  </select>
+                </div>
+                <button class="db-cta" type="button" style="font-size:0.95rem;padding:0.8rem 1rem">Pin it</button>
+              </div>
+            </div>
+
+            <nav class="tabbar" aria-label="Primary">
+              <a href="#"><span class="ti">⌂</span> Home</a>
+              <a class="active" href="#"><span class="ti">☀</span> Daily</a>
+              <a href="#"><span class="ti">▦</span> Monthly</a>
+              <a href="#"><span class="ti">✓</span> Reconcile</a>
+              <a href="#"><span class="ti">◫</span> Loans</a>
+            </nav>
+          </div>
+        </div>
+        <figcaption class="muted" style="text-align:center;font-size:0.78rem;margin-top:0.5rem">“+ Add” → often-logged suggestions or enter your own → Pin it</figcaption>
+      </figure>
+
+      <!-- Quick log from anywhere -->
+      <figure style="margin:0">
+        <div class="phone">
+          <div class="phone-screen" style="min-height:840px">
+            <div class="phone-inner">
+              <header class="app-header">
+                <a href="#" class="app-brand">Tally</a>
+                <span class="spacer"></span>
+                <div class="app-user"><button type="button">⋯</button></div>
+              </header>
+              <div class="stat accent" style="margin-bottom:0.6rem"><div class="k">Spent this month</div><div class="v">£1,842.60</div></div>
+              <div class="ledger-row"><div class="desc"><strong>Tesco Express</strong><span>Groceries</span></div><span class="amt">-£18.40</span></div>
+              <div class="ledger-row"><div class="desc"><strong>British Gas</strong><span>Bills</span></div><span class="amt">-£96.00</span></div>
+            </div>
+
+            <span class="fab" aria-hidden="true">+</span>
+            <div class="overlay"></div>
+
+            <div class="sheet sheet--form" role="dialog" aria-label="Log spend">
+              <div class="sheet-grip"></div>
+              <div class="sheet-head"><h3>Log spend</h3><button class="x" type="button">✕</button></div>
+              <div class="sheet-body">
+                <form class="db-entry">
+                  <label class="db-entry-amount-wrap">
+                    <span class="db-entry-currency">£</span>
+                    <input class="db-entry-amount" value="4.20" inputmode="decimal" aria-label="Amount">
+                  </label>
+
+                  <div class="db-field">
+                    <label>What for?</label>
+                    <div class="db-title-input-wrap">
+                      <input value="Coffee" aria-label="What for?">
+                      <button type="button" class="db-title-clear" aria-label="Clear what for">×</button>
+                    </div>
+                    <div class="db-title-suggestions">
+                      <span class="db-title-chip db-title-chip--selected">Coffee</span>
+                      <span class="db-title-chip">Lunch</span>
+                      <span class="db-title-chip">Snack</span>
+                      <span class="db-title-chip">Pret</span>
+                    </div>
+                  </div>
+
+                  <fieldset class="db-dates">
+                    <legend>When?</legend>
+                    <div class="db-date-chip-row">
+                      <button type="button" class="db-date-chip db-date-chip--selected">Today</button>
+                      <button type="button" class="db-date-chip">Yesterday</button>
+                      <button type="button" class="db-date-chip">2 days ago</button>
+                    </div>
+                    <label class="db-date-other">
+                      <span class="db-date-other-label">Or pick a date</span>
+                      <input type="date" aria-label="Spend date">
+                    </label>
+                  </fieldset>
+
+                  <fieldset class="db-cats">
+                    <legend>Category</legend>
+                    <div class="db-cat-grid">
+                      <button type="button" class="db-cat">Groceries</button>
+                      <button type="button" class="db-cat db-cat--selected">Dining</button>
+                      <button type="button" class="db-cat">Transport</button>
+                      <button type="button" class="db-cat">Bills</button>
+                      <button type="button" class="db-cat">Shopping</button>
+                      <button type="button" class="db-cat">Health</button>
+                    </div>
+                  </fieldset>
+
+                  <button type="submit" class="db-cta">Add spend</button>
+                </form>
+              </div>
+            </div>
+
+            <nav class="tabbar" aria-label="Primary">
+              <a href="#"><span class="ti">⌂</span> Home</a>
+              <a href="#"><span class="ti">☀</span> Daily</a>
+              <a class="active" href="#"><span class="ti">▦</span> Monthly</a>
+              <a href="#"><span class="ti">✓</span> Reconcile</a>
+              <a href="#"><span class="ti">◫</span> Loans</a>
+            </nav>
+          </div>
+        </div>
+        <figcaption class="muted" style="text-align:center;font-size:0.78rem;margin-top:0.5rem">The current Daily form, moved into the “+” modal — nothing redesigned</figcaption>
+      </figure>
+
+      <div style="flex:1;min-width:15rem">
+        <div class="callout"><span class="tag">Mobile</span>The familiar 5-slot bottom bar puts navigation within thumb reach and returns the whole top of the screen to content.</div>
+        <div class="callout"><span class="tag">Daily</span>Daily keeps its <b>Today / Plan / Goals</b> tabs, the spends <b>“Show” date filter</b>, per-row <b>delete</b> and the <b>overspend carry-forward</b> prompt. Only the entry form moves into <b>+</b>.</div>
+        <div class="callout"><span class="tag">Pills</span>Pill management is unchanged: <b>Edit</b> reveals a remove <b>×</b> on each pill, and <b>+ Add</b> opens the same “often logged” suggestions plus the “enter your own → Pin it” form.</div>
+        <div class="callout"><span class="tag">Monthly</span>Monthly goes <b>stats-first</b> — net, income/outgoing/savings and category bars. Everything else (transactions, trends, top categories/merchants, anomalies, bills, month actions) moves behind <b>Show more</b> to a side page, one tap away.</div>
+        <div class="callout"><span class="tag">Log</span>The <b>exact current form, unchanged</b> — £ amount, <b>What for?</b> (with title suggestions), <b>When?</b> and <b>Category</b> — just relocated into a “+” sheet that opens from any tab.</div>
+        <div class="callout"><span class="tag">Search</span>Search becomes a <b>top-bar icon</b> on every screen — most valuable on Monthly, where the six-pill bar used to bury it.</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+    <h3 class="h3" style="margin-bottom:0.6rem">Same form, one new home</h3>
+    <table class="tp-table">
+      <thead>
+        <tr><th></th><th>Today</th><th>With the “+” modal</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Where the form lives</td><td>inline on the Daily page</td><td class="check">in the “+” modal, reachable from any tab</td></tr>
+        <tr><td>Dedicated Daily entry page</td><td>its own section on Daily</td><td class="check">dropped — “+” is the entry point</td></tr>
+        <tr><td>Fields</td><td>£ amount · What for? · When? · Category</td><td class="check">identical — nothing renamed or removed</td></tr>
+        <tr><td>A usual (repeat) spend</td><td>1 tap on the usual chip</td><td class="check">1 tap on the usual chip (unchanged)</td></tr>
+        <tr><td>Add / remove a usual pill</td><td>Edit + “+” on the Usual row</td><td class="check">identical — Edit + “+”, same “Pin it” sheet</td></tr>
+        <tr><td>A one-off</td><td>go to Daily, form is already there → Add</td><td class="check">tap “+” from anywhere → same form → Add spend</td></tr>
+        <tr><td>Monthly on mobile</td><td>hero + a few recent transactions</td><td class="check">stats-first, then “Show more” side page for the rest</td></tr>
+        <tr><td>Search on mobile</td><td>one of six equal nav pills</td><td class="check">top-bar icon on every screen</td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:0.82rem;margin-top:0.6rem">The engine is unchanged — same fields, same endpoint, same Undo. Only the form's location moves.</p>
+  </section>
+
+  <section class="card">
+    <a class="btn" href="index.html">← All concepts</a>
+  </section>
+
+</div>
+</body>
+</html>

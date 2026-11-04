@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept 2 · Four + “More” — Tally nav</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="nav.css">
+</head>
+<body>
+<div class="shell">
+
+  <div class="concept-banner">
+    <span class="tag">Concept 2</span>
+    Four + “More” — the four most-used destinations stay visible; Reconcile · Search · Loans move into a <b>More ▾</b> menu.
+  </div>
+
+  <div class="kicker" style="margin:0 0.35rem 0.5rem">Desktop — menu closed</div>
+  <header class="app-header">
+    <a href="#" class="app-brand">Tally</a>
+    <span class="spacer"></span>
+    <nav class="nav-overflow" aria-label="Primary">
+      <a href="#">Home</a>
+      <a class="active" href="#">Daily</a>
+      <a href="#">Monthly</a>
+      <details>
+        <summary>More <span class="caret">▾</span></summary>
+        <div class="menu" role="menu">
+          <div class="menu-h">Spending</div>
+          <a href="#"><span class="mi">✓</span> Reconcile <span class="pill warn" style="margin-left:auto">2</span></a>
+          <a href="#"><span class="mi">⌕</span> Search</a>
+          <div class="menu-sep"></div>
+          <div class="menu-h">Accounts</div>
+          <a href="#"><span class="mi">◫</span> Loans</a>
+        </div>
+      </details>
+    </nav>
+    <span class="spacer"></span>
+    <div class="app-user">Signed in as ivan <button type="button">Log out</button></div>
+  </header>
+  <p class="lead" style="font-size:0.85rem;margin:-0.6rem 0.35rem 1.25rem">Above: the menu markup is present but collapsed — open the live demo below.</p>
+
+  <section class="card">
+    <div class="row between wrap" style="margin-bottom:0.9rem">
+      <div>
+        <p class="kicker">Monday · 12 June</p>
+        <h2 class="h2" style="margin:0.1rem 0">Daily budget</h2>
+      </div>
+      <span class="pill ok">On track</span>
+    </div>
+    <div class="grid-3">
+      <div class="stat accent"><div class="k">Today's budget</div><div class="v">£42.00</div><div class="d">£18.40 spent so far</div></div>
+      <div class="stat"><div class="k">This week</div><div class="v">£231.10</div><div class="d">of £294 budgeted</div></div>
+      <div class="stat"><div class="k">Remaining today</div><div class="v">£23.60</div><div class="d">4 expenses logged</div></div>
+    </div>
+  </section>
+
+  <!-- live demo -->
+  <section class="card card--solid">
+    <h2 class="h2" style="margin-bottom:0.4rem">Open the “More” menu</h2>
+    <p class="lead" style="font-size:0.88rem;margin-bottom:0.8rem">No JavaScript required — the dropdown is a native <code>&lt;details&gt;</code> element, so it works without hydration and is keyboard-accessible.</p>
+    <div class="mini-nav">
+      <nav class="nav-overflow" aria-label="Primary (demo)" style="align-items:flex-start">
+        <a href="#">Home</a>
+        <a class="active" href="#">Daily</a>
+        <a href="#">Monthly</a>
+        <details open>
+          <summary>More <span class="caret">▾</span></summary>
+          <div class="menu" role="menu" style="position:static;left:auto;right:auto;transform:none;margin:0.6rem auto 0;min-width:15rem">
+            <div class="menu-h">Spending</div>
+            <a href="#"><span class="mi">✓</span> Reconcile <span class="pill warn" style="margin-left:auto">2</span></a>
+            <a href="#"><span class="mi">⌕</span> Search</a>
+            <div class="menu-sep"></div>
+            <div class="menu-h">Accounts</div>
+            <a href="#"><span class="mi">◫</span> Loans</a>
+          </div>
+        </details>
+      </nav>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 class="h2" style="margin-bottom:0.5rem">What it fixes / costs</h2>
+    <div class="problem-grid">
+      <ul class="checklist good">
+        <li>Smallest possible change — five of six labels stay exactly where users expect.</li>
+        <li>Menu can be grouped with headers, so Reconcile/Search/Loans get real context.</li>
+        <li>Absorbs future items without touching the primary row.</li>
+      </ul>
+      <ul class="checklist">
+        <li>Three destinations are hidden one click deep — discovery drops.</li>
+        <li>Which items are “most used” is a guess; it will drift.</li>
+        <li>Reconcile — a monthly <em>must-do</em> — is easy to forget when it's only a badge in a menu.</li>
+      </ul>
+    </div>
+    <div class="callout"><span class="tag">Best for</span>Teams that want the change shipped this week with near-zero user retraining.</div>
+  </section>
+
+  <section class="card">
+    <a class="btn" href="index.html">← All concepts</a>
+    <a class="btn soft" href="concept-3-task.html" style="margin-left:0.5rem">Next: Task-first →</a>
+  </section>
+
+</div>
+</body>
+</html>

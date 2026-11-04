@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept 1 · Grouped two-tier — Tally nav</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="nav.css">
+</head>
+<body>
+<div class="shell">
+
+  <div class="concept-banner">
+    <span class="tag">Concept 1</span>
+    Grouped two-tier — <b>Home · Spending · Loans</b>, with Daily / Monthly / Reconcile / Search as a sub-row inside Spending.
+  </div>
+
+  <!-- desktop preview -->
+  <div class="kicker" style="margin:0 0.35rem 0.5rem">Desktop</div>
+  <header class="app-header">
+    <a href="#" class="app-brand">Tally</a>
+    <span class="spacer"></span>
+    <nav class="nav-grouped" aria-label="Primary">
+      <a href="#">Home</a>
+      <a class="active" href="#">Spending <span class="caret">▾</span><span class="badge">2</span></a>
+      <a href="#">Loans</a>
+    </nav>
+    <span class="spacer"></span>
+    <div class="app-user">Signed in as ivan <button type="button">Log out</button></div>
+  </header>
+
+  <div class="subnav-row">
+    <nav class="subnav" aria-label="Spending sections">
+      <a href="#">Daily</a>
+      <a class="active" href="#">Monthly</a>
+      <a href="#">Reconcile</a>
+      <a href="#">Search</a>
+    </nav>
+    <span class="subnav-note">↖ Contextual row appears only while you're inside Spending.</span>
+  </div>
+
+  <!-- simulated content -->
+  <section class="card">
+    <div class="row between wrap" style="margin-bottom:0.9rem">
+      <div>
+        <p class="kicker">June 2026</p>
+        <h2 class="h2" style="margin:0.1rem 0">Monthly overview</h2>
+      </div>
+      <span class="pill warn">2 months need reconciling</span>
+    </div>
+    <div class="grid-3">
+      <div class="stat accent"><div class="k">Spent this month</div><div class="v">£1,842.60</div><div class="d">of £2,300 budgeted</div></div>
+      <div class="stat"><div class="k">Left to spend</div><div class="v">£457.40</div><div class="d">6 days remaining</div></div>
+      <div class="stat"><div class="k">Daily budget</div><div class="v">£42.00</div><div class="d">on track</div></div>
+    </div>
+    <div class="divider"></div>
+    <div class="ledger-row"><div class="desc"><strong>Tesco Express</strong><span>Groceries · today</span></div><span class="mono muted">12 Jun</span><span class="amt">-£18.40</span></div>
+    <div class="ledger-row"><div class="desc"><strong>British Gas</strong><span>Bills · standing order</span></div><span class="mono muted">08 Jun</span><span class="amt">-£96.00</span></div>
+    <div class="ledger-row"><div class="desc"><strong>Coffee House</strong><span>Eating out · today</span></div><span class="mono muted">12 Jun</span><span class="amt">-£4.20</span></div>
+  </section>
+
+  <!-- annotations -->
+  <section class="card card--solid">
+    <h2 class="h2" style="margin-bottom:0.5rem">How it works</h2>
+    <div class="callout"><span class="tag">Primary</span>Three peers only: <b>Home</b> (dashboard), <b>Spending</b> (the four money pages), <b>Loans</b>. The active group gets the dark pill.</div>
+    <div class="callout"><span class="tag">Context</span>The sub-row mirrors Today / Plan / Goals already used on the Daily page, so it reads as familiar, not new.</div>
+    <div class="callout"><span class="tag">Action</span><b>Search</b> stops being a destination and becomes one segment here — it's a verb you run <em>on</em> your transactions, not a page you live in.</div>
+    <div class="callout"><span class="tag">Signal</span>Reconcile carries a small count badge (<b>2</b>) so the recurring monthly task is discoverable from anywhere in the app.</div>
+    <div class="callout warn"><span class="tag">Rule</span>Direct links (<code>/spending/daily</code>, <code>/spending/reconcile?month=…</code>, search deep-links) still work — the sub-row just reflects whatever section is active.</div>
+  </section>
+
+  <!-- mobile preview -->
+  <section class="card">
+    <h2 class="h2" style="margin-bottom:0.7rem">On a phone</h2>
+    <div class="device-row">
+      <div class="phone">
+        <div class="phone-screen">
+          <div class="phone-inner">
+            <header class="app-header">
+              <a href="#" class="app-brand">Tally</a>
+              <span class="spacer"></span>
+              <div class="app-user"><button type="button">⋯</button></div>
+            </header>
+            <nav class="nav-grouped" style="width:100%;justify-content:space-between;margin-bottom:0.7rem" aria-label="Primary">
+              <a href="#">Home</a>
+              <a class="active" href="#">Spending</a>
+              <a href="#">Loans</a>
+            </nav>
+            <nav class="subnav" style="width:100%" aria-label="Spending sections">
+              <a href="#">Daily</a>
+              <a class="active" href="#">Monthly</a>
+              <a href="#">Reconcile</a>
+              <a href="#">Search</a>
+            </nav>
+            <div style="height:0.9rem"></div>
+            <div class="money-hero-mini">
+              <div class="k">This month · June</div>
+              <div class="label">Net</div>
+              <div class="value">£1,842.60</div>
+              <div class="delta">▲ 12% vs May</div>
+            </div>
+            <div class="stat-grid">
+              <div class="statglass"><span class="k">Income</span><span class="v">£2,450</span></div>
+              <div class="statglass"><span class="k">Outgoing</span><span class="v">£607.40</span></div>
+              <div class="statglass"><span class="k">Savings</span><span class="v">75%</span></div>
+            </div>
+            <div class="mini-h">Outgoing by category</div>
+            <div class="bar-list">
+              <div class="bar-item">
+                <div class="bar-top"><span class="lv">Bills</span><span class="amt">£228.80</span></div>
+                <div class="bar-track"><i style="width:100%"></i></div>
+              </div>
+              <div class="bar-item">
+                <div class="bar-top"><span class="lv">Groceries</span><span class="amt">£182.40</span></div>
+                <div class="bar-track"><i style="width:80%"></i></div>
+              </div>
+              <div class="bar-item">
+                <div class="bar-top"><span class="lv">Dining</span><span class="amt">£96.20</span></div>
+                <div class="bar-track"><i style="width:42%"></i></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="flex:1;min-width:15rem">
+        <div class="callout"><span class="tag">Mobile</span>Two compact rows replace the baseline's <b>3×2 grid</b>. The primary row is three items, the sub-row is a scroll-free segmented control.</div>
+        <div class="callout"><span class="tag">Account</span>“Signed in as…” collapses into a <b>⋯</b> menu, freeing the corner for the brand.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <a class="btn" href="index.html">← All concepts</a>
+    <a class="btn soft" href="concept-2-overflow.html" style="margin-left:0.5rem">Next: Four + More →</a>
+  </section>
+
+</div>
+</body>
+</html>
