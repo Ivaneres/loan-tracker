@@ -33,7 +33,7 @@
                             {% endfor %}
                         </select>
                     </div>
-                    <div class="spending-toolbar-actions">
+                    <div class="spending-toolbar-actions spending-tier-more">
                         <button type="button" id="recategorize-month-btn" class="spending-btn spending-btn--primary text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Re-run AI categorisation for outgoing lines in this month (manual overrides are kept)">Re-run categorisation</button>
                         <button type="button" id="recompute-insights-btn" class="spending-btn spending-btn--muted text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Recalculate all monthly figures (KPIs, charts, budget hints) from your stored transactions. Use if numbers look stale after an app update.">Recompute insights</button>
                         <button type="button" id="delete-month-btn" class="spending-btn spending-btn--danger text-sm disabled:opacity-50 disabled:cursor-not-allowed" disabled title="Remove all transactions and insights for the selected month">Delete month</button>
@@ -75,7 +75,14 @@
                     </div>
                 </div>
 
-                <div id="budget-actions-wrap" class="spending-budget-actions mb-6 hidden">
+                <div id="spending-more-controls" class="spending-more-controls">
+                    <button type="button" id="spending-more-toggle" class="spending-showmore" aria-expanded="false">
+                        <span class="spending-showmore-label">Show more — insights, trends &amp; transactions</span>
+                        <span class="spending-showmore-chev" aria-hidden="true">›</span>
+                    </button>
+                </div>
+
+                <div id="budget-actions-wrap" class="spending-budget-actions spending-tier-more mb-6 hidden">
                     <h3 class="spending-h3">Budget focus</h3>
                     <p class="spending-hint text-xs mb-2">A short list of patterns worth reviewing for next month.</p>
                     <ul id="budget-actions-list" class="spending-budget-actions-list space-y-2 text-sm"></ul>
@@ -84,7 +91,7 @@
                     </div>
                 </div>
 
-                <div id="savings-coach-wrap" class="spending-budget-actions spending-savings-coach mb-6 hidden" aria-labelledby="savings-coach-heading">
+                <div id="savings-coach-wrap" class="spending-budget-actions spending-savings-coach spending-tier-more mb-6 hidden" aria-labelledby="savings-coach-heading">
                     <h3 class="spending-h3" id="savings-coach-heading">Savings ideas (AI)</h3>
                     <p class="spending-hint text-xs mb-1">Suggestions using this month and recent months&rsquo; trends &mdash; not personalised financial advice.</p>
                     <p id="savings-coach-hint" class="spending-hint text-xs mb-2">Sends that month&rsquo;s insights, individual transaction lines (capped) for the selected month, a small line-item sample for recent prior months, and multi-month trend totals. Data is sent to the configured AI.</p>
@@ -104,7 +111,7 @@
                     </div>
                 </div>
 
-                <div id="spending-trends-charts" class="mb-6">
+                <div id="spending-trends-charts" class="spending-tier-more mb-6">
                     <h3 class="spending-h3 mb-1">Month-over-month trends</h3>
                     <p class="spending-hint text-xs mb-2">All months with stored insights. The vertical line is the month you&rsquo;re viewing.</p>
                     <div class="spending-chart-toolbar flex flex-wrap gap-3 items-center mb-2 text-sm">
@@ -143,7 +150,7 @@
                     <div id="spending-chart-sr" class="sr-only"></div>
                 </div>
 
-                <div id="transfer-reconciliation-panel" class="spending-recon hidden border rounded-lg p-4 mb-6 text-sm" style="border-color: var(--line); background: rgba(13, 122, 98, 0.07);">
+                <div id="transfer-reconciliation-panel" class="spending-recon spending-tier-more hidden border rounded-lg p-4 mb-6 text-sm" style="border-color: var(--line); background: rgba(13, 122, 98, 0.07);">
                     <div class="flex flex-wrap items-start justify-between gap-3">
                         <div>
                             <h3 class="font-semibold" style="color: var(--text-color);">Internal transfer reconciliation</h3>
@@ -153,7 +160,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 spending-tier-more">
                     <div>
                         <h3 class="spending-h3">Top categories</h3>
                         <p class="spending-hint text-xs mb-2">With change vs last month and vs recent average (where history exists).</p>
@@ -166,7 +173,7 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 spending-tier-more">
                     <div>
                         <h3 class="spending-h3">Spend anomalies</h3>
                         <p class="spending-hint text-xs mb-1">Category higher than your average in prior months that already have transactions (ignores very small £ amounts). Months before you started tracking are not treated as zero spend.</p>
@@ -179,22 +186,22 @@
                     </div>
                 </div>
 
-                <p id="pareto-summary" class="text-sm mb-4 hidden" style="color: var(--text-color);"></p>
+                <p id="pareto-summary" class="spending-tier-more text-sm mb-4 hidden" style="color: var(--text-color);"></p>
 
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                    <div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6 spending-split">
+                    <div class="spending-tier-more">
                         <h3 class="spending-h3">Largest outgoing this month</h3>
                         <p class="spending-hint text-xs mb-2">Excludes internal transfers. Bar width is relative to the largest item in this list.</p>
                         <ul id="largest-outgoing-list" class="text-sm space-y-3"></ul>
                     </div>
-                    <div>
+                    <div class="spending-tier-primary">
                         <h3 class="spending-h3">Outgoing by category</h3>
                         <p class="spending-hint text-xs mb-2">Share of non-transfer outgoing spend.</p>
                         <ul id="category-breakdown-list" class="text-sm space-y-2"></ul>
                     </div>
                 </div>
 
-                <div class="mb-6">
+                <div class="spending-tier-more mb-6">
                     <h3 class="spending-h3">Regular bills &amp; subscriptions</h3>
                     <p class="spending-hint text-xs mb-3">Recurring names in your last six months with fairly steady cost. <span class="text-gray-400">(Heuristic; bank wording varies.)</span></p>
                     <div id="subscription-signals-list" class="space-y-3 text-sm" style="color: var(--text-color);"></div>
@@ -209,7 +216,7 @@
                     </div>
                 </div>
 
-                <div>
+                <div class="spending-tier-more">
                     <h3 class="spending-h3">Month transactions</h3>
                     <p class="spending-hint text-xs mb-2">Sort and filter. Net under the amount column is for the rows in view. <strong>Gray</strong> rows are excluded from totals; linked transfers are always excluded.</p>
                     <p id="insight-tx-filter-status" class="text-xs mb-1 hidden" role="status" aria-live="polite" style="color: var(--text-color);"></p>

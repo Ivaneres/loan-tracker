@@ -3409,4 +3409,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (monthSelect) {
         loadMonths(initialMonth);
     }
+
+    // Stats-first on mobile: everything but the summary lives behind "Show more".
+    const moreToggle = document.getElementById('spending-more-toggle');
+    if (moreToggle) {
+        const moreLabel = moreToggle.querySelector('.spending-showmore-label');
+        const moreText = moreLabel ? moreLabel.textContent : '';
+        moreToggle.addEventListener('click', () => {
+            const open = document.body.classList.toggle('spending-more-open');
+            moreToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (moreLabel) moreLabel.textContent = open ? 'Back to summary' : moreText;
+            const target = open ? moreToggle : document.getElementById('spending-insights');
+            if (target && target.scrollIntoView) {
+                target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+        });
+    }
 });
