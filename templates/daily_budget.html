@@ -52,13 +52,16 @@
             <p id="db-debt-note" class="db-debt-note hidden" hidden></p>
 
             <div class="db-today-compose">
-            <section id="db-captures" class="db-captures hidden" hidden aria-label="Captured spends">
+            <section id="db-captures" class="db-captures" aria-label="Phone captures">
                 <div class="db-captures-head">
                     <span class="db-captures-label">Captured from your phone</span>
-                    <span id="db-captures-count" class="db-captures-count"></span>
+                    <span class="db-captures-actions">
+                        <span id="db-captures-count" class="db-captures-count"></span>
+                        <a class="db-captures-setup" href="/spending/daily/captures">Set up</a>
+                    </span>
                 </div>
                 <div id="db-captures-list" class="db-captures-list" role="group" aria-label="Unconfirmed captured spends"></div>
-                <p class="db-captures-note">Tap one to fill the form, then <strong>Add spend</strong>. × ignores it.</p>
+                <p id="db-captures-note" class="db-captures-note"></p>
             </section>
 
             <section class="db-usual" aria-label="Usual spends">

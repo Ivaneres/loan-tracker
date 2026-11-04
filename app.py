@@ -9493,6 +9493,22 @@ def daily_budget_tab():
     )
 
 
+@app.route('/spending/daily/captures')
+@login_required
+def daily_capture_setup():
+    """User-facing instructions for wiring phone notifications into Daily."""
+    username = session['username']
+    token = _daily_capture_tokens().get(username)
+    base = request.url_root.rstrip('/')
+    return render_template(
+        'daily_capture_setup.html',
+        username=username,
+        token_configured=bool(token),
+        capture_token=token or '',
+        capture_url=base + '/api/spending/daily/capture',
+    )
+
+
 @app.route('/spending/search')
 @login_required
 def spending_search_tab():
@@ -11882,6 +11898,40 @@ def spending_daily_capture_create():
     _daily_capture_prune(spending)
     save_data(data)
     return jsonify({'ok': True, 'duplicate': False, 'capture': capture})
+
+
+@app.route('/api/spending/daily/capture/test', methods=['POST'])
+@login_required
+def spending_daily_capture_test():
+    """Create a sample pending capture so the user can verify the setup page."""
+    username = session['username']
+    data = load_data()
+    spending, changed = _ensure_user_spending(data, username)
+    captures = _ensure_daily_captures(spending)
+    today = _daily_budget_today()
+    d_str = today.strftime('%Y-%m-%d')
+    now_iso = datetime.now(timezone.utc).isoformat()
+    capture_id = 'test-' + str(uuid.uuid4())
+    capture = {
+        'id': capture_id,
+        'date': d_str,
+        'amount': 1.0,
+        'title': 'Test capture',
+        'merchant_raw': 'created from the setup page',
+        'card_last4': '',
+        'device': 'setup page',
+        'source': 'other',
+        'captured_at': now_iso,
+        'status': 'pending',
+        'dedupe_key': _daily_capture_dedupe_key(d_str, 1.0, 'Test capture'),
+        'created_at': now_iso,
+        'updated_at': now_iso,
+        'transaction_id': None,
+    }
+    captures.append(capture)
+    _daily_capture_prune(spending)
+    save_data(data)
+    return jsonify({'ok': True, 'capture': capture})
 
 
 @app.route('/api/spending/daily/capture/<capture_id>/dismiss', methods=['POST'])

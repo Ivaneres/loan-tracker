@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Phone captures — Tally</title>
+    {% include 'partials/fonts.html' %}
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ asset_url('style.css') }}">
+</head>
+<body class="app-page db-page capture-page min-h-screen">
+    <div class="app-shell">
+        {% with active='daily' %}{% include 'partials/app_header.html' %}{% endwith %}
+
+        <section class="spending-section card capture-setup" aria-labelledby="capture-heading">
+            <p class="capture-back"><a href="/spending/daily">← Back to Daily</a></p>
+            <h2 class="spending-h2" id="capture-heading">Phone captures</h2>
+            <p class="spending-sub">
+                Log Google Wallet taps (and bank app notifications) into Daily automatically.
+                Captures are <strong>suggestions</strong> — nothing is added to your spending
+                until you confirm it on <a href="/spending/daily">Daily</a>.
+            </p>
+
+            <div class="capture-callout capture-callout--info">
+                <strong>Android only.</strong> iPhone has no equivalent hook. Only payments you make
+                with the phone (NFC tap) produce a notification to read.
+            </div>
+
+            {% if not token_configured %}
+            <div class="capture-callout capture-callout--warn">
+                <strong>Server not set up yet.</strong> Add
+                <code>DAILY_CAPTURE_TOKENS="{{ username }}:&lt;random-token&gt;"</code>
+                to your <code>.env</code> (generate one with <code>openssl rand -hex 24</code>),
+                restart Tally, then reload this page.
+            </div>
+            {% endif %}
+
+            <ol class="capture-steps">
+                <li class="capture-step">
+                    <h3>Turn on Wallet notifications</h3>
+                    <p>
+                        Open the Google Wallet app → tap your profile picture →
+                        <strong>Wallet settings</strong> → turn on <strong>purchase notifications</strong>.
+                        Without this, taps produce nothing for the phone to read.
+                    </p>
+                </li>
+
+                <li class="capture-step">
+                    <h3>Get your capture token</h3>
+                    {% if token_configured %}
+                    <p>This is the token for <strong>{{ username }}</strong>. Keep it private — it can only add pending captures, but anyone who has it can add junk.</p>
+                    <div class="capture-token">
+                        <code id="capture-token" class="capture-token-value" data-token="{{ capture_token }}" data-masked="••••••••••••">••••••••••••</code>
+                        <button type="button" id="capture-token-reveal" class="capture-btn capture-btn--ghost">Show</button>
+                        <button type="button" id="capture-token-copy" class="capture-btn">Copy</button>
+                    </div>
+                    {% else %}
+                    <p>No token is configured on the server yet. Ask whoever runs Tally to set <code>DAILY_CAPTURE_TOKENS</code> for your user, then reload this page.</p>
+                    {% endif %}
+                </li>
+
+                <li class="capture-step">
+                    <h3>Install MacroDroid and add a macro</h3>
+                    <p>
+                        <a href="https://play.google.com/store/apps/details?id=com.arlosoft.macrodroid" target="_blank" rel="noopener">MacroDroid</a>
+                        (free) or Tasker both work. Create one macro:
+                    </p>
+                    <ul class="capture-sublist">
+                        <li>
+                            <strong>Trigger:</strong> <em>Notification Received</em> → choose the
+                            <strong>Google Wallet</strong> app. (Add another trigger per bank app later.)
+                        </li>
+                        <li>
+                            <strong>Extract</strong> the amount and merchant from the notification
+                            text with a regular expression (<em>Set Variable → Regular expression</em>).
+                            For <code>You paid £12.34 at TESCO STORES with your Visa •••• 1234</code>:
+                        </li>
+                    </ul>
+                    <pre class="capture-code">amount:    £([0-9]+\.[0-9]{2})      →  $1
+merchant:  at (.+?) with            →  $1</pre>
+                    <ul class="capture-sublist">
+                        <li>
+                            <strong>Action:</strong> <em>HTTP Request</em> —
+                            method <code>POST</code>, this URL:
+                        </li>
+                    </ul>
+                    <pre class="capture-code" id="capture-url">{{ capture_url }}</pre>
+                    <p class="capture-inline-label">Headers:</p>
+                    <pre class="capture-code">Authorization: Bearer &lt;your token&gt;
+Content-Type: application/json</pre>
+                    <p class="capture-inline-label">Body (JSON) — swap in the variables from your regex:</p>
+                    <pre class="capture-code" id="capture-body">{
+  "amount": "{amount}",
+  "title": "{merchant}",
+  "source": "wallet",
+  "captured_at": "{current_time}"
+}</pre>
+                    <p class="capture-footnote">
+                        Variable names depend on MacroDroid/Tasker; use whatever you named them.
+                        <code>&#123;captured_at&#125;</code> is display-only. Adding
+                        <code>"capture_id"</code> makes retries safe (the same tap won't be added twice).
+                    </p>
+                </li>
+
+                <li class="capture-step">
+                    <h3>Test it</h3>
+                    <p>Send a test capture from here, then open <a href="/spending/daily">Daily</a> — it should appear in the <em>Captured from your phone</em> panel.</p>
+                    <button type="button" id="capture-test" class="capture-btn"{% if not token_configured %} disabled{% endif %}>Send a test capture</button>
+                    <span id="capture-test-msg" class="capture-test-msg" role="status" aria-live="polite"></span>
+                    <p class="capture-inline-label">Or from a terminal to check the token:</p>
+                    <pre class="capture-code">curl -X POST {{ capture_url }} \
+  -H "Authorization: Bearer &lt;your token&gt;" \
+  -H "Content-Type: application/json" \
+  -d '{"amount":12.34,"title":"TESCO STORES","source":"wallet"}'</pre>
+                    <p class="capture-footnote">A reply of <code>{"ok":true,...}</code> means it worked. <code>401</code> means the token is wrong; <code>429</code> means you're sending too fast.</p>
+                </li>
+            </ol>
+
+            <h3 class="capture-h3">Troubleshooting</h3>
+            <ul class="capture-troubleshoot">
+                <li><strong>Nothing appears after a tap.</strong> Check purchase notifications are on in Google Wallet, and that the macro's trigger app is Google Wallet (not Google Pay).</li>
+                <li><strong>Amount is wrong or the merchant is blank.</strong> The regex didn't match the notification wording; notifications differ by app and language. Tune the pattern.</li>
+                <li><strong>Works sometimes.</strong> Android battery optimisation can stop the macro. Allow MacroDroid to run in the background.</li>
+                <li><strong>Missed while offline.</strong> The phone is off or offline — those taps are simply lost. Manual entry stays the fallback.</li>
+                <li><strong>See also:</strong> <code>docs/daily-capture.md</code> in the Tally repo for the full technical recipe.</li>
+            </ul>
+        </section>
+    </div>
+
+    <script src="{{ asset_url('capture_setup.js') }}"></script>
+</body>
+</html>

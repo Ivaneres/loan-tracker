@@ -195,6 +195,46 @@ class TestCaptureDismiss(DailyCaptureBase):
         self.assertEqual(resp.status_code, 302)
 
 
+class TestCaptureSetupPage(DailyCaptureBase):
+    def test_setup_page_requires_login(self):
+        resp = self.client.get('/spending/daily/captures')
+        self.assertEqual(resp.status_code, 302)
+
+    def test_setup_page_shows_token_and_endpoint(self):
+        self._login('ivan')
+        html = self.client.get('/spending/daily/captures').get_data(as_text=True)
+        self.assertIn('id="capture-token"', html)
+        self.assertIn('tok-ivan', html)          # revealed on demand by the page JS
+        self.assertIn('/api/spending/daily/capture', html)
+        self.assertIn('id="capture-test"', html)
+        self.assertNotIn('Server not set up yet', html)
+
+    def test_setup_page_flags_missing_server_token(self):
+        with mock.patch.dict(os.environ, {'DAILY_CAPTURE_TOKENS': ''}):
+            self._login('ivan')
+            html = self.client.get('/spending/daily/captures').get_data(as_text=True)
+        self.assertIn('Server not set up yet', html)
+
+    def test_setup_page_hides_token_of_other_user(self):
+        self._login('user')
+        html = self.client.get('/spending/daily/captures').get_data(as_text=True)
+        self.assertIn('tok-user', html)
+        self.assertNotIn('tok-ivan', html)
+
+    def test_test_capture_endpoint_creates_pending(self):
+        self._login('ivan')
+        resp = self.client.post('/api/spending/daily/capture/test')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.get_json()['capture']['title'], 'Test capture')
+        status = self.client.get('/api/spending/daily/status').get_json()
+        self.assertEqual(len(status['pending_captures']), 1)
+        self.assertEqual(status['pending_captures'][0]['source'], 'other')
+
+    def test_test_capture_requires_login(self):
+        resp = self.client.post('/api/spending/daily/capture/test')
+        self.assertEqual(resp.status_code, 302)
+
+
 class TestCapturePrune(DailyCaptureBase):
     def test_prune_caps_records_and_keeps_newest(self):
         with mock.patch.object(app_mod, 'DAILY_CAPTURE_MAX', 3), \

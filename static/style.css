@@ -3246,6 +3246,23 @@ body.db-page button.db-title-chip--selected {
     color: var(--db-accent);
 }
 
+.db-captures-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.db-captures-setup {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--db-accent);
+    text-decoration: none;
+}
+
+.db-captures-setup:hover {
+    text-decoration: underline;
+}
+
 .db-captures-list {
     display: flex;
     flex-direction: column;
@@ -7916,4 +7933,171 @@ body.reconcile-readonly #reconcile-restart-match-confirm {
 @media (max-width: 900px) {
   .rc-two-col { grid-template-columns: 1fr; }
   .rc-effect { position: static; }
+}
+
+/* --- Phone capture setup page (/spending/daily/captures) ----------------- */
+.capture-page .capture-setup {
+    max-width: 46rem;
+}
+
+.capture-back {
+    margin: 0 0 0.6rem;
+    font-size: 0.8rem;
+}
+
+.capture-back a {
+    color: var(--db-accent);
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.capture-callout {
+    border-radius: 0.9rem;
+    padding: 0.7rem 0.85rem;
+    margin: 1rem 0;
+    font-size: 0.88rem;
+    line-height: 1.45;
+    border: 1px solid var(--db-line);
+}
+
+.capture-callout--info {
+    background: rgba(43, 122, 95, 0.08);
+}
+
+.capture-callout--warn {
+    background: rgba(196, 122, 20, 0.10);
+    border-color: rgba(196, 122, 20, 0.35);
+}
+
+.capture-steps {
+    list-style: none;
+    margin: 1.25rem 0 1.5rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.35rem;
+}
+
+.capture-step {
+    border-left: 3px solid var(--db-line);
+    padding-left: 0.9rem;
+}
+
+.capture-step h3,
+.capture-h3 {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.capture-step p {
+    margin: 0 0 0.55rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.capture-sublist {
+    margin: 0 0 0.6rem;
+    padding-left: 1.1rem;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.capture-sublist li {
+    margin-bottom: 0.35rem;
+}
+
+.capture-code {
+    background: var(--db-ink);
+    color: #eaf4ef;
+    border-radius: 0.7rem;
+    padding: 0.7rem 0.85rem;
+    font-family: var(--font-money);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 0 0 0.7rem;
+}
+
+.capture-inline-label {
+    margin: 0 0 0.25rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--db-muted);
+}
+
+.capture-footnote {
+    margin: 0 0 0.6rem;
+    font-size: 0.78rem;
+    color: var(--db-muted);
+    line-height: 1.45;
+}
+
+.capture-token {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.capture-token-value {
+    flex: 1 1 14rem;
+    min-width: 0;
+    background: var(--db-surface-solid);
+    border: 1px solid var(--db-line);
+    border-radius: 0.7rem;
+    padding: 0.55rem 0.7rem;
+    font-family: var(--font-money);
+    font-size: 0.85rem;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.capture-btn {
+    border: 1px solid var(--db-accent);
+    background: var(--db-accent);
+    color: #f4faf7;
+    border-radius: 0.7rem;
+    padding: 0.5rem 0.85rem;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.capture-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.capture-btn--ghost {
+    background: transparent;
+    color: var(--db-accent);
+}
+
+.capture-test-msg {
+    margin-left: 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.capture-test-msg--ok {
+    color: var(--db-accent);
+}
+
+.capture-test-msg--error {
+    color: var(--db-warn);
+}
+
+.capture-troubleshoot {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 0.86rem;
+    line-height: 1.5;
+    color: var(--db-ink);
+}
+
+.capture-troubleshoot li {
+    margin-bottom: 0.4rem;
 }

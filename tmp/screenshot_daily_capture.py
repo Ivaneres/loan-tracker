@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Step-by-step playthrough for phone captures on the Daily screen.
 
-Flow: baseline (no captures) → phone POSTs a capture (bearer token) → panel
-appears → tap to fill the form → pick category → Add spend → capture accepted →
-two more captures, dismiss one. Mobile + desktop crops.
+Flow: empty prompt → in-app setup page (token reveal + test button) → a capture
+arrives → tap fills the form → Add spend → phone POSTs two taps → dismiss one.
+Mobile + desktop crops.
 """
 from __future__ import annotations
 
@@ -169,52 +169,80 @@ def main() -> int:
             login(mobile)
             login(desktop)
 
-            # 1. Baseline: no captures yet.
+            # 1. Baseline: nothing captured yet, prompt to set up.
             mobile.goto(f"{BASE}/spending/daily")
-            mobile.wait_for_selector("#db-captures", state="hidden")
-            save(mobile, "01-mobile-no-captures.png")
+            mobile.wait_for_selector("#db-captures-note")
+            expect(mobile.locator("#db-captures-note")).to_contain_text("Set up phone captures")
+            save(mobile, "01-mobile-empty-prompt.png")
+            save_locator(mobile.locator("#db-captures"), "01b-empty-panel.png")
 
-            # 2. Phone posts a Google Wallet tap.
-            phone_capture(amount=23.45, title="TESCO STORES 3294", card_last4="4412")
-            mobile.reload()
-            mobile.wait_for_selector("#db-captures:not(.hidden)")
-            expect(mobile.locator("#db-captures-list")).to_contain_text("TESCO STORES 3294")
-            save(mobile, "02-mobile-capture-arrived.png")
-            save_locator(mobile.locator("#db-captures"), "02b-capture-panel.png")
+            # 2. In-app setup page (how to enable MacroDroid).
+            mobile.locator('a.db-captures-setup').click()
+            mobile.wait_for_url(lambda u: u.endswith("/spending/daily/captures"))
+            mobile.wait_for_selector("#capture-heading")
+            save(mobile, "02-mobile-setup-page.png")
 
-            # 3. Tap the capture → the entry form is pre-filled.
+            # 2b. Token reveal.
+            mobile.locator("#capture-token-reveal").click()
+            mobile.wait_for_function(
+                f"() => document.getElementById('capture-token').textContent === '{TOKEN}'"
+            )
+            save_locator(mobile.locator(".capture-token"), "02b-setup-token-revealed.png")
+
+            # 2c. Send a test capture from the page.
+            mobile.locator("#capture-test").click()
+            mobile.wait_for_function(
+                """() => (document.getElementById('capture-test-msg')?.textContent || '')
+                  .includes('Sent')"""
+            )
+            save_locator(
+                mobile.locator(".capture-step").last, "02c-setup-test-sent.png"
+            )
+
+            # 3. Back on Daily the test capture is waiting.
+            mobile.goto(f"{BASE}/spending/daily")
+            mobile.wait_for_selector("#db-captures-list .db-capture-card")
+            expect(mobile.locator("#db-captures-list")).to_contain_text("Test capture")
+            save(mobile, "03-mobile-capture-arrived.png")
+            save_locator(mobile.locator("#db-captures"), "03b-capture-panel.png")
+
+            # 4. Tap it -> entry form pre-filled (amount, title, date).
             mobile.locator(".db-capture-main").first.click()
             mobile.wait_for_function(
-                "() => document.getElementById('db-title').value === 'TESCO STORES 3294'"
+                "() => document.getElementById('db-title').value === 'Test capture'"
             )
-            expect(mobile.locator("#db-amount")).to_have_value("23.45")
-            save_locator(mobile.locator(".db-today-compose"), "03-tapped-form-filled.png")
+            expect(mobile.locator("#db-amount")).to_have_value("1.00")
+            save_locator(mobile.locator(".db-today-compose"), "04-tapped-form-filled.png")
 
-            # 4. Pick a category and Add spend → capture accepted, spend listed.
+            # 5. Pick a category and Add spend -> capture accepted, spend listed.
             mobile.locator('.db-cat[data-category="groceries"]').click()
             mobile.locator("#db-add-btn").click()
-            mobile.wait_for_selector("#db-captures", state="hidden")
-            expect(mobile.locator("#db-today-list")).to_contain_text("TESCO STORES 3294")
-            save(mobile, "04-mobile-after-add.png")
-            save_locator(mobile.locator(".db-today-list-wrap"), "04b-spend-listed.png")
+            mobile.wait_for_function(
+                """() => document.querySelectorAll('#db-captures-list .db-capture-card').length === 0"""
+            )
+            expect(mobile.locator("#db-today-list")).to_contain_text("Test capture")
+            save(mobile, "05-mobile-after-add.png")
+            save_locator(mobile.locator(".db-today-list-wrap"), "05b-spend-listed.png")
 
-            # 5. Two more taps; dismiss one via ×.
+            # 6. Phone posts two taps; dismiss one via the × button.
             phone_capture(amount=3.4, title="PRET A MANGER", source="wallet")
             phone_capture(amount=1.75, title="TFL TRAVEL CH", source="bank")
             mobile.reload()
-            mobile.wait_for_selector("#db-captures:not(.hidden)")
+            mobile.wait_for_function(
+                """() => document.querySelectorAll('#db-captures-list .db-capture-card').length === 2"""
+            )
             expect(mobile.locator("#db-captures-count")).to_contain_text("2 new")
-            save_locator(mobile.locator("#db-captures"), "05-two-captures.png")
+            save_locator(mobile.locator("#db-captures"), "06-two-captures.png")
             mobile.locator('[data-capture-dismiss]').first.click()
             mobile.wait_for_function(
                 """() => document.querySelectorAll('#db-captures-list .db-capture-card').length === 1"""
             )
-            save(mobile, "06-mobile-dismissed.png")
+            save(mobile, "06b-mobile-dismissed.png")
 
-            # 6. Desktop view of the panel.
+            # 7. Desktop view of the panel.
             phone_capture(amount=8.9, title="COSTA COFFEE", source="wallet")
             desktop.goto(f"{BASE}/spending/daily")
-            desktop.wait_for_selector("#db-captures:not(.hidden)")
+            desktop.wait_for_selector("#db-captures-list .db-capture-card")
             save(desktop, "07-desktop-captures.png")
 
             browser.close()

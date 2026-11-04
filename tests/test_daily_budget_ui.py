@@ -1,4 +1,5 @@
 """UI presence checks for daily budget Plan fields (no browser required)."""
+import os
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -225,7 +226,9 @@ class TestDailyBudgetCapturesUi(unittest.TestCase):
         self.assertIn('id="db-captures"', html)
         self.assertIn('id="db-captures-list"', html)
         self.assertIn('id="db-captures-count"', html)
+        self.assertIn('id="db-captures-note"', html)
         self.assertIn('Captured from your phone', html)
+        self.assertIn('href="/spending/daily/captures"', html)
 
         js = (ROOT / 'static' / 'daily_budget.js').read_text(encoding='utf-8')
         for needle in (
@@ -237,12 +240,37 @@ class TestDailyBudgetCapturesUi(unittest.TestCase):
             'pending_captures',
             '/api/spending/daily/capture/',
             'capture_id',
+            '/spending/daily/captures',
         ):
             self.assertIn(needle, js)
 
+    @mock.patch.dict(os.environ, {'DAILY_CAPTURE_TOKENS': 'ivan:tok-ui'})
     @mock.patch.object(app_mod, 'save_data')
     @mock.patch.object(app_mod, 'load_data')
-    def test_captures_section_hidden_without_pending(self, load_mock, save_mock):
+    def test_setup_page_renders(self, load_mock, save_mock):
+        load_mock.return_value = self.data
+        self._login()
+        resp = self.client.get('/spending/daily/captures')
+        self.assertEqual(resp.status_code, 200)
+        html = resp.get_data(as_text=True)
+        for needle in (
+            'id="capture-heading"',
+            'id="capture-token"',
+            'id="capture-test"',
+            'id="capture-url"',
+            'Google Wallet',
+            'MacroDroid',
+            'capture_setup.js',
+        ):
+            self.assertIn(needle, html)
+
+        setup_js = (ROOT / 'static' / 'capture_setup.js').read_text(encoding='utf-8')
+        self.assertIn('/api/spending/daily/capture/test', setup_js)
+        self.assertIn('clipboard', setup_js)
+
+    @mock.patch.object(app_mod, 'save_data')
+    @mock.patch.object(app_mod, 'load_data')
+    def test_status_without_captures_is_empty(self, load_mock, save_mock):
         load_mock.return_value = self.data
         self._login()
         resp = self.client.get('/api/spending/daily/status')

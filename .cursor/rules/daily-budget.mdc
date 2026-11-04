@@ -57,7 +57,8 @@ Manual txs: `source: "manual"`, discretionary outgoing, counted in daily spend w
 - Captures live in `spending.daily_captures` (`_ensure_daily_captures`); status is `pending|accepted|dismissed`. **Never** written to `transactions` without a user confirm.
 - Status payload exposes `pending_captures` (`_daily_capture_pending_list`: pending only, ≤14 days old, ≤20 rows, newest first).
 - Idempotent on `capture_id`; also collapses a pending row with the same date+amount+title (`_daily_capture_dedupe_key`). Future dates clamp to today. `_daily_capture_prune` caps resolved history (`DAILY_CAPTURE_MAX`) and pending rows (`DAILY_CAPTURE_PENDING_KEEP`).
-- UI: `#db-captures` panel above the entry form (`@templates/daily_budget.html`); JS `renderCaptures` / `fillFromCapture` / `dismissCapture` in `@static/daily_budget.js`. Tap fills amount/title/entry date and sets `activeCaptureId`; the entry POST sends `capture_id`. Styles: `.db-capture*` in `@static/style.css`.
+- UI: `#db-captures` panel above the entry form (`@templates/daily_budget.html`) — **always visible**; empty state shows a *Set up phone captures* link. JS `renderCaptures` / `fillFromCapture` / `dismissCapture` in `@static/daily_budget.js`. Tap fills amount/title/entry date and sets `activeCaptureId`; the entry POST sends `capture_id`. Styles: `.db-capture*` in `@static/style.css`.
+- Setup page: `GET /spending/daily/captures` → `@templates/daily_capture_setup.html` + `@static/capture_setup.js`. Session-auth; shows the user's own token behind a Show/Copy button (missing token ⇒ "not set up" callout), the endpoint URL, MacroDroid steps, and a *Send a test capture* button backed by `POST /api/spending/daily/capture/test` (session-auth).
 - Tests: `@tests/test_daily_capture.py`.
 
 ## How past spends affect today’s limit

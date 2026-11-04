@@ -37,6 +37,12 @@ service, and keep it out of logs/screenshots.
 
 If `DAILY_CAPTURE_TOKENS` is unset, the ingest route returns **401** for everyone.
 
+There is a user-facing version of this page at **`/spending/daily/captures`**
+(linked as **Set up** from the Daily captures panel). It shows the token behind a
+Show/Copy button, the endpoint URL, the MacroDroid steps, and a *Send a test
+capture* button that creates a sample pending capture so you can verify the UI
+without touching the phone (`POST /api/spending/daily/capture/test`, session-auth).
+
 ## 2. Enable Wallet purchase notifications
 
 Google Wallet app → profile → Wallet settings → turn **purchase notifications**

@@ -446,19 +446,28 @@
   }
 
   function renderCaptures() {
-    const section = $('db-captures');
     const list = $('db-captures-list');
-    if (!section || !list) return;
+    const note = $('db-captures-note');
+    if (!list) return;
     const caps = (state && state.pending_captures) || [];
     const count = $('db-captures-count');
     list.innerHTML = '';
     if (!caps.length) {
       if (activeCaptureId) activeCaptureId = '';
-      setUsualVisible(section, false);
+      if (count) count.textContent = '';
+      if (note) {
+        note.innerHTML = '';
+        note.appendChild(document.createTextNode('Nothing yet. '));
+        const link = document.createElement('a');
+        link.href = '/spending/daily/captures';
+        link.textContent = 'Set up phone captures';
+        note.appendChild(link);
+        note.appendChild(document.createTextNode(' to log taps automatically.'));
+      }
       return;
     }
-    setUsualVisible(section, true);
     if (count) count.textContent = caps.length === 1 ? '1 new' : caps.length + ' new';
+    if (note) note.textContent = 'Tap one to fill the form, then Add spend. × ignores it.';
     caps.forEach((cap) => {
       const card = document.createElement('div');
       card.className = 'db-capture-card';
